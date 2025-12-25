@@ -1,0 +1,390 @@
+[
+    {
+        "id": "9cf9fa5",
+        "type": "tab",
+        "label": "流程 1",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "a3f1ed7",
+        "type": "linear",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "线性变换",
+        "inputD": false,
+        "inputA": 0,
+        "inputB": 100,
+        "outputD": false,
+        "outputX": 0,
+        "outputY": 100,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "inputsOption": [],
+        "x": 330,
+        "y": 1160,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "a30eb45",
+        "type": "limit",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "限值",
+        "as": "high",
+        "inputAuxEnable": false,
+        "constant": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 330,
+        "y": 1220,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "40c0fcb",
+        "type": "limit",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "限值",
+        "as": "low",
+        "inputAuxEnable": false,
+        "constant": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 449.89581298828125,
+        "y": 1218.4444580078125,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "dc5a7ec",
+        "type": "logic",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "逻辑运算",
+        "lType": "AND",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 320,
+        "y": 1280,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "9e88a3e",
+        "type": "logic",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "逻辑运算",
+        "lType": "OR",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 450,
+        "y": 1280,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "9053a91",
+        "type": "logic",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "逻辑运算",
+        "lType": "NOT",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 570,
+        "y": 1280,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "9e75e41",
+        "type": "logic",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "逻辑运算",
+        "lType": "XOR",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 690,
+        "y": 1280,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "c9c216c",
+        "type": "compare",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "比较判断",
+        "as": "g",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "inputAuxEnable": false,
+        "tripPoint": 0,
+        "x": 340,
+        "y": 1360,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "c3b87f4",
+        "type": "compare",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "比较判断",
+        "as": "l",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "inputAuxEnable": false,
+        "tripPoint": 0,
+        "x": 490,
+        "y": 1360,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "c130f2e",
+        "type": "compare",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "比较判断",
+        "as": "e",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "inputAuxEnable": false,
+        "tripPoint": 0,
+        "x": 650,
+        "y": 1360,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "58479cc",
+        "type": "compare",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "比较判断",
+        "as": "ge",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "inputAuxEnable": false,
+        "tripPoint": 0,
+        "x": 800,
+        "y": 1360,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "d3e0897",
+        "type": "compare",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "比较判断",
+        "as": "le",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "inputAuxEnable": false,
+        "tripPoint": 0,
+        "x": 980,
+        "y": 1360,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "cf2c8c0",
+        "type": "compare",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "比较判断",
+        "as": "ne",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "inputAuxEnable": false,
+        "tripPoint": 0,
+        "x": 1160,
+        "y": 1360,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "4d8b97c",
+        "type": "latch",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "数据锁存",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 350,
+        "y": 1440,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "546c07b",
+        "type": "toggle",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "触发开关",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 370,
+        "y": 1520,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "974f7e2",
+        "type": "switch",
+        "z": "9cf9fa5",
+        "inputs": 3,
+        "outputs": 1,
+        "name": "通道选择",
+        "channels": 2,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 350,
+        "y": 1600,
+        "wires": [
+            [],
+            [],
+            []
+        ]
+    },
+    {
+        "id": "9dddad8",
+        "type": "rsFlipflop",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "RS触发器",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 370,
+        "y": 1700,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "12e47d5",
+        "type": "srFlipflop",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "SR触发器",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 370,
+        "y": 1760,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "e249d1f",
+        "type": "edgeTrigger",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "边沿触发",
+        "mode": "rising",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 380,
+        "y": 1820,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "e0f11",
+        "type": "edgeTrigger",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "边沿触发",
+        "mode": "falling",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 550,
+        "y": 1820,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "b0c4501",
+        "type": "edgeTrigger",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "边沿触发",
+        "mode": "any",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 720,
+        "y": 1820,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "6bc46e3",
+        "type": "hysteresis",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "回差控制",
+        "onThreshold": 0,
+        "offThreshold": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "inputsOption": [],
+        "x": 370,
+        "y": 1900,
+        "wires": [
+            []
+        ]
+    }
+]

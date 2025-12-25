@@ -1,0 +1,491 @@
+[
+    {
+        "id": "9cf9fa5",
+        "type": "tab",
+        "label": "流程 1",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "dc9a4fb",
+        "type": "add",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "加",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "fixedValue": 0,
+        "x": 330,
+        "y": 200,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "38a4b9",
+        "type": "subtract",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "减",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "fixedValue": 0,
+        "x": 320,
+        "y": 280,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "2718590",
+        "type": "multiply",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "乘",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "fixedValue": 0,
+        "x": 320,
+        "y": 360,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "a05c4a1",
+        "type": "divide",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "除",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "fixedValue": 0,
+        "x": 340,
+        "y": 440,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "906763",
+        "type": "modulo",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "模",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "fixedValue": 0,
+        "x": 340,
+        "y": 520,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "dfbf2df",
+        "type": "absolute",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "绝对值",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 340,
+        "y": 600,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "6e391c8",
+        "type": "round",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "取整",
+        "mode": "round45",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 350,
+        "y": 680,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "d4c7fbd",
+        "type": "statistics",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "统计运算",
+        "mode": "average",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 360,
+        "y": 760,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "ec9ecfa",
+        "type": "circular",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "三角函数",
+        "mode": "sine",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 340,
+        "y": 840,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "33631c0",
+        "type": "logarithm",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "对数",
+        "mode": "ln",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 370,
+        "y": 920,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "dba19f1",
+        "type": "exponet",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "幂运算",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 360,
+        "y": 980,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "b89b0e",
+        "type": "bitOperation",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "位运算",
+        "lType": "AND",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 360,
+        "y": 1060,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "80e763b",
+        "type": "bitFetch",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "取位",
+        "bit": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 340,
+        "y": 1140,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "f0a5400",
+        "type": "bitGroup",
+        "z": "9cf9fa5",
+        "inputs": 8,
+        "outputs": 1,
+        "name": "位组合",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 350,
+        "y": 1280,
+        "wires": [
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            []
+        ]
+    },
+    {
+        "id": "47b21f8",
+        "type": "shift",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "移位",
+        "mode": "leftShift",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 360,
+        "y": 1460,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "de4d454",
+        "type": "round",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "取整",
+        "mode": "roundUp",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 530,
+        "y": 680,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "9a0785",
+        "type": "round",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "取整",
+        "mode": "roundDown",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 680,
+        "y": 680,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "4bef1b1",
+        "type": "statistics",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "统计运算",
+        "mode": "max",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 490,
+        "y": 760,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "fee0d81",
+        "type": "statistics",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "统计运算",
+        "mode": "min",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 630,
+        "y": 760,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "53d174e",
+        "type": "circular",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "三角函数",
+        "mode": "cosine",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 470,
+        "y": 840,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "efb50f",
+        "type": "circular",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "三角函数",
+        "mode": "tangent",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 630,
+        "y": 840,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "d0650ee",
+        "type": "circular",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "三角函数",
+        "mode": "asin",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 770,
+        "y": 840,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "e5c7640",
+        "type": "circular",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "三角函数",
+        "mode": "acos",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 930,
+        "y": 840,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "152de32",
+        "type": "circular",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "三角函数",
+        "mode": "atan",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 1070,
+        "y": 840,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "5dfa6e7",
+        "type": "logarithm",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "对数",
+        "mode": "log",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 520,
+        "y": 920,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "a6c3533",
+        "type": "bitOperation",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "位运算",
+        "lType": "OR",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 550,
+        "y": 1060,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "9fd7c1e",
+        "type": "bitOperation",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "位运算",
+        "lType": "NOT",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 750,
+        "y": 1060,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "54c1043",
+        "type": "bitOperation",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "位运算",
+        "lType": "XOR",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 960,
+        "y": 1060,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "20a6c8c",
+        "type": "shift",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "移位",
+        "mode": "rightShift",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 550,
+        "y": 1460,
+        "wires": [
+            [],
+            []
+        ]
+    }
+]

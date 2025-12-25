@@ -1,0 +1,23 @@
+[
+    {
+        "id": "9cf9fa5",
+        "type": "tab",
+        "label": "流程 1",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "ac91356",
+        "type": "comment",
+        "z": "9cf9fa5",
+        "inputs": 0,
+        "outputs": 0,
+        "name": "备注",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "info": "",
+        "x": 800,
+        "y": 1460,
+        "wires": []
+    }
+]

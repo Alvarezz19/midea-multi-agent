@@ -1,0 +1,461 @@
+[
+    {
+        "id": "9cf9fa5",
+        "type": "tab",
+        "label": "流程 1",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "5dbadad",
+        "type": "delayOn",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "延时开",
+        "timeout": 60,
+        "timeoutFromInput": false,
+        "timeoutUnits": "seconds",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "debugView": [
+            {
+                "n": "O1: ",
+                "v": ""
+            },
+            {
+                "n": "left:",
+                "v": ""
+            }
+        ],
+        "x": 480,
+        "y": 1220,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "c332125",
+        "type": "delayOn",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "延时开",
+        "timeout": 60,
+        "timeoutFromInput": false,
+        "timeoutUnits": "minutes",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "debugView": [
+            {
+                "n": "O1: ",
+                "v": ""
+            },
+            {
+                "n": "left:",
+                "v": ""
+            }
+        ],
+        "x": 690,
+        "y": 1220,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "13e056f",
+        "type": "delayOn",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "延时开",
+        "timeout": 60,
+        "timeoutFromInput": false,
+        "timeoutUnits": "hours",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "debugView": [
+            {
+                "n": "O1: ",
+                "v": ""
+            },
+            {
+                "n": "left:",
+                "v": ""
+            }
+        ],
+        "x": 880,
+        "y": 1220,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "add073",
+        "type": "delayOn",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "延时开",
+        "timeout": "30",
+        "timeoutFromInput": false,
+        "timeoutUnits": "days",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "debugView": [
+            {
+                "n": "O1: ",
+                "v": ""
+            },
+            {
+                "n": "left:",
+                "v": ""
+            }
+        ],
+        "x": 1050,
+        "y": 1220,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "d9fadd5",
+        "type": "delayOff",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "延时关",
+        "timeout": 60,
+        "timeoutFromInput": false,
+        "timeoutUnits": "seconds",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "debugView": [
+            {
+                "n": "O1: ",
+                "v": ""
+            },
+            {
+                "n": "left:",
+                "v": ""
+            }
+        ],
+        "x": 480,
+        "y": 1300,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "4b13937",
+        "type": "delayOff",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "延时关",
+        "timeout": 60,
+        "timeoutFromInput": false,
+        "timeoutUnits": "minutes",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "debugView": [
+            {
+                "n": "O1: ",
+                "v": ""
+            },
+            {
+                "n": "left:",
+                "v": ""
+            }
+        ],
+        "x": 690,
+        "y": 1300,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "c89c41e",
+        "type": "delayOff",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "延时关",
+        "timeout": 60,
+        "timeoutFromInput": false,
+        "timeoutUnits": "hours",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "debugView": [
+            {
+                "n": "O1: ",
+                "v": ""
+            },
+            {
+                "n": "left:",
+                "v": ""
+            }
+        ],
+        "x": 880,
+        "y": 1300,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "a1c0909",
+        "type": "delayOff",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "延时关",
+        "timeout": "30",
+        "timeoutFromInput": false,
+        "timeoutUnits": "days",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "debugView": [
+            {
+                "n": "O1: ",
+                "v": ""
+            },
+            {
+                "n": "left:",
+                "v": ""
+            }
+        ],
+        "x": 1050,
+        "y": 1300,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "2f0f3c2",
+        "type": "delayPulse",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "定时脉冲",
+        "timeout": 60,
+        "timeoutFromInput": false,
+        "timeoutUnits": "seconds",
+        "timeOutput": false,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "debugView": [
+            {
+                "n": "O1: ",
+                "v": ""
+            },
+            {
+                "n": "left:",
+                "v": ""
+            }
+        ],
+        "x": 510,
+        "y": 1380,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "a25e550",
+        "type": "delayPulse",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "定时脉冲",
+        "timeout": 60,
+        "timeoutFromInput": false,
+        "timeoutUnits": "minutes",
+        "timeOutput": false,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "debugView": [
+            {
+                "n": "O1: ",
+                "v": ""
+            },
+            {
+                "n": "left:",
+                "v": ""
+            }
+        ],
+        "x": 720,
+        "y": 1380,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "8c84806",
+        "type": "delayPulse",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "定时脉冲",
+        "timeout": 60,
+        "timeoutFromInput": false,
+        "timeoutUnits": "hours",
+        "timeOutput": false,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "debugView": [
+            {
+                "n": "O1: ",
+                "v": ""
+            },
+            {
+                "n": "left:",
+                "v": ""
+            }
+        ],
+        "x": 900,
+        "y": 1380,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "bcb368",
+        "type": "delayPulse",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "定时脉冲",
+        "timeout": "30",
+        "timeoutFromInput": false,
+        "timeoutUnits": "days",
+        "timeOutput": false,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "debugView": [
+            {
+                "n": "O1: ",
+                "v": ""
+            },
+            {
+                "n": "left:",
+                "v": ""
+            }
+        ],
+        "x": 1080,
+        "y": 1380,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "90f8fc3",
+        "type": "delayOut",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "定时更新",
+        "timeout": 60,
+        "timeoutFromInput": false,
+        "timeoutUnits": "seconds",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "debugView": [
+            {
+                "n": "O1: ",
+                "v": ""
+            },
+            {
+                "n": "left:",
+                "v": ""
+            }
+        ],
+        "x": 560,
+        "y": 1460,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "88cd8da",
+        "type": "delayOut",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "定时更新",
+        "timeout": 60,
+        "timeoutFromInput": false,
+        "timeoutUnits": "minutes",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "debugView": [
+            {
+                "n": "O1: ",
+                "v": ""
+            },
+            {
+                "n": "left:",
+                "v": ""
+            }
+        ],
+        "x": 730,
+        "y": 1440,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "7940301",
+        "type": "delayOut",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "定时更新",
+        "timeout": 60,
+        "timeoutFromInput": false,
+        "timeoutUnits": "hours",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "debugView": [
+            {
+                "n": "O1: ",
+                "v": ""
+            },
+            {
+                "n": "left:",
+                "v": ""
+            }
+        ],
+        "x": 900,
+        "y": 1440,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "e9f9bfa",
+        "type": "delayOut",
+        "z": "9cf9fa5",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "定时更新",
+        "timeout": "30",
+        "timeoutFromInput": false,
+        "timeoutUnits": "days",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "debugView": [
+            {
+                "n": "O1: ",
+                "v": ""
+            },
+            {
+                "n": "left:",
+                "v": ""
+            }
+        ],
+        "x": 1090,
+        "y": 1440,
+        "wires": [
+            []
+        ]
+    }
+]

@@ -1,0 +1,210 @@
+[
+    {
+        "id": "9cf9fa5",
+        "type": "tab",
+        "label": "流程 1",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "d910aea",
+        "type": "pid",
+        "z": "9cf9fa5",
+        "inputs": 3,
+        "outputs": 1,
+        "name": "PID",
+        "pidMode": "direct",
+        "proportional": 20,
+        "integral": 2,
+        "derivative": 0,
+        "highPidOutLimit": 0,
+        "lowPidOutLimit": 0,
+        "interval": 60,
+        "deadBand": 0,
+        "disabledOutValue": "hold",
+        "proportionalChecked": false,
+        "integralChecked": false,
+        "derivativeChecked": false,
+        "highPidOutLimitChecked": false,
+        "lowPidOutLimitChecked": false,
+        "intervalChecked": false,
+        "deadBandChecked": false,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "inputsOption": [],
+        "x": 480,
+        "y": 1200,
+        "wires": [
+            [],
+            [],
+            []
+        ]
+    },
+    {
+        "id": "acb9ebd",
+        "type": "fuzzypid",
+        "z": "9cf9fa5",
+        "inputs": 3,
+        "outputs": 1,
+        "name": "自适应PID",
+        "pidMode": "direct",
+        "proportional": 20,
+        "integral": 2,
+        "derivative": 0,
+        "highPidOutLimit": 0,
+        "lowPidOutLimit": 0,
+        "interval": 60,
+        "deadBand": 0,
+        "disabledOutValue": "hold",
+        "proportionalChecked": false,
+        "integralChecked": false,
+        "derivativeChecked": false,
+        "highPidOutLimitChecked": false,
+        "lowPidOutLimitChecked": false,
+        "intervalChecked": false,
+        "deadBandChecked": false,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "inputsOption": [],
+        "discourseDomain": "temperature",
+        "x": 490,
+        "y": 1280,
+        "wires": [
+            [],
+            [],
+            []
+        ]
+    },
+    {
+        "id": "c61d28e",
+        "type": "sort",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "冒泡排序",
+        "lType": "ASC",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 480,
+        "y": 1380,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "3d8e97c",
+        "type": "sort",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "冒泡排序",
+        "lType": "DES",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 630,
+        "y": 1380,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "d9e0d09",
+        "type": "sort",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "冒泡排序",
+        "lType": "ASCIDX",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 820,
+        "y": 1380,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "21d196b",
+        "type": "sort",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "冒泡排序",
+        "lType": "DESIDX",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 960,
+        "y": 1360,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "aa3d508",
+        "type": "enthalpy",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "焓值",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 480,
+        "y": 1480,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "6403536",
+        "type": "wetBulbT",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "湿球温度",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 490,
+        "y": 1560,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "5d4cb56",
+        "type": "dewpointT",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "露点温度",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 490,
+        "y": 1640,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "24089d8",
+        "type": "moisture",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "含湿量",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 500,
+        "y": 1720,
+        "wires": [
+            [],
+            []
+        ]
+    }
+]

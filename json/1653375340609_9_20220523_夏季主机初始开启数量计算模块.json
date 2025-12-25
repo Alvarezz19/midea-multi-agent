@@ -1,0 +1,1044 @@
+[
+    {
+        "id": "35d47c4",
+        "type": "subflow",
+        "name": "夏季主机初始开启台数",
+        "info": "",
+        "in": [
+            {
+                "x": 240,
+                "y": 100,
+                "name": "系统开启标志位",
+                "wires": [
+                    {
+                        "id": "cfa9bd4",
+                        "port": 0
+                    }
+                ]
+            },
+            {
+                "x": 240,
+                "y": 160,
+                "name": "湿球温度",
+                "wires": [
+                    {
+                        "id": "4684029",
+                        "port": 0
+                    }
+                ]
+            },
+            {
+                "x": 240,
+                "y": 220,
+                "name": "初始开机台数手/自动切换",
+                "wires": [
+                    {
+                        "id": "728c491",
+                        "port": 0
+                    }
+                ]
+            },
+            {
+                "x": 240,
+                "y": 280,
+                "name": "初始开启台数手动设定",
+                "wires": [
+                    {
+                        "id": "37284b2",
+                        "port": 0
+                    }
+                ]
+            },
+            {
+                "x": 240,
+                "y": 340,
+                "name": "主机可正常运行数量",
+                "wires": [
+                    {
+                        "id": "ddfbc44",
+                        "port": 0
+                    }
+                ]
+            },
+            {
+                "x": 240,
+                "y": 400,
+                "name": "主机最小开启数量设定值",
+                "wires": [
+                    {
+                        "id": "850f9bf",
+                        "port": 0
+                    }
+                ]
+            },
+            {
+                "x": 240,
+                "y": 460,
+                "name": "初始开机1档湿球温度设定值",
+                "wires": [
+                    {
+                        "id": "d421642",
+                        "port": 0
+                    }
+                ]
+            },
+            {
+                "x": 240,
+                "y": 520,
+                "name": "初始开机2档湿球温度设定值",
+                "wires": [
+                    {
+                        "id": "71c2175",
+                        "port": 0
+                    }
+                ]
+            },
+            {
+                "x": 240,
+                "y": 580,
+                "name": "初始开机3档湿球温度设定值",
+                "wires": [
+                    {
+                        "id": "4d169ce",
+                        "port": 0
+                    }
+                ]
+            },
+            {
+                "x": 240,
+                "y": 640,
+                "name": "初始开机4档湿球温度设定值",
+                "wires": [
+                    {
+                        "id": "d269c4f",
+                        "port": 0
+                    }
+                ]
+            },
+            {
+                "x": 240,
+                "y": 700,
+                "name": "初始开机5档湿球温度设定值",
+                "wires": [
+                    {
+                        "id": "997a252",
+                        "port": 0
+                    }
+                ]
+            }
+        ],
+        "out": [
+            {
+                "x": 2220,
+                "y": 360,
+                "name": "夏季初始开机台数",
+                "wires": [
+                    {
+                        "id": "52fdfd4",
+                        "port": 0
+                    }
+                ]
+            }
+        ],
+        "inputs": 11,
+        "outputs": 1
+    },
+    {
+        "id": "547244",
+        "type": "compare",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "比较判断",
+        "as": "ge",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "inputAuxEnable": true,
+        "tripPoint": 0,
+        "x": 1040,
+        "y": 520,
+        "wires": [
+            [
+                {
+                    "id": "ab64b23",
+                    "port": 0
+                }
+            ],
+            [
+                {
+                    "id": "76bb050",
+                    "port": 0
+                }
+            ]
+        ]
+    },
+    {
+        "id": "4684029",
+        "type": "swInput",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "湿球温度",
+        "swInputType": "analog",
+        "swInputDefault": 0,
+        "swInputPriority": "16",
+        "bacnetVisible": false,
+        "bacnetObjectType": "OBJECT_DISABLED",
+        "bacnetObjectInstanceAuto": true,
+        "bacnetObjectInstance": 1,
+        "bacnetObjectUnits": "No Units",
+        "bacnetObjectPrefix": "",
+        "bacnetObjectCOV": false,
+        "bacnetObjectCOVInscreace": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "powerDownSave": false,
+        "x": 360,
+        "y": 160,
+        "wires": [
+            [
+                {
+                    "id": "35d47c4",
+                    "port": 1
+                }
+            ],
+            []
+        ]
+    },
+    {
+        "id": "5904763",
+        "type": "add",
+        "z": "35d47c4",
+        "inputs": 6,
+        "outputs": 1,
+        "name": "加",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "fixedValue": 0,
+        "x": 1270,
+        "y": 360,
+        "wires": [
+            [
+                {
+                    "id": "739dd7a",
+                    "port": 0
+                }
+            ],
+            [
+                {
+                    "id": "695f345",
+                    "port": 0
+                }
+            ],
+            [
+                {
+                    "id": "6dd4f5a",
+                    "port": 0
+                }
+            ],
+            [
+                {
+                    "id": "2add118",
+                    "port": 0
+                }
+            ],
+            [
+                {
+                    "id": "bb1c470",
+                    "port": 0
+                }
+            ],
+            [
+                {
+                    "id": "547244",
+                    "port": 0
+                }
+            ]
+        ]
+    },
+    {
+        "id": "4d169ce",
+        "type": "swInput",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "初始开机3档湿球温度设定值",
+        "swInputType": "analog",
+        "swInputDefault": 0,
+        "swInputPriority": "16",
+        "bacnetVisible": false,
+        "bacnetObjectType": "OBJECT_DISABLED",
+        "bacnetObjectInstanceAuto": true,
+        "bacnetObjectInstance": 1,
+        "bacnetObjectUnits": "No Units",
+        "bacnetObjectPrefix": "",
+        "bacnetObjectCOV": false,
+        "bacnetObjectCOVInscreace": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "powerDownSave": false,
+        "x": 420,
+        "y": 580,
+        "wires": [
+            [
+                {
+                    "id": "35d47c4",
+                    "port": 8
+                }
+            ],
+            []
+        ]
+    },
+    {
+        "id": "695f345",
+        "type": "compare",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "比较判断",
+        "as": "ge",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "inputAuxEnable": true,
+        "tripPoint": 0,
+        "x": 1040,
+        "y": 280,
+        "wires": [
+            [
+                {
+                    "id": "ab64b23",
+                    "port": 0
+                }
+            ],
+            [
+                {
+                    "id": "622e4e5",
+                    "port": 0
+                }
+            ]
+        ]
+    },
+    {
+        "id": "ab64b23",
+        "type": "quote",
+        "z": "35d47c4",
+        "inputs": 0,
+        "outputs": 1,
+        "name": "引用",
+        "labelName": "[4684029:0] 湿球温度",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 820,
+        "y": 280,
+        "wires": []
+    },
+    {
+        "id": "37284b2",
+        "type": "swInput",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "初始开启台数手动设定",
+        "swInputType": "analog",
+        "swInputDefault": 0,
+        "swInputPriority": "16",
+        "bacnetVisible": false,
+        "bacnetObjectType": "OBJECT_DISABLED",
+        "bacnetObjectInstanceAuto": true,
+        "bacnetObjectInstance": 1,
+        "bacnetObjectUnits": "No Units",
+        "bacnetObjectPrefix": "",
+        "bacnetObjectCOV": false,
+        "bacnetObjectCOVInscreace": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "powerDownSave": false,
+        "x": 400,
+        "y": 280,
+        "wires": [
+            [
+                {
+                    "id": "35d47c4",
+                    "port": 3
+                }
+            ],
+            []
+        ]
+    },
+    {
+        "id": "d269c4f",
+        "type": "swInput",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "初始开机4档湿球温度设定值",
+        "swInputType": "analog",
+        "swInputDefault": 0,
+        "swInputPriority": "16",
+        "bacnetVisible": false,
+        "bacnetObjectType": "OBJECT_DISABLED",
+        "bacnetObjectInstanceAuto": true,
+        "bacnetObjectInstance": 1,
+        "bacnetObjectUnits": "No Units",
+        "bacnetObjectPrefix": "",
+        "bacnetObjectCOV": false,
+        "bacnetObjectCOVInscreace": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "powerDownSave": false,
+        "x": 420,
+        "y": 640,
+        "wires": [
+            [
+                {
+                    "id": "35d47c4",
+                    "port": 9
+                }
+            ],
+            []
+        ]
+    },
+    {
+        "id": "2add118",
+        "type": "compare",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "比较判断",
+        "as": "ge",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "inputAuxEnable": true,
+        "tripPoint": 0,
+        "x": 1040,
+        "y": 400,
+        "wires": [
+            [
+                {
+                    "id": "ab64b23",
+                    "port": 0
+                }
+            ],
+            [
+                {
+                    "id": "9cf2e15",
+                    "port": 0
+                }
+            ]
+        ]
+    },
+    {
+        "id": "651b4f1",
+        "type": "switch",
+        "z": "35d47c4",
+        "inputs": 3,
+        "outputs": 1,
+        "name": "通道选择",
+        "channels": 2,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 1440,
+        "y": 360,
+        "wires": [
+            [
+                {
+                    "id": "3105d2a",
+                    "port": 0
+                }
+            ],
+            [
+                {
+                    "id": "5904763",
+                    "port": 0
+                }
+            ],
+            [
+                {
+                    "id": "bef416e",
+                    "port": 0
+                }
+            ]
+        ]
+    },
+    {
+        "id": "cfa9bd4",
+        "type": "swInput",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "系统开启标志位",
+        "swInputType": "binary",
+        "swInputDefault": 0,
+        "swInputPriority": "16",
+        "bacnetVisible": false,
+        "bacnetObjectType": "OBJECT_DISABLED",
+        "bacnetObjectInstanceAuto": true,
+        "bacnetObjectInstance": 1,
+        "bacnetObjectUnits": "No Units",
+        "bacnetObjectPrefix": "",
+        "bacnetObjectCOV": false,
+        "bacnetObjectCOVInscreace": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "powerDownSave": false,
+        "x": 380,
+        "y": 100,
+        "wires": [
+            [
+                {
+                    "id": "35d47c4",
+                    "port": 0
+                }
+            ],
+            []
+        ]
+    },
+    {
+        "id": "abbc295",
+        "type": "quote",
+        "z": "35d47c4",
+        "inputs": 0,
+        "outputs": 1,
+        "name": "引用",
+        "labelName": "[d269c4f:0] 初始开机4档湿球温度设定值",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 760,
+        "y": 520,
+        "wires": []
+    },
+    {
+        "id": "5bae0e0",
+        "type": "limit",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "限值",
+        "as": "low",
+        "inputAuxEnable": true,
+        "constant": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 1890,
+        "y": 360,
+        "wires": [
+            [
+                {
+                    "id": "caef8be",
+                    "port": 0
+                }
+            ],
+            [
+                {
+                    "id": "4b14c4c",
+                    "port": 0
+                }
+            ]
+        ]
+    },
+    {
+        "id": "76bb050",
+        "type": "quote",
+        "z": "35d47c4",
+        "inputs": 0,
+        "outputs": 1,
+        "name": "引用",
+        "labelName": "[997a252:0] 初始开机5档湿球温度设定值",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 760,
+        "y": 580,
+        "wires": []
+    },
+    {
+        "id": "d6081ce",
+        "type": "latch",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "数据锁存",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 1600,
+        "y": 360,
+        "wires": [
+            [
+                {
+                    "id": "651b4f1",
+                    "port": 0
+                }
+            ],
+            [
+                {
+                    "id": "3bdf945",
+                    "port": 0
+                }
+            ]
+        ]
+    },
+    {
+        "id": "bef416e",
+        "type": "quote",
+        "z": "35d47c4",
+        "inputs": 0,
+        "outputs": 1,
+        "name": "引用",
+        "labelName": "[37284b2:0] 初始开启台数手动设定",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 1220,
+        "y": 580,
+        "wires": []
+    },
+    {
+        "id": "6dd4f5a",
+        "type": "compare",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "比较判断",
+        "as": "ge",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "inputAuxEnable": true,
+        "tripPoint": 0,
+        "x": 1040,
+        "y": 340,
+        "wires": [
+            [
+                {
+                    "id": "ab64b23",
+                    "port": 0
+                }
+            ],
+            [
+                {
+                    "id": "7d24563",
+                    "port": 0
+                }
+            ]
+        ]
+    },
+    {
+        "id": "bb1c470",
+        "type": "compare",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "比较判断",
+        "as": "ge",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "inputAuxEnable": true,
+        "tripPoint": 0,
+        "x": 1040,
+        "y": 460,
+        "wires": [
+            [
+                {
+                    "id": "ab64b23",
+                    "port": 0
+                }
+            ],
+            [
+                {
+                    "id": "abbc295",
+                    "port": 0
+                }
+            ]
+        ]
+    },
+    {
+        "id": "d421642",
+        "type": "swInput",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "初始开机1档湿球温度设定值",
+        "swInputType": "analog",
+        "swInputDefault": 0,
+        "swInputPriority": "16",
+        "bacnetVisible": false,
+        "bacnetObjectType": "OBJECT_DISABLED",
+        "bacnetObjectInstanceAuto": true,
+        "bacnetObjectInstance": 1,
+        "bacnetObjectUnits": "No Units",
+        "bacnetObjectPrefix": "",
+        "bacnetObjectCOV": false,
+        "bacnetObjectCOVInscreace": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "powerDownSave": false,
+        "x": 420,
+        "y": 460,
+        "wires": [
+            [
+                {
+                    "id": "35d47c4",
+                    "port": 6
+                }
+            ],
+            []
+        ]
+    },
+    {
+        "id": "71c2175",
+        "type": "swInput",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "初始开机2档湿球温度设定值",
+        "swInputType": "analog",
+        "swInputDefault": 0,
+        "swInputPriority": "16",
+        "bacnetVisible": false,
+        "bacnetObjectType": "OBJECT_DISABLED",
+        "bacnetObjectInstanceAuto": true,
+        "bacnetObjectInstance": 1,
+        "bacnetObjectUnits": "No Units",
+        "bacnetObjectPrefix": "",
+        "bacnetObjectCOV": false,
+        "bacnetObjectCOVInscreace": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "powerDownSave": false,
+        "x": 420,
+        "y": 520,
+        "wires": [
+            [
+                {
+                    "id": "35d47c4",
+                    "port": 7
+                }
+            ],
+            []
+        ]
+    },
+    {
+        "id": "997a252",
+        "type": "swInput",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "初始开机5档湿球温度设定值",
+        "swInputType": "analog",
+        "swInputDefault": 0,
+        "swInputPriority": "16",
+        "bacnetVisible": false,
+        "bacnetObjectType": "OBJECT_DISABLED",
+        "bacnetObjectInstanceAuto": true,
+        "bacnetObjectInstance": 1,
+        "bacnetObjectUnits": "No Units",
+        "bacnetObjectPrefix": "",
+        "bacnetObjectCOV": false,
+        "bacnetObjectCOVInscreace": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "powerDownSave": false,
+        "x": 420,
+        "y": 700,
+        "wires": [
+            [
+                {
+                    "id": "35d47c4",
+                    "port": 10
+                }
+            ],
+            []
+        ]
+    },
+    {
+        "id": "728c491",
+        "type": "swInput",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "初始开机台数手/自动切换",
+        "swInputType": "analog",
+        "swInputDefault": 0,
+        "swInputPriority": "16",
+        "bacnetVisible": false,
+        "bacnetObjectType": "OBJECT_DISABLED",
+        "bacnetObjectInstanceAuto": true,
+        "bacnetObjectInstance": 1,
+        "bacnetObjectUnits": "No Units",
+        "bacnetObjectPrefix": "",
+        "bacnetObjectCOV": false,
+        "bacnetObjectCOVInscreace": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "powerDownSave": false,
+        "x": 410,
+        "y": 220,
+        "wires": [
+            [
+                {
+                    "id": "35d47c4",
+                    "port": 2
+                }
+            ],
+            []
+        ]
+    },
+    {
+        "id": "ddfbc44",
+        "type": "swInput",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "主机可正常运行数量",
+        "swInputType": "analog",
+        "swInputDefault": 0,
+        "swInputPriority": "16",
+        "bacnetVisible": false,
+        "bacnetObjectType": "OBJECT_DISABLED",
+        "bacnetObjectInstanceAuto": true,
+        "bacnetObjectInstance": 1,
+        "bacnetObjectUnits": "No Units",
+        "bacnetObjectPrefix": "",
+        "bacnetObjectCOV": false,
+        "bacnetObjectCOVInscreace": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "powerDownSave": false,
+        "x": 400,
+        "y": 340,
+        "wires": [
+            [
+                {
+                    "id": "35d47c4",
+                    "port": 4
+                }
+            ],
+            []
+        ]
+    },
+    {
+        "id": "622e4e5",
+        "type": "quote",
+        "z": "35d47c4",
+        "inputs": 0,
+        "outputs": 1,
+        "name": "引用",
+        "labelName": "[d421642:0] 初始开机1档湿球温度设定值",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 760,
+        "y": 340,
+        "wires": []
+    },
+    {
+        "id": "7d24563",
+        "type": "quote",
+        "z": "35d47c4",
+        "inputs": 0,
+        "outputs": 1,
+        "name": "引用",
+        "labelName": "[71c2175:0] 初始开机2档湿球温度设定值",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 760,
+        "y": 400,
+        "wires": []
+    },
+    {
+        "id": "9cf2e15",
+        "type": "quote",
+        "z": "35d47c4",
+        "inputs": 0,
+        "outputs": 1,
+        "name": "引用",
+        "labelName": "[4d169ce:0] 初始开机3档湿球温度设定值",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 760,
+        "y": 460,
+        "wires": []
+    },
+    {
+        "id": "739dd7a",
+        "type": "constInput",
+        "z": "35d47c4",
+        "inputs": 0,
+        "outputs": 1,
+        "name": "常量",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "fixedValue": "1",
+        "x": 1090,
+        "y": 220,
+        "wires": []
+    },
+    {
+        "id": "3105d2a",
+        "type": "quote",
+        "z": "35d47c4",
+        "inputs": 0,
+        "outputs": 1,
+        "name": "引用",
+        "labelName": "[728c491:0] 初始开机台数手/自动切换",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 1210,
+        "y": 160,
+        "wires": []
+    },
+    {
+        "id": "caef8be",
+        "type": "limit",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "限值",
+        "as": "high",
+        "inputAuxEnable": true,
+        "constant": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 1750,
+        "y": 360,
+        "wires": [
+            [
+                {
+                    "id": "d6081ce",
+                    "port": 0
+                }
+            ],
+            [
+                {
+                    "id": "5dea055",
+                    "port": 0
+                }
+            ]
+        ]
+    },
+    {
+        "id": "70d859b",
+        "type": "quote",
+        "z": "35d47c4",
+        "inputs": 0,
+        "outputs": 1,
+        "name": "引用",
+        "labelName": "[cfa9bd4:0] 系统开启标志位",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 1300,
+        "y": 260,
+        "wires": []
+    },
+    {
+        "id": "3bdf945",
+        "type": "logic",
+        "z": "35d47c4",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "逻辑运算",
+        "lType": "NOT",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 1450,
+        "y": 260,
+        "wires": [
+            [
+                {
+                    "id": "70d859b",
+                    "port": 0
+                }
+            ]
+        ]
+    },
+    {
+        "id": "52fdfd4",
+        "type": "swInput",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "夏季初始开机台数",
+        "swInputType": "analog",
+        "swInputDefault": 0,
+        "swInputPriority": "16",
+        "bacnetVisible": false,
+        "bacnetObjectType": "OBJECT_DISABLED",
+        "bacnetObjectInstanceAuto": true,
+        "bacnetObjectInstance": 1,
+        "bacnetObjectUnits": "No Units",
+        "bacnetObjectPrefix": "",
+        "bacnetObjectCOV": false,
+        "bacnetObjectCOVInscreace": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "powerDownSave": false,
+        "x": 2070,
+        "y": 360,
+        "wires": [
+            [
+                {
+                    "id": "5bae0e0",
+                    "port": 0
+                }
+            ],
+            []
+        ]
+    },
+    {
+        "id": "5dea055",
+        "type": "quote",
+        "z": "35d47c4",
+        "inputs": 0,
+        "outputs": 1,
+        "name": "引用",
+        "labelName": "[ddfbc44:0] 主机可正常运行数量",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 1570,
+        "y": 420,
+        "wires": []
+    },
+    {
+        "id": "850f9bf",
+        "type": "swInput",
+        "z": "35d47c4",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "主机最小开启数量设定值",
+        "swInputType": "analog",
+        "swInputDefault": 0,
+        "swInputPriority": "16",
+        "bacnetVisible": false,
+        "bacnetObjectType": "OBJECT_DISABLED",
+        "bacnetObjectInstanceAuto": true,
+        "bacnetObjectInstance": 1,
+        "bacnetObjectUnits": "No Units",
+        "bacnetObjectPrefix": "",
+        "bacnetObjectCOV": false,
+        "bacnetObjectCOVInscreace": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "powerDownSave": false,
+        "x": 410,
+        "y": 400,
+        "wires": [
+            [
+                {
+                    "id": "35d47c4",
+                    "port": 5
+                }
+            ],
+            []
+        ]
+    },
+    {
+        "id": "4b14c4c",
+        "type": "quote",
+        "z": "35d47c4",
+        "inputs": 0,
+        "outputs": 1,
+        "name": "引用",
+        "labelName": "[850f9bf:0] 主机最小开启数量设定值",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 1690,
+        "y": 460,
+        "wires": []
+    }
+]

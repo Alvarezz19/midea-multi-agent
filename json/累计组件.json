@@ -1,0 +1,129 @@
+[
+    {
+        "id": "9cf9fa5",
+        "type": "tab",
+        "label": "流程 1",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "566b7dd",
+        "type": "counter",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "计数器",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 540,
+        "y": 1240,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "f5cfe94",
+        "type": "integral",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "累加器",
+        "interval": 60,
+        "units": "seconds",
+        "defaultOutput": 0,
+        "highLimit": 0,
+        "lowLimit": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "defaultFromInput": false,
+        "x": 560,
+        "y": 1300,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "c37de6b",
+        "type": "integral",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "累加器",
+        "interval": 60,
+        "units": "minutes",
+        "defaultOutput": 0,
+        "highLimit": 0,
+        "lowLimit": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "defaultFromInput": false,
+        "x": 710.8958129882812,
+        "y": 1303.4444580078125,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "26f7e79",
+        "type": "integral",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "累加器",
+        "interval": 60,
+        "units": "hours",
+        "defaultOutput": 0,
+        "highLimit": 0,
+        "lowLimit": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "defaultFromInput": false,
+        "x": 850,
+        "y": 1300,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "675bbc1",
+        "type": "integral",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "累加器",
+        "interval": "30",
+        "units": "days",
+        "defaultOutput": 0,
+        "highLimit": 0,
+        "lowLimit": 0,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "defaultFromInput": false,
+        "x": 1010,
+        "y": 1280,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "819d474",
+        "type": "runtime",
+        "z": "9cf9fa5",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "运行时间",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 530,
+        "y": 1420,
+        "wires": [
+            [],
+            []
+        ]
+    }
+]
