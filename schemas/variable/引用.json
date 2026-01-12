@@ -1,0 +1,59 @@
+    {
+        "id": "",
+        "module_type": "quote",
+        "category": "变量模块/引用",
+        "name": "引用",
+
+        // --- 1. 检索与理解层 (供检索智能体使用) ---
+        // 这部分内容将被转化为向量 (Vector)，用于匹配用户的自然语言需求
+        "description": "引用模块用于在控制系统中引用其他节点的数据或状态。",
+        "keywords": [  "引用", "节点引用", "数据共享", "数据复用"],
+        "usage_guides": ["Topic不支持通配符",
+            "在获取到有效订阅消息前,节点将使用[默认值]或者[掉电保持值]进行输出",
+            "同一个Topic的多个节点如果QoS配置不一样,默认使用第1个节点配置的    QoS进行订阅(建议统一QoS,否则有不确定性)",
+            "Payload格式:  {\"seq\":123, \"nodes\":[{\"name\":\"Object\",\"value\":0}, ...]}",
+            "程序接收payload后会根据Object匹配对应节点,Object必须全局唯一"
+        ],
+
+        // --- 2. 参数约束层 (供规划智能体/LLM 填充参数使用) ---
+        // 这部分定义了各个参数的合法取值，防止 AI 产生幻觉
+        "parameters_schema": {
+            "user_defined_name": {
+            "type": "string",
+            "description": "该模块的名称",
+            "default": "引用"
+            },
+            "labelName":{
+            "type": "string",
+            "description": "引用模块的id、输出口编号和名字",
+            "default": "[模块id:输出口编号] 模块名字"
+            }
+        },
+
+        // --- 3. 生成模板层 (最终产出的代码) ---
+        // 规划智能体将填好的参数代入此模板
+        // 注意：id, x, y, z, wires 这些拓扑参数留空或设为占位符，由规划智能体在连线时动态生成
+
+         "template_json": {
+
+        //需要AI填入
+        "id":  "{{__GEN_ID__}}",//特殊标记，指示系统生成唯一 ID
+        "z": "{{__FLOW_ID__}}",//特殊标记，指示归属的流程 ID
+        "name": "{{user_defined_name}}",
+        "labelName": "{{}}",
+        
+        // 动态生成
+        "x": 0, // 模块在流程图中的x坐标
+        "y": 0,// 模块在流程图中的y坐标
+        "wires": [],// 模块之间的连线
+        "inputs": 0,// 模块的输入数量
+        "outputs": 0,// 模块的输出数量
+        
+        // 以下为默认参数，不需要 AI 操心，直接硬编码
+        "type": "quote",
+        "labelNameOld": "",
+        "outOfService": 0,
+        "outOfServiceValue": 0
+
+    }
+}
