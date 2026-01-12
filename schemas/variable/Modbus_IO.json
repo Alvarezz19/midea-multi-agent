@@ -1,0 +1,89 @@
+    {
+        "id": "",
+        "module_type": "modbusOutput",
+        "category": "变量模块/Modbus_IO",
+        "name": "Modbus IO(Modbus 输入/输出)",
+
+        // --- 1. 检索与理解层 (供检索智能体使用) ---
+        // 这部分内容将被转化为向量 (Vector)，用于匹配用户的自然语言需求
+        "description": "Modbus IO模块用于通过Modbus协议（包括Modbus RTU和Modbus TCP）控制远程设备。该模块支持多种功能码，如读取线圈、读取离散输入、读取保持寄存器、读取输入寄存器、写单个线圈、写单个寄存器、写多个线圈和写多个寄存器。用户可以配置端口、TCP地址、设备地址、点位地址、数据类型以及转换比例等参数。此外，该模块还支持BACnet协议，可以将Modbus数据映射到BACnet对象中，实现更广泛的集成和控制。",
+        "keywords": [  "Modbus", "输入/输出", "控制", "远程设备", "Modbus RTU", "Modbus TCP", "功能码", "读取线圈", "读取离散输入", "读取保持寄存器", "读取输入寄存器", "写单个线圈", "写单个寄存器", "写多个线圈", "写多个寄存器", "端口", "TCP地址", "设备地址", "点位地址", "数据类型", "转换比例", "集成", "控制协议"]
+        "usage_guides": [],
+
+        // --- 2. 参数约束层 (供规划智能体/LLM 填充参数使用) ---
+        // 这部分定义了各个参数的合法取值，防止 AI 产生幻觉
+        "parameters_schema": {
+            "user_defined_name": {
+            "type": "string",
+            "description": "该模块的名称",
+            "default": "Modbus IO"
+            }
+
+        },
+
+        // --- 3. 生成模板层 (最终产出的代码) ---
+        // 规划智能体将填好的参数代入此模板
+        // 注意：id, x, y, z, wires 这些拓扑参数留空或设为占位符，由规划智能体在连线时动态生成
+
+         "template_json": {
+
+        //需要AI填入
+        "id":  "{{__GEN_ID__}}",//特殊标记，指示系统生成唯一 ID
+        "z": "{{__FLOW_ID__}}",//特殊标记，指示归属的流程 ID
+        "name": "{{user_defined_name}}",
+        
+        // 动态生成
+        "x": 0, // 模块在流程图中的x坐标
+        "y": 0,// 模块在流程图中的y坐标
+        "wires": [],// 模块之间的连线
+        "inputs": 0,// 模块的输入数量
+        "outputs": 0,// 模块的输出数量
+        
+        // 以下为默认参数，不需要 AI 操心，直接硬编码
+        "type": "modbusOutput",
+        "protocol": "modbus_output",
+        "modbusTcpIPaddr": "",
+        "modbusTcpPort": 502,
+        "modbusAddress": 1,
+        "modbusRegAddr": 1,
+        "modbusValueType": "0",
+        "modbusWriteOnly": "0",
+        "modbusPort": "2",
+        "defaultValue": 0,
+        "functionCode": 3,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "bacInputPriority": "16",
+        "bacnetIsLargeAV": false,
+        "bacnetVisible": false,
+        "bacnetObjectType": "OBJECT_DISABLED",
+        "bacnetObjectInstanceAuto": true,
+        "bacnetObjectInstance": 1,
+        "bacnetObjectUnits": "No Units",
+        "bacnetObjectPrefix": "",
+        "bacnetObjectDescription": "",
+        "bacnetObjectCOV": false,
+        "bacnetObjectCOVInscreace": 0.1,
+        "hwInputConvert": "none",
+        "hwInputConvertScale": 1,
+        "writeUnsignedMask": 65535,
+        "readUnsignedMask": 65535,
+        "modbusSlaveEnable": false,
+        "modbusSlaveRegAddr": 0,
+        "modbusSlaveRegType": "0",
+        "modbusSlaveRtuConvert": "none",
+        "modbusSlaveRtuConvertScale": 1,
+        "modbusSlave2Enable": false,
+        "modbusSlave2RegAddr": 0,
+        "modbusSlave2RegType": "0",
+        "modbusSlave2RtuConvert": "none",
+        "modbusSlave2RtuConvertScale": 1,
+        "modbusTcpSlaveEnable": false,
+        "modbusTcpSlaveRegAddr": 0,
+        "modbusTcpSlaveRegType": "0",
+        "modbusSlaveTcpConvert": "none",
+        "modbusSlaveTcpConvertScale": 1
+
+    }
+}
+

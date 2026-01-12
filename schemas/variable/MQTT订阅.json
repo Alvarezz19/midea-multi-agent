@@ -1,0 +1,61 @@
+    {
+        "id": "",
+        "module_type": "mqttin",
+        "category": "变量模块/MQTT订阅",
+        "name": "MQTT订阅",
+
+        // --- 1. 检索与理解层 (供检索智能体使用) ---
+        // 这部分内容将被转化为向量 (Vector)，用于匹配用户的自然语言需求
+        "description": "MQTT订阅模块用于通过MQTT协议订阅特定主题（Topic）的消息，并将接收到的数据传递给相应的节点。该模块支持JSON格式的Payload，其中包含序列号（seq）和节点数据（nodes）。每个节点数据包括节点名称（name）和值（value）。需要注意的是，Topic不支持通配符。在获取到有效订阅消息之前，节点将使用默认值或掉电保持值进行输出。如果同一个Topic有多个节点且QoS配置不同，默认使用第一个节点的QoS进行订阅（建议统一QoS以避免不确定性）。该模块广泛应用于物联网、远程监控和数据采集等场景，确保数据的实时性和可靠性。",
+        "keywords": [ "MQTT", "订阅", "主题", "Topic", "通配符", "默认值", "掉电保持值", "QoS", "质量服务", "Payload"],
+        "usage_guides": [],
+
+        // --- 2. 参数约束层 (供规划智能体/LLM 填充参数使用) ---
+        // 这部分定义了各个参数的合法取值，防止 AI 产生幻觉
+        "parameters_schema": {
+            "user_defined_name": {
+            "type": "string",
+            "description": "该模块的名称",
+            "default": "MQTT订阅"
+            },
+            "objectName":{
+            "type": "string",
+            "description": "该模块在MQTT中的唯一名字"
+            },
+            "topic":{
+            "type": "string",
+            "description": "接收的MQTT订阅主题的名字"
+            }
+
+        },
+
+        // --- 3. 生成模板层 (最终产出的代码) ---
+        // 规划智能体将填好的参数代入此模板
+        // 注意：id, x, y, z, wires 这些拓扑参数留空或设为占位符，由规划智能体在连线时动态生成
+
+         "template_json": {
+
+        //需要AI填入
+        "id":  "{{__GEN_ID__}}",//特殊标记，指示系统生成唯一 ID
+        "z": "{{__FLOW_ID__}}",//特殊标记，指示归属的流程 ID
+        "name": "{{user_defined_name}}",
+        "topic": "{{topic}}",
+        "objctName": "{{objectName}}",
+        
+        // 动态生成
+        "x": 0, // 模块在流程图中的x坐标
+        "y": 0,// 模块在流程图中的y坐标
+        "wires": [],// 模块之间的连线
+        "inputs": 0,// 模块的输入数量
+        "outputs": 0,// 模块的输出数量
+        
+        // 以下为默认参数，不需要 AI 操心，直接硬编码
+        "type": "mqttin",
+        "qos": 0,
+        "defaultValue": 0,
+        "powerDownSave": false,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+
+    }
+}
