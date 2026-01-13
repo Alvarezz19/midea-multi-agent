@@ -1,0 +1,34 @@
+{
+    "id": "",
+    "module_type": "counter",
+    "category": "累计模块/计数器",
+    "name": "计数器 (Counter)",
+    "description": "计数器模块用于累计输入信号的脉冲次数。输入端口固定为计数信号和复位控制，输出端口固定为计数结果。",
+    "keywords": [
+      "计数器",
+      "累计",
+      "脉冲计数",
+      "复位",
+      "状态保持"
+    ],
+    "usage_guides": [
+      "输入端口接收脉冲信号进行计数，复位端口可用于将计数值清零。",
+      "输出端口输出当前计数值，可用于累计事件或信号触发次数的监测。",
+      "计数器在保持状态时，输出值不会受输入信号短时变化影响，适用于事件累计和状态记录。"
+    ],
+    "parameters_schema": {},
+    "template_json": [
+      {
+        "id": "{{__GEN_ID__}}",
+        "z": "{{__FLOW_ID__}}",
+        "type": "counter",
+        "name": "{{user_defined_name}}",
+        "inputs": 2,
+        "outputs": 1,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "wires": [[], []]
+      }
+    ]
+  }
+  

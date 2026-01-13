@@ -1,0 +1,44 @@
+{
+    "id": "",
+    "module_type": "switch",
+    "category": "逻辑模块/通道选择",
+    "name": "通道选择 (Switch)",
+    "description": "通道选择模块用于从多个输入信号中选择输出一个信号。可配置通道数量，输入端口数量会随通道数动态变化。",
+    "keywords": [
+      "通道选择",
+      "开关",
+      "多路选择",
+      "信号选择",
+      "多输入"
+    ],
+    "usage_guides": [
+      "根据通道数量选择不同输入信号作为输出。",
+      "输入端口数量 = 通道数 + 1",
+      "通道数量可以手动设置，范围 2~16。",
+      "用于从多个信号中选择一个信号输出，常用于多路控制和信号切换场景。"
+    ],
+    "parameters_schema": {
+      "channels": {
+        "type": "integer",
+        "description": "通道数量。",
+        "minimum": 2,
+        "maximum": 16,
+        "default": 2
+      }
+    },
+    "template_json": [
+      {
+        "id": "{{__GEN_ID__}}",
+        "z": "{{__FLOW_ID__}}",
+        "type": "switch",
+        "name": "{{user_defined_name}}",
+        "inputs": "{{channelsPlusOne}}",
+        "outputs": 1,
+        "channels": "{{channels}}",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "wires": "{{wiresArray}}"
+      }
+    ]
+  }
+  

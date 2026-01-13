@@ -1,0 +1,58 @@
+{
+    "id": "",
+    "module_type": "logic",
+    "category": "逻辑模块/逻辑运算",
+    "name": "逻辑运算 (Logic)",
+    "description": "逻辑运算模块用于对多个布尔输入信号进行逻辑运算，支持与、或、非、异或等逻辑类型。输入端口数量可配置，支持动态调整，输出单路布尔信号。",
+    "keywords": [
+      "逻辑",
+      "与",
+      "或",
+      "非",
+      "异或",
+      "条件判断",
+      "布尔运算"
+    ],
+    "usage_guides": [
+      "当所有条件均满足时输出为真，可选择与（AND）逻辑。",
+      "当任一条件满足即可输出为真，可选择或（OR）逻辑。",
+      "当需要对输入条件取反时，可选择非（NOT）逻辑。",
+      "当需要判断输入条件是否不同状态时，可选择异或（XOR）逻辑。",
+      "输入端口数量可根据参与逻辑运算的信号数量灵活调整。"
+    ],
+    "parameters_schema": {
+      "lType": {
+        "type": "string",
+        "description": "逻辑运算类型。",
+        "enum": [
+          "AND",
+          "OR",
+          "NOT",
+          "XOR"
+        ],
+        "default": "AND"
+      },
+      "inputsCount": {
+        "type": "integer",
+        "description": "参与逻辑运算的输入端口数量。",
+        "minimum": 2,
+        "maximum": 16,
+        "default": 2
+      }
+    },
+    "template_json": [
+      {
+        "id": "{{__GEN_ID__}}",
+        "z": "{{__FLOW_ID__}}",
+        "type": "logic",
+        "name": "{{user_defined_name}}",
+        "inputs": "{{inputsCount}}",
+        "outputs": 1,
+        "lType": "{{lType}}",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "wires": "{{wiresArray}}"
+      }
+    ]
+  }
+  

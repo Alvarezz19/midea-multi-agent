@@ -1,0 +1,62 @@
+{
+    "id": "",
+    "module_type": "limit",
+    "category": "逻辑模块/限值判断",
+    "name": "限值 (Limit)",
+    "description": "限值模块用于对输入信号进行上下限约束。支持限高或限低模式，阈值可为固定常量或通过外部信号动态提供。",
+    "keywords": [
+      "限值",
+      "限高",
+      "限低",
+      "阈值",
+      "信号约束",
+      "保护"
+    ],
+    "usage_guides": [
+      "防止信号超过最大允许值选择限高模式。",
+      "防止信号低于最小允许值选择限低模式。",
+      "阈值可由外部信号动态提供时启用动态阈值输入。"
+    ],
+    "parameters_schema": {
+      "as": {
+        "type": "string",
+        "description": "限值模式。high 表示限高，low 表示限低。",
+        "enum": ["high","low"],
+        "default": "high"
+      },
+      "inputAuxEnable": {
+        "type": "boolean",
+        "description": "是否启用动态阈值输入。",
+        "default": false
+      },
+      "constant": {
+        "type": "number",
+        "description": "限值常量（静态模式下有效）。",
+        "default": 0
+      },
+      "inputsCount": {
+        "type": "integer",
+        "description": "输入端口数量（静态:1，动态:2）。",
+        "minimum": 1,
+        "maximum": 2,
+        "default": 1
+      }
+    },
+    "template_json": [
+      {
+        "id": "{{__GEN_ID__}}",
+        "z": "{{__FLOW_ID__}}",
+        "type": "limit",
+        "name": "{{user_defined_name}}",
+        "inputs": "{{inputsCount}}",
+        "outputs": 1,
+        "as": "{{as}}",
+        "inputAuxEnable": "{{inputAuxEnable}}",
+        "constant": "{{constant}}",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "wires": "{{wiresArray}}"
+      }
+    ]
+  }
+  
