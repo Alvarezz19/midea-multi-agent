@@ -1,0 +1,118 @@
+{
+    "id": "",
+    "module_type": "pid",
+    "category": "应用/PID控制器",
+    "name": "PID控制器 (PID Controller)",
+    "description": "PID控制器是一个典型的闭环控制模块，用于将温度、压力等被控量稳定在设定值。它比较设定值与反馈值的偏差，通过比例(P)、积分(I)、微分(D)运算输出控制量。该模块支持正/反向作用、死区设置、输出限幅以及多种停机/无效时的输出模式。",
+    "keywords": [
+        "PID",
+        "温度",
+        "压力",
+        "闭环控制",
+        "比例积分微分",
+        "过程控制"
+    ],
+    "usage_guides": [
+        "输入端至少包括：使能信号、设定值(SV)、反馈值(PV)。",
+        "当'使能'为1时，进行PID运算；为0时，输出由'禁止时输出'参数决定(如保持保持、输出0等)。",
+        "根据'运算方向'配置(通常加热为反作用，制冷为正作用等，需根据具体定义确认)计算输出。",
+        "可以通过设置proportionalChecked，开放该参数的输入引脚，以便在运行期动态修改PID参数。"
+    ],
+    "parameters_schema": {
+        "pidMode": {
+            "type": "string",
+            "description": "PID运算方向。如果对该项启用动态输入，当输入值为 0 表示正向运算，输入值为 非0 表示反向运算。",
+            "enum": ["direct", "reverse"],
+            "default": "direct"
+        },
+        "proportional": {
+            "type": "integer",
+            "description": "比例增益(P)。",
+            "default": 20
+        },
+        "integral": {
+            "type": "integer",
+            "description": "积分增益(I)。",
+            "default": 2
+        },
+        "derivative": {
+            "type": "integer",
+            "description": "微分增益(D)。",
+            "default": 0
+        },
+        "highPidOutLimit": {
+            "type": "integer",
+            "description": "PID计算输出的上限值。",
+            "default": 0
+        },
+        "lowPidOutLimit": {
+            "type": "integer",
+            "description": "PID计算输出的下限值。",
+            "default": 0
+        },
+        "interval": {
+            "type": "integer",
+            "description": "PID运算的时间间隔（秒），是一个大于0的整数。",
+            "minimum": 1,
+            "default": 60
+        },
+        "deadBand": {
+            "type": "integer",
+            "description": "死区范围。偏差在该范围内时不调整输出，是一个非负整数。",
+            "minimum": 0,
+            "default": 0
+        },
+        "disabledOutValue": {
+            "type": "string",
+            "description": "不使能（禁止）时的输出模式。max: 输出值为[上限值]；min: 输出值为[下限值]；zero: 输出值为0；hold: 输出值为[不使能前一刻的值]。",
+            "enum": ["hold", "max", "min", "zero"],
+            "default": "hold"
+        },
+        "inputsCount": {
+            "type": "integer",
+            "description": "动态输入时输入端口数量（范围 3~12）。",
+            "minimum": 3,
+            "maximum": 12,
+            "default": 3
+        },
+        "inputsOption": {
+            "type": "string array",
+            "description": "选择是否要对某些参数启用外部输入端口，以便在运行期动态修改这些参数。（可以多选）",
+            "enum": ["pidMode", "proportional", "integral", "derivative", "highPidOutLimit", "lowPidOutLimit", "interval", "deadBand"],
+            "default": "[]"
+        }
+    },
+    "template_json": [
+        {
+            "id": "{{__GEN_ID__}}",
+            "z": "{{__FLOW_ID__}}",
+            "type": "pid",
+            "name": "PID",
+            "inputs": "{{inputsCount}}",
+            "outputs": 1,
+            "pidMode": "{{pidMode}}",
+            "proportional": "{{proportional}}",
+            "integral": "{{integral}}",
+            "derivative": "{{derivative}}",
+            "highPidOutLimit": "{{highPidOutLimit}}",
+            "lowPidOutLimit": "{{lowPidOutLimit}}",
+            "interval": "{{interval}}",
+            "deadBand": "{{deadBand}}",
+            "disabledOutValue": "{{disabledOutValue}}",
+            "proportionalChecked": false,
+            "integralChecked": false,
+            "derivativeChecked": false,
+            "highPidOutLimitChecked": false,
+            "lowPidOutLimitChecked": false,
+            "intervalChecked": false,
+            "deadBandChecked": false,
+            "outOfService": 0,
+            "outOfServiceValue": 0,
+            "inputsOption": "{{inputsOptionArray}}",
+            "inputsOptionCache": [],
+            "x": "{{xCoord}}",
+            "y": "{{yCoord}}",
+            "wires": "{{wiresArray}}"
+        }
+    ]
+}

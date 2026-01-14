@@ -1,0 +1,127 @@
+{
+    "id": "",
+    "module_type": "fuzzypid",
+    "category": "应用/自适应PID",
+    "name": "自适应PID (Adaptive PID)",
+    "description": "自适应PID模块在标准PID基础上增加了场景感知能力，能够根据输入类型（如温度、压力等）和运行状态自动调整控制策略。相比普通PID，它更强调稳定性和抗干扰能力，适合难以通过手动整定参数的复杂工况。",
+    "keywords": [
+        "自适应PID",
+        "模糊控制",
+        "参数自整定",
+        "稳定控制",
+        "温度",
+        "温差",
+        "压力",
+        "压差",
+        "CO2浓度"
+    ],
+    "usage_guides": [
+        "选择'控制对象域'(discourseDomain)，如温度或压力，模块将应用内置的优化算法。",
+        "PID参数（P/I/D）主要作为初始参考值，运行过程中算法会进行微调（注意：部分实现不支持运行期外部修改PID参数）。",
+        "输入端依然需要：使能、设定值、反馈值。",
+        "适用于大滞后或参数时变的控制对象。"
+    ],
+    "parameters_schema": {
+        "pidMode": {
+            "type": "string",
+            "description": "PID运算方向。如果对该项启用动态输入，当输入值为 0 表示正向运算，输入值为 非0 表示反向运算。",
+            "default": "direct"
+        },
+        "proportional": {
+            "type": "integer",
+            "description": "初始比例增益(P)。",
+            "default": 20
+        },
+        "integral": {
+            "type": "integer",
+            "description": "初始积分增益(I)。",
+            "default": 2
+        },
+        "derivative": {
+            "type": "integer",
+            "description": "初始微分增益(D)。",
+            "default": 0
+        },
+        "highPidOutLimit": {
+            "type": "integer",
+            "description": "PID输出上限。",
+            "default": 0
+        },
+        "lowPidOutLimit": {
+            "type": "integer",
+            "description": "PID输出下限。",
+            "default": 0
+        },
+        "interval": {
+            "type": "integer",
+            "description": "PID运算的时间间隔（秒），是一个大于0的整数。",
+            "minimum": 1,
+            "default": 60
+        },
+        "deadBand": {
+            "type": "integer",
+            "description": "死区范围。偏差在该范围内时不调整输出，是一个非负整数。",
+            "minimum": 0,
+            "default": 0
+        },
+        "disabledOutValue": {
+            "type": "string",
+            "description": "不使能（禁止）时的输出模式。max: 输出值为[上限值]；min: 输出值为[下限值]；zero: 输出值为0；hold: 输出值为[不使能前一刻的值]。",
+            "enum": ["hold", "max", "min", "zero"],
+            "default": "hold"
+        },
+        "discourseDomain": {
+            "type": "string",
+            "description": "控制对象类型（包括温度、温差、压力、压差、CO2浓度）。",
+            "enum": ["temperature", "temperatureDiff", "pressure", "pressureDiff", "co2density"],
+            "default": "temperature"
+        },
+        "inputsCount": {
+            "type": "integer",
+            "description": "动态输入时输入端口数量（范围 3~9）。",
+            "minimum": 3,
+            "maximum": 9,
+            "default": 3
+        },
+        "inputsOption": {
+            "type": "string array",
+            "description": "选择是否要对某些参数启用外部输入端口，以便在运行期动态修改这些参数。（可以多选）",
+            "enum": ["pidMode", "highPidOutLimit", "lowPidOutLimit", "interval", "deadBand"],
+            "default": "[]"
+        }
+    },
+    "template_json": [
+        {
+            "id": "{{__GEN_ID__}}",
+            "z": "{{__FLOW_ID__}}",
+            "type": "fuzzypid",
+            "name": "自适应PID",
+            "inputs": "{{inputsCount}}",
+            "outputs": 1,
+            "pidMode": "{{pidMode}}",
+            "proportional": "{{proportional}}",
+            "integral": "{{integral}}",
+            "derivative": "{{derivative}}",
+            "highPidOutLimit": "{{highPidOutLimit}}",
+            "lowPidOutLimit": "{{lowPidOutLimit}}",
+            "interval": "{{interval}}",
+            "deadBand": "{{deadBand}}",
+            "disabledOutValue": "{{disabledOutValue}}",
+            "proportionalChecked": false,
+            "integralChecked": false,
+            "derivativeChecked": false,
+            "highPidOutLimitChecked": false,
+            "lowPidOutLimitChecked": false,
+            "intervalChecked": false,
+            "deadBandChecked": false,
+            "outOfService": 0,
+            "outOfServiceValue": 0,
+            "inputsOption": "{{inputsOptionArray}}",
+            "discourseDomain": "{{discourseDomain}}",
+            "inputsOptionCache": [],
+            "x": "{{xCoord}}",
+            "y": "{{yCoord}}",
+            "wires": "{{wiresArray}}"
+        }
+    ]
+}
