@@ -20,7 +20,7 @@
             },
             "timeUnit": {
             "type": "string",
-            "description": "常量的具体值",
+            "description": "时间的单位，周天代表每周天数，1代表星期一，7代表星期日",
             "enum":[
                 "second",
                 "minute",
