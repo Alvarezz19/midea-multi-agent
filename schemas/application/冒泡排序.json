@@ -1,0 +1,49 @@
+{
+    "id": "",
+    "module_type": "sort",
+    "category": "应用/冒泡排序",
+    "name": "冒泡排序 (Bubble Sort)",
+    "description": "冒泡排序模块用于对多个输入数值进行排序。支持多种排序模式，如升序、降序以及输出排序后的数值或其对应的原始索引序号。适用于多台设备运行时间排序（用于轮换控制）或温度高低排序等场景。",
+    "keywords": [
+        "冒泡排序",
+        "排序",
+        "最大值最小值",
+        "索引"
+    ],
+    "usage_guides": [
+        "设置'输入数量'(inputs)，模块将动态生成对应数量的输入引脚。",
+        "选择'排序方式'(lType)，可输出排序后的数值序列或原序号序列。",
+        "输入数量最小为2，最大支持到16。"
+    ],
+    "parameters_schema": {
+        "lType": {
+            "type": "string",
+            "description": "排序模式（包括升序、降序、按序号升序、按序号降序）。",
+            "enum": ["ASC", "DES", "ASCIDX", "DESIDX"],
+            "default": "ASC"
+        },
+        "inputs": {
+            "type": "integer",
+            "description": "待排序的输入信号数量。",
+            "minimum": 2,
+            "maximum": 16,
+            "default": 2
+        }
+    },
+    "template_json": [
+        {
+            "id": "{{__GEN_ID__}}",
+            "z": "{{__FLOW_ID__}}",
+            "type": "sort",
+            "name": "冒泡排序",
+            "inputs": "{{inputs}}",
+            "outputs": "{{inputs}}",
+            "lType": "{{lType}}",
+            "outOfService": 0,
+            "outOfServiceValue": 0,
+            "x": "{{xCoord}}",
+            "y": "{{yCoord}}",
+            "wires": "{{wiresArray}}"
+        }
+    ]
+}

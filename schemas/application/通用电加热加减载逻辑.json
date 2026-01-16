@@ -1,0 +1,84 @@
+{
+    "id": "",
+    "module_type": "seq",
+    "category": "应用/通用电加热加减载逻辑",
+    "name": "通用电加热加减载逻辑 (Heating Sequencer)",
+    "description": "通用电加热加减载模块用于管理多级电加热器的顺序启停。根据输入的总加热需求百分比(0-100%)，自动控制多级加热器的开启数量，支持设置各级功率权重和级间启动延时，防止瞬时电流冲击。",
+    "keywords": [
+        "电加热",
+        "加减载",
+        "顺序控制",
+        "分级控制"
+    ],
+    "usage_guides": [
+        "输入：加热需求 (0-100)。",
+        "配置'级数'(stages)和'各级占比'(stagesProportion)，定义加热器的分级逻辑。",
+        "设置'级间延时'(mutilOnDelay)，确保逐级加载时电网冲击最小。",
+        "减载（关闭）通常可以同时进行，或依据内部逻辑快速响应。"
+    ],
+    "parameters_schema": {
+        "mutilOnDelay": {
+            "type": "integer",
+            "description": "多级开启时的级间延时时间（秒）。",
+            "minimum": 1,
+            "default": 60
+        },
+        "mutilOnDelayFromInput": {
+            "type": "boolean",
+            "description": "级间延时是否由外部输入决定。",
+            "default": false
+        },
+        "stages": {
+            "type": "integer",
+            "description": "电加热的总级数。（最小为2，最大为16）",
+            "minimum": 2,
+            "maximum": 16,
+            "default": 2
+        },
+        "stagesProportion": {
+            "type": "array",
+            "description": "各级加热器功率占比（如[1, 1]表示两级功率相等）。",
+            "default": [
+                1,
+                1
+            ]
+        },
+        "inputsCount": {
+            "type": "integer",
+            "description": "动态输入时输入端口数量（范围 1~2）。",
+            "minimum": 1,
+            "maximum": 2,
+            "default": 1
+        }
+    },
+    "template_json": [
+        {
+            "id": "{{__GEN_ID__}}",
+            "z": "{{__FLOW_ID__}}",
+            "type": "seq",
+            "name": "通用电加热加减载逻辑",
+            "inputs": "{{inputsCount}}",
+            "outputs": 1,
+            "mutilOnDelay": "{{mutilOnDelay}}",
+            "mutilOnDelayFromInput": "{{mutilOnDelayFromInput}}",
+            "stages": "{{stages}}",
+            "stagesProportion": "{{stagesProportion}}",
+            "stagesProportionchanged": 1,
+            "outOfService": 0,
+            "outOfServiceValue": 0,
+            "debugView": [
+                {
+                    "n": "O1: ",
+                    "v": ""
+                },
+                {
+                    "n": "left:",
+                    "v": ""
+                }
+            ],
+            "x": "{{xCoord}}",
+            "y": "{{yCoord}}",
+            "wires": "{{wiresArray}}"
+        }
+    ]
+}
