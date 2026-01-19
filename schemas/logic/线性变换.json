@@ -56,6 +56,55 @@
       "default": 1
       }
     },
+    "ports_definition": {
+    "inputs": [
+      {
+        "index": 1,      
+        "label": "对象",
+        "type": "number",
+        "description": "需要进行线性转换的目标值 (Target Value)",
+        "condition": "always"
+      },
+      {
+        "index": 2,
+        "label": "输入起始",
+        "type": "number",
+        "description": "动态输入范围下限",
+        "condition": "inputD == true"
+      },
+      {
+        "index": 3,
+        "label": "输入终止",
+        "type": "number",
+        "description": "动态输入范围上限",
+        "condition": "inputD == true"
+      },
+      {
+        "index": 4,
+        "label": "输出起始",
+        "type": "number",
+        "description": "动态输出范围下限",
+        "condition": "outputD == true"
+      },
+      {
+        "index": 5,
+        "label": "输出终止",
+        "type": "number",
+        "description": "动态输出范围上限",
+        "condition": "outputD == true"
+      }
+    ],
+    "outputs": [
+      {
+        "index": 1,
+        "label": "输出",
+        "type": "number",
+        "description": "转换后的结果",
+        "condition": "always"
+      }
+    ]
+},
+
     "template_json": {
       "id": "{{__GEN_ID__}}",
       "z": "{{__FLOW_ID__}}",

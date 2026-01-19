@@ -20,24 +20,65 @@
     "parameters_schema": {
       "onThresholdDynamic": {
         "type": "boolean",
-        "description": "开阀值是否动态输入。",
+        "description": "开阀值是否动态输入。决定端口 2 是否激活。",
         "default": false
       },
       "offThresholdDynamic": {
         "type": "boolean",
-        "description": "关阀值是否动态输入。",
+        "description": "关阀值是否动态输入。决定端口 3 是否激活。",
         "default": false
       },
       "onThreshold": {
         "type": "number",
-        "description": "开阀值（静态模式下有效）。",
+        "description": "开阀值的固定数值（onThresholdDynamic 为 false 时使用）。",
         "default": 0
       },
       "offThreshold": {
         "type": "number",
-        "description": "关阀值（静态模式下有效）。",
+        "description": "关阀值的固定数值（offThresholdDynamic 为 false 时使用）。",
         "default": 0
+      },
+      "inputsCount": {
+        "type": "integer",
+        "description": "动态端口总数。计算逻辑：1 + (onThresholdDynamic?1:0) + (offThresholdDynamic?1:0)。",
+        "minimum": 1,
+        "maximum": 3,
+        "default": 1
       }
+    },
+    "ports_definition": {
+      "inputs": [
+        {
+          "index": 1,
+          "label": "输入",
+          "type": "number",
+          "description": "进行回差控制的输入对象",
+          "condition": "always"
+        },
+        {
+          "index": 2,
+          "label": "开阀值",
+          "type": "number",
+          "description": "动态输入的开阀值边界",
+          "condition": "onThresholdDynamic == true"
+        },
+        {
+          "index": 3,
+          "label": "关阀值",
+          "type": "number",
+          "description": "动态输入的关阀值边界",
+          "condition": "offThresholdDynamic == true"
+        }
+      ],
+      "outputs": [
+        {
+          "index": 1,
+          "label": "输出",
+          "type": "boolean",
+          "description": "回差控制结果（布尔值）",
+          "condition": "always"
+        }
+      ]
     },
     "template_json": [
       {

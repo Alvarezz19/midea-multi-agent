@@ -33,24 +33,67 @@
       },
       "defaultFromInput": {
         "type": "boolean",
-        "description": "复位值是否由动态输入提供。",
+        "description": "复复位值是否由动态输入提供。为 true 时，激活第 3 个输入端口。",
         "default": false
       },
       "defaultOutput": {
         "type": "number",
-        "description": "复位值（静态模式下使用）。",
+        "description": "复位值（静态模式下使用，defaultFromInput == false）。",
         "default": 0
       },
       "highLimit": {
         "type": "number",
         "description": "累加器上限值。",
+        "maximum": 16777215,
         "default": 0
       },
       "lowLimit": {
         "type": "number",
         "description": "累加器下限值。",
+        "minimum": -16777215,
         "default": 0
+      },
+      "inputsCount": {
+        "type": "integer",
+        "description": "当前激活的输入端口总数 (2-3)。由 defaultFromInput 决定。",
+        "minimum": 2,
+        "maximum": 3,
+        "default": 2
       }
+    },
+    "ports_definition": {
+      "inputs": [
+        {
+          "index": 1,
+          "label": "输入",
+          "type": "number",
+          "description": "需要进行累加的输入信号对象",
+          "condition": "always"
+        },
+        {
+          "index": 2,
+          "label": "复位",
+          "type": "boolean",
+          "description": "触发复位动作的信号。当此信号为 True 时，累加器重置为复位值",
+          "condition": "always"
+        },
+        {
+          "index": 3,
+          "label": "复位值",
+          "type": "number",
+          "description": "动态提供的复位目标数值。当 defaultFromInput 为 true 时，此端口激活。",
+          "condition": "defaultFromInput == true"
+        }
+      ],
+      "outputs": [
+        {
+          "index": 1,
+          "label": "输出",
+          "type": "number",
+          "description": "根据设定间隔累计后的数值结果",
+          "condition": "always"
+        }
+      ]
     },
     "template_json": [
       {

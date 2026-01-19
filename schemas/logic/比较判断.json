@@ -39,7 +39,7 @@
       },
       "tripPoint": {
         "type": "number",
-        "description": "固定阈值（静态模式下有效）。",
+        "description": "固定阈值（静态模式下有效）,动态阈值时为默认值。",
         "default": 0
       },
       "inputsCount": {
@@ -50,6 +50,34 @@
         "default": 1
       }
     },
+    "ports_definition": {
+      "inputs": [
+        {
+          "index": 1,
+          "label": "输入1",
+          "type": "number",
+          "description": "被比较数，参与比较运算的输入数值。",
+          "condition": "always"
+        },
+        {
+          "index": 2,
+          "label": "输入2",
+          "type": "number",
+          "description": "比较数，用于比较的阈值输入。",
+          "condition": "inputAuxEnable == true"
+        }
+      ],
+      "outputs": [
+        {
+          "index": 1,
+          "label": "输出",
+          "type": "boolean",
+          "description": "比较运算的结果成立时，输出True(1),否则输出False(0)",
+          "condition": "always"
+        }
+      ]
+    },
+
     "template_json": [
       {
         "id": "{{__GEN_ID__}}",

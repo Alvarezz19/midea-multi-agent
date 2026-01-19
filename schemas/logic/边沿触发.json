@@ -13,8 +13,8 @@
       "事件触发"
     ],
     "usage_guides": [
-      "设置为上升沿触发时，输入信号由低到高变化时输出触发。",
-      "设置为下降沿触发时，输入信号由高到低变化时输出触发。",
+      "设置为上升沿触发时，输入信号由0到1变化时输出触发。",
+      "设置为下降沿触发时，输入信号由1到0变化时输出触发。",
       "设置为任意变化触发时，输入信号变化（上升或下降）都会触发输出。"
     ],
     "parameters_schema": {
@@ -24,6 +24,24 @@
         "enum": ["rising", "falling", "any"],
         "default": "rising"
       }
+    },
+    "ports_definition": {
+      "inputs": [
+        {
+          "index": 1,
+          "name": "输入",
+          "type": "boolean",
+          "description": "输入信号。"
+        }
+      ],
+      "outputs": [
+        {
+          "index": 1,
+          "name": "输出",
+          "type": "boolean",
+          "description": "输出信号。"
+        }
+      ]
     },
     "template_json": [
       {
