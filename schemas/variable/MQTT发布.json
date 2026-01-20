@@ -3,17 +3,10 @@
         "module_type": "mqttout",
         "category": "变量模块/MQTT发布",
         "name": "MQTT发布",
-
-        // --- 1. 检索与理解层 (供检索智能体使用) ---
-        // 这部分内容将被转化为向量 (Vector)，用于匹配用户的自然语言需求
-        "description": "MQTT发布模块用于通过MQTT协议将数据发布到指定的主题（Topic）。该模块支持JSON格式的Payload，其中包含序列号（seq）和节点数据（nodes）。每个节点数据包括节点名称（name）和值（value）。需要注意的是，Topic不支持通配符。该模块广泛应用于物联网、远程监控和数据采集等场景，确保数据的实时性和可靠性。通过配置正确的Topic和Payload格式，可以实现高效的数据传输和设备间的通信。",
         "keywords": [ "MQTT", "发布", "主题", "Topic", "通配符", "Payload"],
         "usage_guides": ["Topic不支持通配符",
             "Payload格式:  {\"seq\":123, \"nodes\":[{\"name\":\"Object\",\"value\":0}, ...]}"
         ],
-
-        // --- 2. 参数约束层 (供规划智能体/LLM 填充参数使用) ---
-        // 这部分定义了各个参数的合法取值，防止 AI 产生幻觉
         "parameters_schema": {
             "user_defined_name": {
             "type": "string",
@@ -27,7 +20,8 @@
             "topic":{
             "type": "string",
             "description": "发布的MQTT订阅主题的名字"
-            }
+            },
+
 
         },
 
@@ -60,28 +54,16 @@
                 }
             ]
         },
-
-        // --- 3. 生成模板层 (最终产出的代码) ---
-        // 规划智能体将填好的参数代入此模板
-        // 注意：id, x, y, z, wires 这些拓扑参数留空或设为占位符，由规划智能体在连线时动态生成
-
          "template_json": {
-
-        //需要AI填入
-        "id":  "{{__GEN_ID__}}",//特殊标记，指示系统生成唯一 ID
-        "z": "{{__FLOW_ID__}}",//特殊标记，指示归属的流程 ID
-        "name": "{{user_defined_name}}",
+        "id":  "{{__GEN_ID__}}",
+        "z": "{{__FLOW_ID__}}",
         "topic": "{{topic}}",
         "objctName": "{{objectName}}",
-        
-        // 动态生成
-        "x": 0, // 模块在流程图中的x坐标
-        "y": 0,// 模块在流程图中的y坐标
-        "wires": [],// 模块之间的连线
-        "inputs": 0,// 模块的输入数量
-        "outputs": 0,// 模块的输出数量
-        
-        // 以下为默认参数，不需要 AI 操心，直接硬编码
+        "x": "{{__POS_X__}}", 
+        "y": "{{__POS_Y__}}",
+        "wires": "{{wiresArray}}",
+        "inputs": 1,
+        "outputs": 2,
         "type": "mqttout",
         "qos": 0,
         "retained": 0,

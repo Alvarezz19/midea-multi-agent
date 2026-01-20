@@ -3,15 +3,9 @@
         "module_type": "hwOutput",
         "category": "变量模块/物理输出",
         "name": "物理输出 (Physical Output)",
-
-        // --- 1. 检索与理解层 (供检索智能体使用) ---
-        // 这部分内容将被转化为向量 (Vector)，用于匹配用户的自然语言需求
         "description": "物理输出模块用于创建控制器以及控制器 KONG 总线接入的 IO 扩展模块上具有输出功能的端口，实现对其进行配置并调用。",
         "keywords": [ "控制", "输出", "继电器", "接触器", "指示灯", "电磁阀", "变频器", "调光器", "阀门定位器", "执行机构", "记录仪", "电子膨胀阀", "DO", "模拟量输出", "通用输出", "线性变换", "默认值", "延迟开", "延迟关", "掉电保持"],
         "usage_guides": [],
-
-        // --- 2. 参数约束层 (供规划智能体/LLM 填充参数使用) ---
-        // 这部分定义了各个参数的合法取值，防止 AI 产生幻觉
         "parameters_schema": {
             "hwExpander": {
             "type": "integer",
@@ -31,7 +25,22 @@
             "type": "string",
             "description": "实例名称",
             "default": "物理输出"
+            },
+            "inputCount": {
+            "type": "integer",
+            "description": "输入端口数量",
+            "minimum": 1,
+            "maximum": 2,
+            "default": 1
+            },
+            "outputCount": {
+            "type": "integer",
+            "description": "输出端口数量",
+            "minimum": 1,
+            "maximum": 2,
+            "default": 1
             }
+
 
         },
 
@@ -74,27 +83,18 @@
 
         },
 
-        // --- 3. 生成模板层 (最终产出的代码) ---
-        // 规划智能体将填好的参数代入此模板
-        // 注意：id, x, y, z, wires 这些拓扑参数留空或设为占位符，由规划智能体在连线时动态生成
 
          "template_json": {
-
-        //需要AI填入
-        "id":  "{{__GEN_ID__}}",//特殊标记，指示系统生成唯一 ID
-        "z": "{{__FLOW_ID__}}",//特殊标记，指示归属的流程 ID
+        "id":  "{{__GEN_ID__}}",
+        "z": "{{__FLOW_ID__}}",
         "name": "{{user_defined_name}}",
         "hwExpander": "{{hwExpander}}",
         "hwChannelIndex": "{{hwChannelIndex}}",
-        
-        // 动态生成
-        "x": 0, // 模块在流程图中的x坐标
-        "y": 0,// 模块在流程图中的y坐标
-        "wires": [],// 模块之间的连线
-        "inputs": 0,// 模块的输入数量
-        "outputs": 0,// 模块的输出数量
-        
-        // 以下为默认参数，不需要 AI 操心，直接硬编码
+        "x": "{{__POS_X__}}", 
+        "y": "{{__POS_Y__}}",
+        "wires": "{{wiresArray}}",
+        "inputs": "{{inputCount}}",
+        "outputs": "{{outputCount}}",
         "type": "hwOutput",
         "hwChannelType": "Universal Output",
         "hwOutputMode": "DO",

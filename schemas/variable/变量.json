@@ -3,20 +3,28 @@
         "module_type": "swInput",
         "category": "变量模块/变量",
         "name": "变量(软件输入)",
-
-        // --- 1. 检索与理解层 (供检索智能体使用) ---
-        // 这部分内容将被转化为向量 (Vector)，用于匹配用户的自然语言需求
         "description": "变量（软件输入）模块用于在控制系统中定义和管理软件层面的输入数据。这些变量可以是用户自定义的数值、状态或计算结果，用于存储和处理各种类型的数据。",
-        "keywords": [  "变量", "软件输入", "数据管理", "用户自定义", "数值", "状态", "计算结果"]
+        "keywords": [  "变量", "软件输入", "数据管理", "用户自定义", "数值", "状态", "计算结果"],
         "usage_guides": [],
-
-        // --- 2. 参数约束层 (供规划智能体/LLM 填充参数使用) ---
-        // 这部分定义了各个参数的合法取值，防止 AI 产生幻觉
         "parameters_schema": {
             "user_defined_name": {
             "type": "string",
             "description": "该模块的名称",
             "default": "变量"
+            },
+            "inputCount": {
+            "type": "integer",
+            "description": "输入端口数量",
+            "minimum": 1,
+            "maximum": 2,
+            "default": 1
+            },
+            "outputCount": {
+            "type": "integer",
+            "description": "输出端口数量",
+            "minimum": 1,
+            "maximum": 2,
+            "default": 1
             }
 
         },
@@ -59,25 +67,15 @@
 
         },
 
-        // --- 3. 生成模板层 (最终产出的代码) ---
-        // 规划智能体将填好的参数代入此模板
-        // 注意：id, x, y, z, wires 这些拓扑参数留空或设为占位符，由规划智能体在连线时动态生成
-
          "template_json": {
-
-        //需要AI填入
-        "id":  "{{__GEN_ID__}}",//特殊标记，指示系统生成唯一 ID
-        "z": "{{__FLOW_ID__}}",//特殊标记，指示归属的流程 ID
+        "id":  "{{__GEN_ID__}}",
+        "z": "{{__FLOW_ID__}}",
         "name": "{{user_defined_name}}",
-        
-        // 动态生成
-        "x": 0, // 模块在流程图中的x坐标
-        "y": 0,// 模块在流程图中的y坐标
-        "wires": [],// 模块之间的连线
-        "inputs": 0,// 模块的输入数量
-        "outputs": 0,// 模块的输出数量
-        
-        // 以下为默认参数，不需要 AI 操心，直接硬编码
+        "x": "{{__POS_X__}}", 
+        "y": "{{__POS_Y__}}",
+        "wires": "{{wiresArray}}",
+        "inputs": "{{inputCount}}",
+        "outputs": "{{outputCount}}",
         "type": "swInput",
         "swInputType": "analog",
         "swInputDefault": 0,
