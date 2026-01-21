@@ -93,6 +93,8 @@
         "outOfService": 0,
         "outOfServiceValue": 0,
         "inputsOption": "{{inputsOptionArray}}",
+        "x": "{{__POS_X__}}",
+        "y": "{{__POS_Y__}}",
         "wires": "{{wiresArray}}"
       }
     ]
