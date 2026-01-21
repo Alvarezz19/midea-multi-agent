@@ -111,6 +111,8 @@
         "outOfService": 0,
         "outOfServiceValue": 0,
         "defaultFromInput": "{{defaultFromInput}}",
+        "x": "{{__POS_X__}}",
+        "y": "{{__POS_Y__}}",
         "wires": "{{wiresArray}}"
       }
     ]

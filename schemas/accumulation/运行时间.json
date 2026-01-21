@@ -61,6 +61,8 @@
         "outputs": 2,
         "outOfService": 0,
         "outOfServiceValue": 0,
+        "x": "{{__POS_X__}}",
+        "y": "{{__POS_Y__}}",
         "wires": [[], []]
       }
     ]
