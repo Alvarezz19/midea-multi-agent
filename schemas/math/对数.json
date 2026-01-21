@@ -49,6 +49,26 @@
       "default": "ln"
     }
   },
+  "ports_definition": {
+    "inputs": [
+      {
+        "index": 0,
+        "label": "正数值",
+        "type": "number",
+        "description": "需要进行对数运算的正数(必须>0)",
+        "condition": "always"
+      }
+    ],
+    "outputs": [
+      {
+        "index": 0,
+        "label": "对数值",
+        "type": "number",
+        "description": "对数运算结果(自然对数或常用对数)",
+        "condition": "always"
+      }
+    ]
+  },
   "template_json": {
     "id": "{{__GEN_ID__}}",
     "z": "{{__FLOW_ID__}}",

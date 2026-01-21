@@ -55,6 +55,26 @@
       "default": 0
     }
   },
+  "ports_definition": {
+    "inputs": [
+      {
+        "index": 0,
+        "label": "被加数1",
+        "type": "number",
+        "description": "参与加法运算的第1个数值",
+        "condition": "always"
+      }
+    ],
+    "outputs": [
+      {
+        "index": 0,
+        "label": "和",
+        "type": "number",
+        "description": "所有输入信号之和(输入=1时为输入与固定值之和)",
+        "condition": "always"
+      }
+    ]
+  },
   "template_json": {
     "id": "{{__GEN_ID__}}",
     "z": "{{__FLOW_ID__}}",

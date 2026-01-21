@@ -41,6 +41,26 @@
       "default": "user_defined_name"
     }
   },
+  "ports_definition": {
+    "inputs": [
+      {
+        "index": 0,
+        "label": "数值",
+        "type": "number",
+        "description": "需要取绝对值的数值(可为正数或负数)",
+        "condition": "always"
+      }
+    ],
+    "outputs": [
+      {
+        "index": 0,
+        "label": "绝对值",
+        "type": "number",
+        "description": "取绝对值后的非负数结果",
+        "condition": "always"
+      }
+    ]
+  },
   "template_json": {
     "id": "{{__GEN_ID__}}",
     "z": "{{__FLOW_ID__}}",

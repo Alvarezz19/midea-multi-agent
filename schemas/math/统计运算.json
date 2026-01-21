@@ -60,6 +60,26 @@
       "default": 2
     }
   },
+  "ports_definition": {
+    "inputs": [
+      {
+        "index": 0,
+        "label": "数值1",
+        "type": "number",
+        "description": "参与统计运算的第1个数值",
+        "condition": "always"
+      }
+    ],
+    "outputs": [
+      {
+        "index": 0,
+        "label": "统计结果",
+        "type": "number",
+        "description": "统计运算结果(平均值/最大值/最小值)",
+        "condition": "always"
+      }
+    ]
+  },
   "template_json": {
     "id": "{{__GEN_ID__}}",
     "z": "{{__FLOW_ID__}}",

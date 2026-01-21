@@ -51,6 +51,33 @@
       "default": "leftShift"
     }
   },
+  "ports_definition": {
+    "inputs": [
+      {
+        "index": 0,
+        "label": "被移位数值",
+        "type": "integer",
+        "description": "需要进行移位操作的整型数",
+        "condition": "always"
+      },
+      {
+        "index": 1,
+        "label": "移位位数",
+        "type": "integer",
+        "description": "移位的位数(左移或右移的位数)",
+        "condition": "always"
+      }
+    ],
+    "outputs": [
+      {
+        "index": 0,
+        "label": "移位结果",
+        "type": "integer",
+        "description": "移位运算后的整型数结果",
+        "condition": "always"
+      }
+    ]
+  },
   "template_json": {
     "id": "{{__GEN_ID__}}",
     "z": "{{__FLOW_ID__}}",

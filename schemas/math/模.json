@@ -53,6 +53,26 @@
       "default": 0
     }
   },
+  "ports_definition": {
+    "inputs": [
+      {
+        "index": 0,
+        "label": "被取模数",
+        "type": "number",
+        "description": "被取模的数值(第1个输入)",
+        "condition": "always"
+      }
+    ],
+    "outputs": [
+      {
+        "index": 0,
+        "label": "余数",
+        "type": "number",
+        "description": "取模运算的余数(输入=1时为输入与固定值的模)",
+        "condition": "always"
+      }
+    ]
+  },
   "template_json": {
     "id": "{{__GEN_ID__}}",
     "z": "{{__FLOW_ID__}}",

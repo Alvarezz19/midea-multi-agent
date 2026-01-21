@@ -55,6 +55,26 @@
       "default": 0
     }
   },
+  "ports_definition": {
+    "inputs": [
+      {
+        "index": 0,
+        "label": "整型数",
+        "type": "integer",
+        "description": "需要提取特定位的整型数值",
+        "condition": "always"
+      }
+    ],
+    "outputs": [
+      {
+        "index": 0,
+        "label": "位值",
+        "type": "integer",
+        "description": "指定二进制位的值(0或1)",
+        "condition": "always"
+      }
+    ]
+  },
   "template_json": {
     "id": "{{__GEN_ID__}}",
     "z": "{{__FLOW_ID__}}",

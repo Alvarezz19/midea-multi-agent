@@ -42,6 +42,33 @@
       "default": "user_defined_name"
     }
   },
+  "ports_definition": {
+    "inputs": [
+      {
+        "index": 0,
+        "label": "指数",
+        "type": "number",
+        "description": "幂运算的指数(y),用于计算x^y中的y",
+        "condition": "always"
+      },
+      {
+        "index": 1,
+        "label": "底数",
+        "type": "number",
+        "description": "幂运算的底数(x),用于计算x^y中的x",
+        "condition": "always"
+      }
+    ],
+    "outputs": [
+      {
+        "index": 0,
+        "label": "幂值",
+        "type": "number",
+        "description": "幂运算结果,即底数的指数次方(x^y)",
+        "condition": "always"
+      }
+    ]
+  },
   "template_json": {
     "id": "{{__GEN_ID__}}",
     "z": "{{__FLOW_ID__}}",

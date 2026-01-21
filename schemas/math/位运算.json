@@ -61,6 +61,26 @@
       "default": 2
     }
   },
+  "ports_definition": {
+    "inputs": [
+      {
+        "index": 0,
+        "label": "运算数1",
+        "type": "integer",
+        "description": "参与位运算的第1个整型数",
+        "condition": "always"
+      }
+    ],
+    "outputs": [
+      {
+        "index": 0,
+        "label": "位运算结果",
+        "type": "integer",
+        "description": "位运算结果(位与/位或/位异或/位非)",
+        "condition": "always"
+      }
+    ]
+  },
   "template_json": {
     "id": "{{__GEN_ID__}}",
     "z": "{{__FLOW_ID__}}",

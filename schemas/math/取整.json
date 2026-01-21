@@ -50,6 +50,26 @@
       "default": "round45"
     }
   },
+  "ports_definition": {
+    "inputs": [
+      {
+        "index": 0,
+        "label": "浮点数",
+        "type": "number",
+        "description": "需要进行取整运算的数值",
+        "condition": "always"
+      }
+    ],
+    "outputs": [
+      {
+        "index": 0,
+        "label": "整数值",
+        "type": "number",
+        "description": "取整后的结果(四舍五入/向上/向下取整)",
+        "condition": "always"
+      }
+    ]
+  },
   "template_json": {
     "id": "{{__GEN_ID__}}",
     "z": "{{__FLOW_ID__}}",
