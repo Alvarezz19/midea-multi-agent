@@ -22,14 +22,14 @@
     "ports_definition": {
       "inputs": [
         {
-          "index": 1,
+          "index": 0,
           "label": "输入",
           "type": "boolean",
           "description": "监测对象，即接受的脉冲信号，信号由 False 变为 True 时计数值加 1",
           "condition": "always"
         },
         {
-          "index": 2,
+          "index": 1,
           "label": "复位",
           "type": "boolean",
           "description": "复位控制信号。当信号为 True 时，计数值清零",
@@ -38,7 +38,7 @@
       ],
       "outputs": [
         {
-          "index": 1,
+          "index": 0,
           "label": "输出",
           "type": "integer",
           "description": "累计的脉冲次数。最大值为 16777215，达到最大值后保持该值输出",

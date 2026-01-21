@@ -54,8 +54,8 @@
             "outputs": 1,
             "outOfService": 0,
             "outOfServiceValue": 0,
-            "x": "{{xCoord}}",
-            "y": "{{yCoord}}",
+            "x": "{{__POS_X__}}",
+            "y": "{{__POS_Y__}}",
             "wires": "{{wiresArray}}"
         }
     ]
