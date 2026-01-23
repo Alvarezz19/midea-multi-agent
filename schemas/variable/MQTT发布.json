@@ -20,7 +20,7 @@
             "topic":{
             "type": "string",
             "description": "发布的MQTT订阅主题的名字"
-            },
+            }
 
 
         },
@@ -58,7 +58,7 @@
         "id":  "{{__GEN_ID__}}",
         "z": "{{__FLOW_ID__}}",
         "topic": "{{topic}}",
-        "objctName": "{{objectName}}",
+        "objectName": "{{objectName}}",
         "x": "{{__POS_X__}}", 
         "y": "{{__POS_Y__}}",
         "wires": "{{wiresArray}}",
