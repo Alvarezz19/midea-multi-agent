@@ -88,8 +88,8 @@
     "mode": "{{mode}}",
     "outOfService": 0,
     "outOfServiceValue": 0,
-    "x": "{{__AUTO_X__}}",
-    "y": "{{__AUTO_Y__}}",
+            "x": "{{__POS_X__}}",
+            "y": "{{__POSY__}}",
     "wires": "{{__WIRES__}}"
   }
 }

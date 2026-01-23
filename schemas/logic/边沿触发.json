@@ -28,7 +28,7 @@
     "ports_definition": {
       "inputs": [
         {
-          "index": 1,
+          "index": 0,
           "name": "输入",
           "type": "boolean",
           "description": "输入信号。"
@@ -36,7 +36,7 @@
       ],
       "outputs": [
         {
-          "index": 1,
+          "index": 0,
           "name": "输出",
           "type": "boolean",
           "description": "输出信号。"

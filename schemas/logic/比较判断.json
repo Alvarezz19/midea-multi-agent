@@ -53,14 +53,14 @@
     "ports_definition": {
       "inputs": [
         {
-          "index": 1,
+          "index": 0,
           "label": "输入1",
           "type": "number",
           "description": "被比较数，参与比较运算的输入数值。",
           "condition": "always"
         },
         {
-          "index": 2,
+          "index": 1,
           "label": "输入2",
           "type": "number",
           "description": "比较数，用于比较的阈值输入。",
@@ -69,7 +69,7 @@
       ],
       "outputs": [
         {
-          "index": 1,
+          "index": 0,
           "label": "输出",
           "type": "boolean",
           "description": "比较运算的结果成立时，输出True(1),否则输出False(0)",

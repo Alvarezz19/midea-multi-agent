@@ -64,21 +64,21 @@
     "ports_definition": {
       "inputs": [
         {
-          "index": 1,
+          "index": 0,
           "label": "输入",
           "type": "number",
           "description": "需要进行累加的输入信号对象",
           "condition": "always"
         },
         {
-          "index": 2,
+          "index": 1,
           "label": "复位",
           "type": "boolean",
           "description": "触发复位动作的信号。当此信号为 True 时，累加器重置为复位值",
           "condition": "always"
         },
         {
-          "index": 3,
+          "index": 2,
           "label": "复位值",
           "type": "number",
           "description": "动态提供的复位目标数值。当 defaultFromInput 为 true 时，此端口激活。",
@@ -87,7 +87,7 @@
       ],
       "outputs": [
         {
-          "index": 1,
+          "index": 0,
           "label": "输出",
           "type": "number",
           "description": "根据设定间隔累计后的数值结果",

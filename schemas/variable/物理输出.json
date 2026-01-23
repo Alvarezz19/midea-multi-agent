@@ -19,7 +19,7 @@
             "description": "IO通道的地址编号。",
             "minimum": 1,
             "maximum": 31,
-            "default": 0
+            "default": 1
             },
             "user_defined_name": {
             "type": "string",

@@ -29,118 +29,118 @@
     "ports_definition": {
       "inputs": [
         {
-          "index": 1,
+          "index": 0,
           "name": "通道选择",
           "type": "integer",
           "description": "选择通道n的输入作为输出。其中,0为通道0,1为通道1,以此类推。超出有效范围的值将按 0 处理。"
         },
         {
-          "index": 2,
+          "index": 1,
           "name": "通道0",
           "type": "number",
           "description": "通道 0 的输入信号。",
           "condition": "channels >= 2"
         },
         {
-          "index": 3,
+          "index": 2,
           "name": "通道1",
           "type": "number",
           "description": "通道 1 的输入信号。",
           "condition": "channels >= 2"
         },
         {
-          "index": 4,
+          "index": 3,
           "name": "通道2",
           "type": "number",
           "description": "通道 2 的输入信号。",
           "condition": "channels >= 3"
         },
         {
-          "index": 5,
+          "index": 4,
           "name": "通道3",
           "type": "number",
           "description": "通道 3 的输入信号。",
           "condition": "channels >= 4"
         },
         {
-          "index": 6,
+          "index": 5,
           "name": "通道4",
           "type": "number",
           "description": "通道 4 的输入信号。",
           "condition": "channels >= 5"
         },
         {
-          "index": 7,
+          "index": 6,
           "name": "通道5",
           "type": "number",
           "description": "通道 5 的输入信号。",
           "condition": "channels >= 6"
         },
         {
-          "index": 8,
+          "index": 7,
           "name": "通道6",
           "type": "number",
           "description": "通道 6 的输入信号。",
           "condition": "channels >= 7"
         },
         {
-          "index": 9,
+          "index": 8,
           "name": "通道7",
           "type": "number",
           "description": "通道 7 的输入信号。",
           "condition": "channels >= 8"
         },
         {
-          "index": 10,
+          "index": 9,
           "name": "通道8",
           "type": "number",
           "description": "通道 8 的输入信号。",
           "condition": "channels >= 9"
         },
         {
-          "index": 11,
+          "index": 10,
           "name": "通道9",
           "type": "number",
           "description": "通道 9 的输入信号。",
           "condition": "channels >= 10"
         },
         {
-          "index": 12,
+          "index": 11,
           "name": "通道10",
           "type": "number",
           "description": "通道 10 的输入信号。",
           "condition": "channels >= 11"
         },
         {
-          "index": 13,
+          "index": 12,
           "name": "通道11",
           "type": "number",
           "description": "通道 11 的输入信号。",
           "condition": "channels >= 12"
         },
         {
-          "index": 14,
+          "index": 13,
           "name": "通道12",
           "type": "number",
           "description": "通道 12 的输入信号。",
           "condition": "channels >= 13"
         },
         {
-          "index": 15,
+          "index": 14,
           "name": "通道13",
           "type": "number",
           "description": "通道 13 的输入信号。",
           "condition": "channels >= 14"
         },
         {
-          "index": 16,
+          "index": 15,
           "name": "通道14",
           "type": "number",
           "description": "通道 14 的输入信号。",
           "condition": "channels >= 15"
         },
         {
-          "index": 17,
+          "index": 16,
           "name": "通道15",
           "type": "number",
           "description": "通道 15 的输入信号。",
@@ -149,7 +149,7 @@
       ],
       "outputs": [
         {
-          "index": 1,
+          "index": 0,
           "name": "输出",
           "type": "number",
           "description": "根据通道选择信号选中的通道输入值。"

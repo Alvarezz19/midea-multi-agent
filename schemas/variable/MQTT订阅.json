@@ -61,7 +61,7 @@
         "z": "{{__FLOW_ID__}}",
         "name": "{{user_defined_name}}",
         "topic": "{{topic}}",
-        "objctName": "{{objectName}}",
+        "objectName": "{{objectName}}",
         "x": "{{__POS_X__}}", 
         "y": "{{__POS_Y__}}",
         "wires": "{{wiresArray}}",

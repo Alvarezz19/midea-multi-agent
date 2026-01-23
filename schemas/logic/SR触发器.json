@@ -22,13 +22,13 @@
     "ports_definition": {
       "inputs": [
         {
-          "index": 1,
+          "index": 0,
           "name": "输入",
           "type": "boolean",
           "description": "置位信号。"
         },
         {
-          "index": 2,
+          "index": 1,
           "name": "复位",
           "type": "boolean",
           "description": "复位信号。"
@@ -36,7 +36,7 @@
       ],
       "outputs": [
         {
-          "index": 1,
+          "index": 0,
           "name": "输出",
           "type": "boolean",
           "description": "输出结果。"

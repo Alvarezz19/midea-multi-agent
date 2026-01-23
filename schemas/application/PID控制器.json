@@ -202,8 +202,8 @@
             "outOfServiceValue": 0,
             "inputsOption": "{{inputsOptionArray}}",
             "inputsOptionCache": [],
-            "x": "{{xCoord}}",
-            "y": "{{yCoord}}",
+            "x": "{{__POS_X__}}",
+            "y": "{{__POS_Y__}}",
             "wires": "{{wiresArray}}"
         }
     ]
