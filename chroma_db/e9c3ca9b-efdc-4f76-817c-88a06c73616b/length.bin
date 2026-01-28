@@ -1,0 +1,1 @@
+invalid type: string "{\"id\": \"\", \"module_type\": \"rsFlipflop\", \"category\": \"逻辑模块/触发器\", \"name\": \"RS触发器 (RS Flip-Flop)\", \"description\": \"RS触发器模块用于实现基本的置位/复位触发逻辑。RS触发器即置位优先触发器。\", \"keywords\": [\"触发器\", \"RS\", \"置位复位\", \"状态保持\", \"逻辑\", \"置位优先\"], \"usage_guides
