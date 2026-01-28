@@ -11,13 +11,14 @@ from agents.validation_agent import ValidationAgent
 from agents.debugging_agent import DebuggingAgent
 from tools.execution_tool import ExecutionTool
 import config
+from langsmith import traceable
 
 
 # 定义工作流状态
 class WorkflowState(TypedDict):
     """工作流全局状态"""
     user_query: str  # 用户输入的需求
-    retrieval_context: dict  # 检索到的上下文
+    retrieval_context: dict  # 检索到的完整上下文（原始数据）
     execution_plan: dict  # 执行计划
     generated_code: str  # 生成的 Python 代码
     execution_result: dict  # 代码执行结果
@@ -29,6 +30,7 @@ class WorkflowState(TypedDict):
     final_output: dict  # 最终输出
 
 
+@traceable(name="create_workflow", tags=["workflow", "langgraph"])
 def create_workflow() -> StateGraph:
     """
     创建 LangGraph 工作流
@@ -38,8 +40,8 @@ def create_workflow() -> StateGraph:
     """
     # 初始化所有智能体
     retrieval_agent = RetrievalAgent()
-    # planning_agent = PlanningAgent()
-    # coding_agent = CodingAgent()
+    planning_agent = PlanningAgent()  # 启用规划智能体
+    coding_agent = CodingAgent()      # 启用编码智能体
     # validation_agent = ValidationAgent()
     # debugging_agent = DebuggingAgent()
     # execution_tool = ExecutionTool()
@@ -49,8 +51,8 @@ def create_workflow() -> StateGraph:
     
     # ========== 添加节点 ==========
     workflow.add_node("retrieval", retrieval_agent)
-    # workflow.add_node("planning", planning_agent)
-    # workflow.add_node("coding", coding_agent)
+    workflow.add_node("planning", planning_agent)  # 启用规划节点
+    workflow.add_node("coding", coding_agent)     # 启用编码节点
     # workflow.add_node("execution", execution_tool)
     # workflow.add_node("validation", validation_agent)
     # workflow.add_node("debugging", debugging_agent)
@@ -58,13 +60,16 @@ def create_workflow() -> StateGraph:
     # ========== 定义边缘（流程）==========
 
     workflow.set_entry_point("retrieval")
-    workflow.add_edge("retrieval", END)
+    workflow.add_edge("retrieval", "planning")        # 检索 -> 规划
+    workflow.add_edge("planning", "coding")           # 规划 -> 编码
+    workflow.add_edge("coding", END)                  # 编码 -> 结束（临时）
     
     # # 1. 开始 -> 检索
     # workflow.set_entry_point("retrieval")
     
-    # # 2. 检索 -> 规划（无条件）
-    # workflow.add_edge("retrieval", "planning")
+    # # 2. 检索 -> 格式化 -> 规划
+    # workflow.add_edge("retrieval", "format_context")
+    # workflow.add_edge("format_context", "planning")
     
     # # 3. 规划 -> 编码（无条件）
     # workflow.add_edge("planning", "coding")
@@ -128,6 +133,7 @@ def create_workflow() -> StateGraph:
     return workflow
 
 
+@traceable(name="run_workflow", tags=["workflow", "langgraph"])
 def run_workflow(user_query: str) -> dict:
     """
     运行完整工作流
@@ -160,7 +166,12 @@ def run_workflow(user_query: str) -> dict:
     }
     
     # TODO: 执行工作流
-    result = app.invoke(initial_state)
+    invoke_config = {
+        "run_name": "MideaWorkflow",
+        "tags": ["workflow", "langgraph"],
+        "metadata": {"user_query": user_query},
+    }
+    result = app.invoke(initial_state, config=invoke_config)
     
     # 示例返回（模拟执行）
     # result = {
@@ -183,34 +194,149 @@ def run_workflow(user_query: str) -> dict:
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("KONG CUBE 智能组态生成系统 - LangGraph 工作流")
+    print("KONG CUBE 智能组态生成系统 - 检索智能体测试")
     print("=" * 60)
     
-    # 测试运行
-    test_query = "计算夏季主机初始开启数量，需要手自动切换功能"
+    # # 创建检索智能体
+    # from agents.retrieval_agent import RetrievalAgent
+    # retrieval_agent = RetrievalAgent()
     
+    # # 检查知识库是否已加载
+    # if retrieval_agent.collection.count() == 0:
+    #     print("\n⚠️  知识库为空，请先运行: python init_knowledge_base.py")
+    #     print("提示：这将加载所有模块定义到向量数据库\n")
+    # else:
+    #     print(f"\n✅ 知识库已加载，包含 {retrieval_agent.collection.count()} 个模块\n")
+    
+    # # 测试查询
+    # # test_queries = [
+    # #     "计算夏季主机初始开启数量，需要手自动切换功能",
+    # #     "我需要比较两个温度值，判断是否超过阈值",
+    # #     "读取温度传感器的数据",
+    # #     "实现一个定时器，每隔10秒触发一次",
+    # #     "对输入值进行线性变换，转换成百分比"
+    # # ]
+    # test_queries = [      
+    #     "我需要比较两个温度值，判断是否超过阈值",
+    # ]
+    
+    # print("开始测试检索功能:\n")
+    # print("-" * 60)
+    
+    # for i, query in enumerate(test_queries, 1):
+    #     print(f"\n测试 {i}: {query}")
+        
+    #     # 执行检索
+    #     context = retrieval_agent.retrieve(query, top_k=10)
+        
+    #     # 显示结果
+    #     if context['relevant_nodes']:
+    #         print(f"\n找到 {len(context['relevant_nodes'])} 个相关模块:")
+    #         for node in context['relevant_nodes']:
+    #             print(f"\n  [{node['rank']}] {node['name']} (类型: {node['module_type']})")
+    #             print(f"      分类: {node['category']}")
+    #             print(f"      相似度: {node['similarity_score']:.3f}")
+    #             print(f"      描述: {node['description'][:80]}...")
+    #     else:
+    #         print("\n  ❌ 未找到相关模块")
+        
+    #     print("\n" + "-" * 60)
+    
+    # 测试完整工作流
+    print("\n\n测试完整工作流调用:")
+    print("=" * 60)
+    
+    test_query = "设计一个计算模块，计算公式是 5.65 * (输入A+输入B+输入C+输入D) * 输入E*输入F / 4.12"
     print(f"\n用户需求: {test_query}\n")
     
-    # TODO: 取消注释以实际运行
     result = run_workflow(test_query)
-    print(f"生成结果: {result}")
     
+    # 显示原始检索结果
+    if result.get("retrieval_context"):
+        ctx = result["retrieval_context"]
+        print(f"\n📊 检索结果摘要:")
+        print(f"  - 查询: {ctx['query']}")
+        print(f"  - 找到模块数: {ctx['metadata']['retrieved_count']}")
+        print(f"  - 平均置信度: {ctx['metadata']['avg_confidence_score']:.3f}")
+        
+        if ctx['relevant_nodes']:
+            print(f"\n  最相关的模块:")
+            for node in ctx['relevant_nodes'][:3]:
+                print(f"    • {node['name']} ({node['module_type']}) - {node['similarity_score']:.3f}")
     
-    # print("\n注意: 完整运行需要：")
-    # print("1. 配置 .env 文件中的 API 密钥")
-    # print("2. 安装所有依赖: pip install -r requirements.txt")
-    # print("3. 初始化向量数据库: python -m tools.init_vectordb")
+    # 显示规划结果
+    if result.get("execution_plan"):
+        plan = result["execution_plan"]
+        print(f"\n\n{'=' * 60}")
+        print("🎯 规划智能体输出:")
+        print("=" * 60)
+        print(f"\n目标: {plan.get('goal', 'N/A')}")
+        
+        nodes = plan.get('nodes', [])
+        if nodes:
+            print(f"\n节点列表 ({len(nodes)} 个):")
+            for i, node in enumerate(nodes, 1):
+                print(f"\n  [{i}] {node.get('logic_id')} ({node.get('module_type')})")
+                print(f"      理由: {node.get('reasoning', 'N/A')}")
+                if node.get('parameters'):
+                    print(f"      参数: {node['parameters']}")
+        
+        connections = plan.get('connections', [])
+        if connections:
+            print(f"\n连接关系 ({len(connections)} 条):")
+            for conn in connections:
+                print(f"  {conn['from_node']}[{conn['from_port_index']}] -> {conn['to_node']}[{conn['to_port_index']}]")
     
-    # # 绘制工作流程图
-    # print("\n正在生成工作流程图...")
-    # try:
-    #     workflow = create_workflow()
-    #     app = workflow.compile()  # 必须先编译
-    #     png_data = app.get_graph().draw_mermaid_png()
-    #     with open("workflow_graph2.png", 'wb') as f:
-    #         f.write(png_data)
-    #     print("✅ 流程图已保存为 workflow_graph.png")
-    # except Exception as e:
-    #     print(f"⚠️  保存图像失败: {e}")
-    #     print("提示: 可能需要安装 pygraphviz 或使用在线 Mermaid 渲染器") 
+    # 显示编码结果
+    if result.get("generated_code"):
+        print(f"\n\n{'=' * 60}")
+        print("🔧 编码智能体输出:")
+        print("=" * 60)
+        
+        json_code = result["generated_code"]
+        print(f"\nJSON 文件预览（前 500 字符）:")
+        print(json_code[:500])
+        if len(json_code) > 500:
+            print(f"\n... (总计 {len(json_code)} 字符)")
+        
+        # 保存到文件
+        import os
+        from utils.time_utils import generate_output_filename
+        
+        # 创建输出目录
+        output_dir = "generated_flow"
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # 生成带时间戳的文件名
+        output_filename = generate_output_filename(prefix="模块", ext="json")
+        output_file = os.path.join(output_dir, output_filename)
+        
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(json_code)
+        
+        abs_path = os.path.abspath(output_file)
+        print(f"\n✅ JSON 已保存到: {abs_path}")
+
+    # 保存工作流完整输出到 outputs 目录
+    outputs_dir = "outputs"
+    os.makedirs(outputs_dir, exist_ok=True)
+    workflow_output_file = os.path.join(outputs_dir, "workflow_result.json")
+    
+    # 序列化处理：确保所有对象都可序列化
+    import json
+    def default_serializer(obj):
+        if hasattr(obj, '__dict__'):
+            return obj.__dict__
+        return str(obj)
+
+    try:
+        with open(workflow_output_file, 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2, default=default_serializer)
+        print(f"\n✅ 工作流完整状态已保存到: {os.path.abspath(workflow_output_file)}")
+    except Exception as e:
+        print(f"\n❌ 保存工作流输出失败: {e}")
+    
+    print("\n" + "=" * 60)
+    print("测试完成！")
+    print("=" * 60) 
 
