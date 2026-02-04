@@ -96,8 +96,10 @@ def build_reverse_connections(connections: List[Dict], id_map: Dict[str, str]) -
     """
     构建反向连接索引（用于填充 wires 字段）
     
-    平台的 wires 记录上游来源，格式为：
-    wires[input_port_index] = [{"id": upstream_uuid, "port": upstream_port_index}]
+    平台的 wires 格式：
+    wires[input_port_index] = [{"id": upstream_uuid, "port": upstream_output_port}]
+    
+    即：wires 记录的是当前节点的每个输入端口连接到哪个上游节点的输出端口。
     
     Args:
         connections: 规划智能体的连接列表
@@ -135,7 +137,8 @@ def fill_template(template: Dict[str, Any],
                   real_id: str,
                   flow_id: str,
                   coords: Dict[str, int],
-                  wires: List[List[Dict]]) -> Dict[str, Any]:
+                  wires: List[List[Dict]],
+                  module_name: str = "") -> Dict[str, Any]:
     """
     填充模板，替换占位符并注入参数
     
@@ -146,6 +149,7 @@ def fill_template(template: Dict[str, Any],
         flow_id: 流程 ID
         coords: 坐标信息 {x, y}
         wires: 构建好的 wires 数组
+        module_name: 模块原始名称（如"加法运算"）
         
     Returns:
         填充后的完整节点 JSON
@@ -172,9 +176,10 @@ def fill_template(template: Dict[str, Any],
     
     # 3. 处理 name 字段
     if 'name' in result:
-        # 如果用户没有指定 name，使用 reasoning 作为名称
+        # 优先使用规划参数中的 name，其次使用模块原始名称
         if 'name' not in planned_params:
-            result['name'] = node.get('reasoning', result.get('type', '未命名'))[:50]
+            result['name'] = module_name if module_name else result.get('type', '未命名')
+            # result['name'] = node.get('reasoning', result.get('type', '未命名'))[:50]
     
     # 4. 清理占位符（删除未替换的模板变量）
     clean_placeholders(result)

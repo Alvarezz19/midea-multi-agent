@@ -12,7 +12,8 @@ from agents.debugging_agent import DebuggingAgent
 from tools.execution_tool import ExecutionTool
 import config
 from langsmith import traceable
-
+import os
+os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
 # 定义工作流状态
 class WorkflowState(TypedDict):
@@ -64,72 +65,6 @@ def create_workflow() -> StateGraph:
     workflow.add_edge("planning", "coding")           # 规划 -> 编码
     workflow.add_edge("coding", END)                  # 编码 -> 结束（临时）
     
-    # # 1. 开始 -> 检索
-    # workflow.set_entry_point("retrieval")
-    
-    # # 2. 检索 -> 格式化 -> 规划
-    # workflow.add_edge("retrieval", "format_context")
-    # workflow.add_edge("format_context", "planning")
-    
-    # # 3. 规划 -> 编码（无条件）
-    # workflow.add_edge("planning", "coding")
-    
-    # # 4. 编码 -> 执行（无条件）
-    # workflow.add_edge("coding", "execution")
-    
-    # # 5. 执行 -> 验证 OR 调试（条件边缘）
-    # def route_after_execution(state: WorkflowState) -> Literal["validation", "debugging"]:
-    #     """根据执行结果决定下一步"""
-    #     if state["execution_result"]["success"]:
-    #         return "validation"
-    #     else:
-    #         return "debugging"
-    
-    # workflow.add_conditional_edges(
-    #     "execution",
-    #     route_after_execution,
-    #     {
-    #         "validation": "validation",
-    #         "debugging": "debugging"
-    #     }
-    # )
-    
-    # # 6. 验证 -> 结束 OR 调试（条件边缘）
-    # def route_after_validation(state: WorkflowState) -> Literal["end", "debugging"]:
-    #     """根据验证结果决定是否结束"""
-    #     if state["validation_result"]["passed"]:
-    #         return "end"
-    #     else:
-    #         return "debugging"
-    
-    # workflow.add_conditional_edges(
-    #     "validation",
-    #     route_after_validation,
-    #     {
-    #         "end": END,
-    #         "debugging": "debugging"
-    #     }
-    # )
-    
-    # # 7. 调试 -> 执行 OR 结束（条件边缘，形成闭环）
-    # def route_after_debugging(state: WorkflowState) -> Literal["execution", "end"]:
-    #     """根据重试次数决定是否继续"""
-    #     if state["retry_count"] >= config.MAX_RETRY_TIMES:
-    #         # 超过最大重试次数，强制结束
-    #         return "end"
-    #     else:
-    #         # 重新执行修正后的代码
-    #         return "execution"
-    
-    # workflow.add_conditional_edges(
-    #     "debugging",
-    #     route_after_debugging,
-    #     {
-    #         "execution": "execution",
-    #         "end": END
-    #     }
-    # )
-    
     return workflow
 
 
@@ -172,22 +107,7 @@ def run_workflow(user_query: str) -> dict:
         "metadata": {"user_query": user_query},
     }
     result = app.invoke(initial_state, config=invoke_config)
-    
-    # 示例返回（模拟执行）
-    # result = {
-    #     "success": True,
-    #     "final_output": {
-    #         "version": "1.0",
-    #         "nodes": [],
-    #         "wires": []
-    #     },
-    #     "metadata": {
-    #         "total_steps": 5,
-    #         "retry_count": 0,
-    #         "execution_time": "2.3s"
-    #     }
-    # }
-    
+
     return result
 
 
@@ -196,57 +116,12 @@ if __name__ == "__main__":
     print("=" * 60)
     print("KONG CUBE 智能组态生成系统 - 检索智能体测试")
     print("=" * 60)
-    
-    # # 创建检索智能体
-    # from agents.retrieval_agent import RetrievalAgent
-    # retrieval_agent = RetrievalAgent()
-    
-    # # 检查知识库是否已加载
-    # if retrieval_agent.collection.count() == 0:
-    #     print("\n⚠️  知识库为空，请先运行: python init_knowledge_base.py")
-    #     print("提示：这将加载所有模块定义到向量数据库\n")
-    # else:
-    #     print(f"\n✅ 知识库已加载，包含 {retrieval_agent.collection.count()} 个模块\n")
-    
-    # # 测试查询
-    # # test_queries = [
-    # #     "计算夏季主机初始开启数量，需要手自动切换功能",
-    # #     "我需要比较两个温度值，判断是否超过阈值",
-    # #     "读取温度传感器的数据",
-    # #     "实现一个定时器，每隔10秒触发一次",
-    # #     "对输入值进行线性变换，转换成百分比"
-    # # ]
-    # test_queries = [      
-    #     "我需要比较两个温度值，判断是否超过阈值",
-    # ]
-    
-    # print("开始测试检索功能:\n")
-    # print("-" * 60)
-    
-    # for i, query in enumerate(test_queries, 1):
-    #     print(f"\n测试 {i}: {query}")
-        
-    #     # 执行检索
-    #     context = retrieval_agent.retrieve(query, top_k=10)
-        
-    #     # 显示结果
-    #     if context['relevant_nodes']:
-    #         print(f"\n找到 {len(context['relevant_nodes'])} 个相关模块:")
-    #         for node in context['relevant_nodes']:
-    #             print(f"\n  [{node['rank']}] {node['name']} (类型: {node['module_type']})")
-    #             print(f"      分类: {node['category']}")
-    #             print(f"      相似度: {node['similarity_score']:.3f}")
-    #             print(f"      描述: {node['description'][:80]}...")
-    #     else:
-    #         print("\n  ❌ 未找到相关模块")
-        
-    #     print("\n" + "-" * 60)
-    
+ 
     # 测试完整工作流
     print("\n\n测试完整工作流调用:")
     print("=" * 60)
     
-    test_query = "设计一个计算模块，计算公式是 5.65 * (输入A+输入B+输入C+输入D) * 输入E*输入F / 4.12"
+    test_query = "设计一个夏季/冬季主机负荷计算模块，输入0时为夏季，输入1时为冬季，夏季主机负荷=4.18*(冷冻回水温度-冷冻供水温度)*冷冻水流量/3.6。冬季主机负荷=4.18*(冷冻供水温度-冷冻回水温度)*冷冻水流量/3.6"
     print(f"\n用户需求: {test_query}\n")
     
     result = run_workflow(test_query)
@@ -318,23 +193,23 @@ if __name__ == "__main__":
         print(f"\n✅ JSON 已保存到: {abs_path}")
 
     # 保存工作流完整输出到 outputs 目录
-    outputs_dir = "outputs"
-    os.makedirs(outputs_dir, exist_ok=True)
-    workflow_output_file = os.path.join(outputs_dir, "workflow_result.json")
+    # outputs_dir = "outputs"
+    # os.makedirs(outputs_dir, exist_ok=True)
+    # workflow_output_file = os.path.join(outputs_dir, "workflow_result.json")
     
-    # 序列化处理：确保所有对象都可序列化
-    import json
-    def default_serializer(obj):
-        if hasattr(obj, '__dict__'):
-            return obj.__dict__
-        return str(obj)
+    # # 序列化处理：确保所有对象都可序列化
+    # import json
+    # def default_serializer(obj):
+    #     if hasattr(obj, '__dict__'):
+    #         return obj.__dict__
+    #     return str(obj)
 
-    try:
-        with open(workflow_output_file, 'w', encoding='utf-8') as f:
-            json.dump(result, f, ensure_ascii=False, indent=2, default=default_serializer)
-        print(f"\n✅ 工作流完整状态已保存到: {os.path.abspath(workflow_output_file)}")
-    except Exception as e:
-        print(f"\n❌ 保存工作流输出失败: {e}")
+    # try:
+    #     with open(workflow_output_file, 'w', encoding='utf-8') as f:
+    #         json.dump(result, f, ensure_ascii=False, indent=2, default=default_serializer)
+    #     print(f"\n✅ 工作流完整状态已保存到: {os.path.abspath(workflow_output_file)}")
+    # except Exception as e:
+    #     print(f"\n❌ 保存工作流输出失败: {e}")
     
     print("\n" + "=" * 60)
     print("测试完成！")

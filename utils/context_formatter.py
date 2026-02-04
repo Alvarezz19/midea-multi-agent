@@ -26,14 +26,14 @@ def format_docs_for_planner(retrieval_context: Dict[str, Any]) -> str:
     lines = []
     
     # ========== 标题部分 ==========
-    lines.append("=" * 80)
-    lines.append("📚 知识库检索结果")
-    lines.append("=" * 80)
+    # lines.append("=" * 80)
+    lines.append("知识库检索结果")
+    # lines.append("=" * 80)
     
     # ========== 检索元信息 ==========
     metadata = retrieval_context.get('metadata', {})
-    lines.append(f"\n🔍 检索查询: {retrieval_context.get('query', 'N/A')}")
-    lines.append(f"📊 检索统计:")
+    lines.append(f"\n检索查询: {retrieval_context.get('query', 'N/A')}")
+    lines.append(f"检索统计:")
     lines.append(f"   - 找到模块数: {metadata.get('retrieved_count', 0)}")
     lines.append(f"   - 平均相似度: {metadata.get('avg_confidence_score', 0):.3f}")
     
@@ -46,8 +46,8 @@ def format_docs_for_planner(retrieval_context: Dict[str, Any]) -> str:
     lines.append("")
     
     # ========== 相关模块列表 ==========
-    lines.append("📦 相关模块清单:")
-    lines.append("-" * 80)
+    lines.append("相关模块清单:")
+    # lines.append("-" * 80)
     
     relevant_nodes = retrieval_context.get('relevant_nodes', [])
     
@@ -88,18 +88,18 @@ def format_docs_for_planner(retrieval_context: Dict[str, Any]) -> str:
         lines.append("")  # 模块之间的分隔
     
     # ========== 总结建议 ==========
-    lines.append("-" * 80)
-    lines.append("💡 规划建议:")
+    # lines.append("-" * 80)
+    lines.append("规划建议:")
     
     # 根据相似度给出建议
     top_similarity = relevant_nodes[0].get('similarity_score', 0) if relevant_nodes else 0
     
     if top_similarity > 0.8:
-        lines.append("   ✅ 发现高度匹配的模块，建议优先使用排名靠前的模块。")
+        lines.append("   发现高度匹配的模块，建议优先使用排名靠前的模块。")
     elif top_similarity > 0.6:
-        lines.append("   ⚠️  匹配度中等，建议结合多个模块或适当调整参数。")
+        lines.append("   匹配度中等，建议结合多个模块或适当调整参数。")
     else:
-        lines.append("   ⚠️  匹配度较低，可能需要组合多个基础模块实现需求。")
+        lines.append("   匹配度较低，可能需要组合多个基础模块实现需求。")
     
     # 分类统计
     categories = {}
@@ -109,9 +109,9 @@ def format_docs_for_planner(retrieval_context: Dict[str, Any]) -> str:
     
     if categories:
         cat_summary = ', '.join([f"{k}({v}个)" for k, v in categories.items()])
-        lines.append(f"   📂 模块分类分布: {cat_summary}")
+        lines.append(f"   模块分类分布: {cat_summary}")
     
-    lines.append("=" * 80)
+    # lines.append("=" * 80)
     
     return "\n".join(lines)
 

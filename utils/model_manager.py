@@ -15,13 +15,16 @@ class LLMManager:
         获取 LLM 实例
         
         Args:
-            provider: LLM 提供商 (deepseek, openai, qwen, glm)
+            provider: LLM 提供商 (deepseek, openai, qwen, glm, kimi)
             **kwargs: 额外参数
             
         Returns:
             LLM 实例
         """
         provider = provider or config.LLM_PROVIDER
+        # 清理空参数，避免覆盖默认配置
+        if kwargs.get("model") is None:
+            kwargs.pop("model", None)
         
         if config.DEBUG:
             print(f"🤖 初始化 LLM: {provider}")
@@ -34,6 +37,8 @@ class LLMManager:
             return LLMManager._get_qwen(**kwargs)
         elif provider == "glm":
             return LLMManager._get_glm(**kwargs)
+        elif provider == "kimi":
+            return LLMManager._get_kimi(**kwargs)
         else:
             raise ValueError(f"不支持的 LLM 提供商: {provider}")
     
@@ -86,6 +91,21 @@ class LLMManager:
             base_url=config.GLM_BASE_URL,
             model=kwargs.get('model', config.GLM_MODEL),
             temperature=kwargs.get('temperature', config.LLM_TEMPERATURE),
+            max_tokens=kwargs.get('max_tokens', config.LLM_MAX_TOKENS)
+        )
+
+    @staticmethod
+    def _get_kimi(**kwargs):
+        """获取 Kimi LLM（Moonshot）"""
+        from langchain_openai import ChatOpenAI
+
+        # Kimi 部分模型仅允许 temperature=1
+        kwargs.pop("temperature", None)
+        return ChatOpenAI(
+            api_key=config.KIMI_API_KEY,
+            base_url=config.KIMI_BASE_URL,
+            model=kwargs.get('model', config.KIMI_MODEL),
+            temperature=1.0,
             max_tokens=kwargs.get('max_tokens', config.LLM_MAX_TOKENS)
         )
 
@@ -217,7 +237,7 @@ def get_default_embedding(**kwargs):
 
 def list_supported_llm_providers():
     """列出支持的 LLM 提供商"""
-    return ["deepseek", "openai", "qwen", "glm"]
+    return ["deepseek", "openai", "qwen", "glm", "kimi"]
 
 
 def list_supported_embedding_providers():
