@@ -67,6 +67,7 @@ class CodingAgent:
                 print(f"\n   📐 布局完成: {len(coords_map)} 个节点定位")
             
             # --- 步骤4: 反向连线索引 ---
+            # 平台的 wires 格式是：wires[输入端口索引] = [{id: 上游节点ID, port: 上游输出端口}]
             reverse_connections = build_reverse_connections(connections, id_map)
             
             if config.DEBUG:
@@ -118,7 +119,8 @@ class CodingAgent:
                 input_count = int(planned_params.get('inputCount', 
                                   planned_params.get('inputs', template_inputs)))
                 
-                # C. 构建 wires 数组
+                # C. 构建 wires 数组（基于输入端口）
+                # wires[输入端口索引] = [{id: 上游节点ID, port: 上游输出端口}]
                 wires = []
                 node_incoming = reverse_connections.get(logic_id, {})
                 
@@ -134,6 +136,7 @@ class CodingAgent:
                 # D. 填充模板
                 real_id = id_map[logic_id]
                 coords = coords_map.get(logic_id, {'x': 0, 'y': 0})
+                module_name = module_doc.get('name', module_type)  # 获取模块原始名称
                 
                 filled_node = fill_template(
                     template=template,
@@ -141,7 +144,8 @@ class CodingAgent:
                     real_id=real_id,
                     flow_id=flow_id,
                     coords=coords,
-                    wires=wires
+                    wires=wires,
+                    module_name=module_name
                 )
                 
                 final_modules.append(filled_node)

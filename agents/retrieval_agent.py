@@ -55,6 +55,22 @@ class RetrievalAgent:
             if config.DEBUG:
                 print("📦 创建新的知识库集合")
     
+    # ==================== 相似度计算 ====================
+    
+    def _normalize_distance(self, distance: float) -> float:
+        """
+        将 L2 距离转换为相似度分数
+        
+        使用 1/(1+d) 公式，确保结果在 (0, 1] 范围内
+        
+        Args:
+            distance: L2 欧氏距离
+            
+        Returns:
+            相似度分数，范围 (0, 1]
+        """
+        return 1.0 / (1.0 + distance)
+    
     def _serialize_module_to_text(self, module_json: Dict[str, Any]) -> str:
         """
         将模块 JSON 转换为富含语义的自然语言文本块
@@ -220,7 +236,7 @@ class RetrievalAgent:
                     enhanced, top_k, category_filter, similarity_threshold
                 )
         
-        # 标准单查询检索
+        # 标准单查询检索（向量检索）
         return self._single_query_retrieve(
             query, top_k, category_filter, similarity_threshold
         )
@@ -264,8 +280,8 @@ class RetrievalAgent:
                 distances = results['distances'][0] if 'distances' in results else [0] * len(documents)
                 
                 for i, (doc, metadata, distance) in enumerate(zip(documents, metadatas, distances)):
-                    # 计算相似度分数（距离越小，相似度越高）
-                    similarity_score = 1 - distance
+                    # 计算相似度分数（使用归一化公式，确保结果在 (0, 1] 范围）
+                    similarity_score = self._normalize_distance(distance)
                     
                     # 阈值过滤
                     if similarity_score < similarity_threshold:
@@ -521,7 +537,7 @@ class RetrievalAgent:
                 
                 if config.DEBUG:
                     print(f"\n✅ 知识库加载完成！总计 {len(documents)} 个模块")
-                    print(f"   向量数据库当前包含 {self.collection.count()} 条记录\n")
+                    print(f"   向量数据库当前包含 {self.collection.count()} 条记录")
             
             except Exception as e:
                 if config.DEBUG:

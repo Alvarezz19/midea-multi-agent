@@ -51,14 +51,15 @@ class PlanIR(BaseModel):
 class PlanningAgent:
     """规划智能体"""
     
-    def __init__(self, llm_provider: Optional[str] = None):
+    def __init__(self, llm_provider: Optional[str] = None, model: Optional[str] = None):
         """初始化 LLM
         
         Args:
             llm_provider: LLM 提供商,如不指定则使用配置文件中的默认值
+            model: 指定模型名称,如不指定则使用对应提供商的默认模型
         """
         # 初始化 LLM
-        self.llm = LLMManager.get_llm(llm_provider)
+        self.llm = LLMManager.get_llm(llm_provider, model=model)
         
         # 创建提示词模板
         self.planning_prompt = self._create_planning_prompt()
@@ -66,6 +67,8 @@ class PlanningAgent:
         if config.DEBUG:
             print(f"✅ 规划智能体初始化完成")
             print(f"   LLM 提供商: {llm_provider or config.LLM_PROVIDER}")
+            if model:
+                print(f"   指定模型: {model}")
     
     def _create_planning_prompt(self) -> ChatPromptTemplate:
         """创建规划提示词模板"""
@@ -99,6 +102,7 @@ class PlanningAgent:
     {{
       "logic_id": "节点唯一ID",
       "module_type": "模块类型",
+      "name": "模块实例名称",
       "parameters": {{"参数名": "参数值"}},
       "reasoning": "选择此模块的理由"
     }}

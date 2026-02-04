@@ -6,7 +6,7 @@ load_dotenv()
 
 # ==================== LLM 配置 ====================
 # 支持的 LLM 提供商
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "deepseek")  # deepseek, openai, qwen, glm 等
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "deepseek")  # deepseek, openai, qwen, glm, kimi 等
 
 # DeepSeek 配置
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
@@ -27,6 +27,11 @@ QWEN_MODEL = os.getenv("QWEN_MODEL", "qwen-max")
 GLM_API_KEY = os.getenv("GLM_API_KEY", "")
 GLM_BASE_URL = os.getenv("GLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
 GLM_MODEL = os.getenv("GLM_MODEL", "glm-4")
+
+# Kimi 配置（Moonshot）
+KIMI_API_KEY = os.getenv("KIMI_API_KEY", "")
+KIMI_BASE_URL = os.getenv("KIMI_BASE_URL", "https://api.moonshot.cn/v1")
+KIMI_MODEL = os.getenv("KIMI_MODEL", "kimi-k2.5")
 
 # ==================== Embedding 配置 ====================
 # 支持的 Embedding 提供商
@@ -62,4 +67,4 @@ MAX_RETRY_TIMES = int(os.getenv("MAX_RETRY_TIMES", "3"))
 
 # ==================== 温度参数配置 ====================
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
-LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "2048"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "8192"))
