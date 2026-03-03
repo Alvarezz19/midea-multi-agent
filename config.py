@@ -68,3 +68,16 @@ MAX_RETRY_TIMES = int(os.getenv("MAX_RETRY_TIMES", "3"))
 # ==================== 温度参数配置 ====================
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "8192"))
+
+# ==================== 检索智能体 LLM 优化（默认关闭） ====================
+# 说明：这些开关用于在检索阶段引入可选的 LLM 查询重写/轻量重排。
+# 默认全部关闭，确保成本与延迟可控；LLM 不可用时实现必须自动兜底回退。
+RETRIEVAL_USE_LLM_REWRITE = os.getenv("RETRIEVAL_USE_LLM_REWRITE", "false").lower() == "true"
+
+# 可选：为检索优化指定独立的 provider/model；为空则复用全局 LLM_PROVIDER/默认模型
+RETRIEVAL_LLM_PROVIDER = os.getenv("RETRIEVAL_LLM_PROVIDER", "").strip()
+RETRIEVAL_LLM_MODEL = os.getenv("RETRIEVAL_LLM_MODEL", "").strip()
+
+# 预算参数（与成本/延迟强相关）
+RETRIEVAL_LLM_MAX_QUERIES = int(os.getenv("RETRIEVAL_LLM_MAX_QUERIES", "8"))
+RETRIEVAL_LLM_TIMEOUT_S = float(os.getenv("RETRIEVAL_LLM_TIMEOUT_S", "8"))

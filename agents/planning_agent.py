@@ -2,7 +2,7 @@
 规划智能体 (Planning Agent)
 职责：拥有控制逻辑专家的思维，将需求转化为逻辑步骤
 """
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Set
 from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
@@ -43,6 +43,29 @@ class PlanIR(BaseModel):
                 raise ValueError(f"连接中引用了不存在的上游节点ID: {conn.from_node}")
             if conn.to_node not in node_ids:
                 raise ValueError(f"连接中引用了不存在的下游节点ID: {conn.to_node}")
+    
+    def validate_module_types(self, available_types: Set[str]) -> List[str]:
+        """验证所有节点的 module_type 是否在可用模块白名单中
+        
+        Args:
+            available_types: 检索结果中包含的合法 module_type 集合
+            
+        Returns:
+            不合法的 module_type 列表（空列表表示全部合法）
+            
+        Raises:
+            ValueError: 当存在不合法的 module_type 时
+        """
+        invalid = []
+        for node in self.nodes:
+            if node.module_type not in available_types:
+                invalid.append(f"{node.logic_id} -> {node.module_type}")
+        if invalid:
+            raise ValueError(
+                f"以下节点使用了不在检索结果中的 module_type: {', '.join(invalid)}。"
+                f"可用类型: {sorted(available_types)}"
+            )
+        return invalid
 
 
 # ==================== 规划智能体 ====================
@@ -145,6 +168,13 @@ class PlanningAgent:
             print(f"\n🎯 规划智能体开始工作...")
             print(f"   用户需求: {user_query}")
         
+        # 提取可用 module_type 白名单（用于后续校验）
+        self._available_module_types = {
+            node.get('module_type')
+            for node in retrieval_context.get('relevant_nodes', [])
+            if node.get('module_type')
+        }
+        
         # 清洗检索上下文为轻量级文本
         slim_context = format_docs_for_planner(retrieval_context)
         
@@ -157,63 +187,97 @@ class PlanningAgent:
             slim_context=slim_context
         )
         
-        # 调用 LLM 生成 JSON 输出
+        # 调用 LLM 生成结构化输出
+        plan_ir = None
+        
+        # 主路径：Structured Output（通过 function calling 直接输出 PlanIR）
         try:
-            response = self.llm.invoke(messages)
+            structured_llm = self.llm.with_structured_output(PlanIR)
+            plan_ir = structured_llm.invoke(messages)
             
-            # 解析 JSON 字符串
-            import json
-            import re
+            if config.DEBUG:
+                print(f"   ✅ Structured Output 解析成功")
+                
+        except Exception as e:
+            if config.DEBUG:
+                print(f"   ⚠️ Structured Output 失败，回退到正则解析: {e}")
             
-            # 提取 JSON 内容(处理可能的markdown代码块)
-            content = response.content
-            json_match = re.search(r'```json\s*(.*?)\s*```', content, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(1)
-            else:
-                # 尝试直接解析
-                json_str = content.strip()
-            
-            # 解析为字典
-            plan_dict = json.loads(json_str)
-            
-            # 转换为 PlanIR 对象
-            plan_ir = PlanIR(**plan_dict)
-            
+            # 回退路径：手动正则解析
+            try:
+                plan_ir = self._fallback_parse(messages)
+            except Exception as fallback_e:
+                if config.DEBUG:
+                    print(f"\n❌ 规划失败（回退解析也失败）: {fallback_e}")
+                    import traceback
+                    traceback.print_exc()
+                return PlanIR(goal="规划失败", nodes=[], connections=[])
+        
+        # ========== 校验阶段 ==========
+        try:
             # 验证节点ID的有效性
             plan_ir.validate_ids()
             
+            # 验证 module_type 白名单
+            if self._available_module_types:
+                plan_ir.validate_module_types(self._available_module_types)
+        except ValueError as e:
             if config.DEBUG:
-                print(f"\n✅ 规划完成:")
-                print(f"   目标: {plan_ir.goal}")
-                print(f"   节点数: {len(plan_ir.nodes)}")
-                print(f"   连接数: {len(plan_ir.connections)}")
-                
-                # 显示节点列表
-                print(f"\n   节点列表:")
-                for node in plan_ir.nodes:
-                    print(f"     • {node.logic_id} ({node.module_type})")
-                
-                # 显示连接关系
-                if plan_ir.connections:
-                    print(f"\n   连接关系:")
-                    for conn in plan_ir.connections:
-                        print(f"     {conn.from_node}[{conn.from_port_index}] -> {conn.to_node}[{conn.to_port_index}]")
-            
-            return plan_ir
+                print(f"\n❌ 规划校验失败: {e}")
+            return PlanIR(goal=f"规划校验失败: {e}", nodes=[], connections=[])
         
-        except Exception as e:
-            if config.DEBUG:
-                print(f"\n❌ 规划失败: {e}")
-                import traceback
-                traceback.print_exc()
+        if config.DEBUG:
+            print(f"\n✅ 规划完成:")
+            print(f"   目标: {plan_ir.goal}")
+            print(f"   节点数: {len(plan_ir.nodes)}")
+            print(f"   连接数: {len(plan_ir.connections)}")
             
-            # 返回空规划
-            return PlanIR(
-                goal="规划失败",
-                nodes=[],
-                connections=[]
-            )
+            # 显示节点列表
+            print(f"\n   节点列表:")
+            for node in plan_ir.nodes:
+                print(f"     • {node.logic_id} ({node.module_type})")
+            
+            # 显示连接关系
+            if plan_ir.connections:
+                print(f"\n   连接关系:")
+                for conn in plan_ir.connections:
+                    print(f"     {conn.from_node}[{conn.from_port_index}] -> {conn.to_node}[{conn.to_port_index}]")
+        
+        return plan_ir
+    
+    def _fallback_parse(self, messages) -> PlanIR:
+        """
+        回退解析：当 Structured Output 不可用时，通过正则提取 JSON 手动解析
+        
+        Args:
+            messages: 已格式化的 prompt 消息列表
+            
+        Returns:
+            PlanIR: 解析后的规划中间表示
+            
+        Raises:
+            ValueError: JSON 解析或 Pydantic 校验失败时
+        """
+        import json
+        import re
+        
+        response = self.llm.invoke(messages)
+        content = response.content
+        
+        # 提取 JSON 内容（处理可能的 markdown 代码块）
+        json_match = re.search(r'```json\s*(.*?)\s*```', content, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            # 尝试直接解析
+            json_str = content.strip()
+        
+        plan_dict = json.loads(json_str)
+        plan_ir = PlanIR(**plan_dict)
+        
+        if config.DEBUG:
+            print(f"   ✅ 回退正则解析成功")
+        
+        return plan_ir
     
     def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
