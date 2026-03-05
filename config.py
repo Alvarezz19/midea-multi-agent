@@ -33,6 +33,12 @@ KIMI_API_KEY = os.getenv("KIMI_API_KEY", "")
 KIMI_BASE_URL = os.getenv("KIMI_BASE_URL", "https://api.moonshot.cn/v1")
 KIMI_MODEL = os.getenv("KIMI_MODEL", "kimi-k2.5")
 
+# # Gemini 配置
+# GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+# # 推荐使用 Google 的 OpenAI 兼容接口，可以直接复用原有的 ChatOpenAI 工具链
+# GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
+# GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+
 # ==================== Embedding 配置 ====================
 # 支持的 Embedding 提供商
 EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "bge")  # bge, openai, sentence-transformers, jina, siliconflow

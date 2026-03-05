@@ -10,7 +10,8 @@ from .coding_utils import (
     generate_short_uuid,
     topological_layout,
     build_reverse_connections,
-    fill_template
+    fill_template,
+    resolve_input_count
 )
 
 
@@ -111,13 +112,10 @@ class CodingAgent:
                 
                 # B. 确定输入端口数量
                 planned_params = node.get('parameters', {})
-                # 优先使用规划参数，回退到模板值（跳过占位符）
                 template_inputs = template.get('inputs', 0)
-                if isinstance(template_inputs, str) and '{{' in template_inputs:
-                    template_inputs = 0  # 占位符，使用默认值
-                
-                input_count = int(planned_params.get('inputCount', 
-                                  planned_params.get('inputs', template_inputs)))
+                input_count = resolve_input_count(
+                    template_inputs, planned_params, module_doc
+                )
                 
                 # C. 构建 wires 数组（基于输入端口）
                 # wires[输入端口索引] = [{id: 上游节点ID, port: 上游输出端口}]

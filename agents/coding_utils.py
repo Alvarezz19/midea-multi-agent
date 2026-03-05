@@ -1,7 +1,8 @@
 """
 编码智能体辅助工具
-包含 ID 生成、拓扑布局等功能
+包含 ID 生成、拓扑布局、输入端口解析等功能
 """
+import re
 import uuid
 from typing import List, Dict, Any, Tuple
 
@@ -9,6 +10,80 @@ from typing import List, Dict, Any, Tuple
 def generate_short_uuid() -> str:
     """生成类似 'b45d2af' 的短ID（7位）"""
     return str(uuid.uuid4()).replace('-', '')[:7]
+
+
+def _extract_placeholder_name(value: str) -> str:
+    """
+    从占位符字符串中提取参数名
+    
+    示例:
+        '{{inputsCount}}' → 'inputsCount'
+        '{{channelsPlusOne}}' → 'channelsPlusOne'
+        '非占位符' → ''
+    """
+    match = re.match(r'^\{\{(\w+)\}\}$', value.strip())
+    return match.group(1) if match else ""
+
+
+def resolve_input_count(template_inputs, planned_params: Dict[str, Any],
+                       module_doc: Dict[str, Any] = None) -> int:
+    """
+    通用地确定节点输入端口数量
+    
+    处理所有模板中 inputs 字段的命名模式:
+      A. "{{inputs}}"          → planned_params['inputs']
+      B. "{{inputCount}}"      → planned_params['inputCount']
+      C. "{{inputsCount}}"     → planned_params['inputsCount']
+      D. "{{channelsPlusOne}}" → planned_params['channels'] + 1
+      E. 固定数值              → 直接使用（规划参数可覆盖）
+    
+    Args:
+        template_inputs: 模板中 inputs 字段的原始值
+        planned_params: 规划智能体输出的参数字典
+        module_doc: 模块文档（包含 ports_definition），用于兜底计算
+        
+    Returns:
+        输入端口数量
+    """
+    # Case 1: 模板 inputs 是占位符字符串
+    if isinstance(template_inputs, str) and '{{' in template_inputs:
+        param_name = _extract_placeholder_name(template_inputs)
+        
+        if param_name:
+            # 特殊处理: channelsPlusOne → channels + 1
+            if param_name == 'channelsPlusOne':
+                channels = planned_params.get('channels', 2)
+                return int(channels) + 1
+            
+            # 通用处理: 从 planned_params 查找占位符引用的参数
+            if param_name in planned_params:
+                return int(planned_params[param_name])
+        
+        # 占位符参数未在 planned_params 中找到，尝试常见别名
+        for alias in ['inputCount', 'inputsCount', 'inputs']:
+            if alias in planned_params:
+                return int(planned_params[alias])
+    
+    # Case 2: 模板 inputs 是固定数值
+    elif isinstance(template_inputs, (int, float)):
+        # 规划参数可能覆盖了端口数量
+        for key in ['inputCount', 'inputsCount', 'inputs']:
+            if key in planned_params:
+                return int(planned_params[key])
+        return int(template_inputs)
+    
+    # Case 3: 兜底 - 从 ports_definition 计算 always 条件的端口数
+    if module_doc:
+        ports_def = module_doc.get('ports_definition', {})
+        input_ports = ports_def.get('inputs', [])
+        always_count = sum(
+            1 for p in input_ports
+            if p.get('condition', 'always') == 'always'
+        )
+        if always_count > 0:
+            return always_count
+    
+    return 0
 
 
 def topological_layout(nodes: List[Dict], connections: List[Dict]) -> Dict[str, Dict[str, int]]:
@@ -166,13 +241,36 @@ def fill_template(template: Dict[str, Any],
     
     # 2. 注入规划参数
     planned_params = node.get('parameters', {})
+
+    # 兼容规划侧输出: user_defined_name 仅作为名称来源，不写入最终 JSON
+    if "user_defined_name" in planned_params and "name" not in planned_params:
+        planned_params["name"] = planned_params["user_defined_name"]
+    
+    # 解析模板 inputs 字段的占位符，确定参数名到 inputs 的映射关系
+    template_inputs_raw = template.get('inputs')
+    inputs_param_name = None
+    if isinstance(template_inputs_raw, str) and '{{' in template_inputs_raw:
+        inputs_param_name = _extract_placeholder_name(template_inputs_raw)
     
     for key, value in planned_params.items():
-        # 特殊处理：inputCount -> inputs
-        if key == "inputCount" and "inputs" in result:
+        # user_defined_name 不进入最终平台 JSON
+        if key == "user_defined_name":
+            continue
+
+        # 通用处理：如果参数名匹配模板 inputs 占位符引用的变量名，映射到 inputs
+        if inputs_param_name and key == inputs_param_name and key != 'inputs':
+            result["inputs"] = value
+            result[key] = value  # 同时保留原参数名字段
+        # 兼容旧逻辑：inputCount -> inputs
+        elif key == "inputCount" and "inputs" in result:
             result["inputs"] = value
         else:
             result[key] = value
+    
+    # 特殊处理：channelsPlusOne 需要计算 channels + 1
+    if inputs_param_name == 'channelsPlusOne':
+        channels = planned_params.get('channels', 2)
+        result["inputs"] = int(channels) + 1
     
     # 3. 处理 name 字段
     if 'name' in result:
@@ -180,6 +278,12 @@ def fill_template(template: Dict[str, Any],
         if 'name' not in planned_params:
             result['name'] = module_name if module_name else result.get('type', '未命名')
             # result['name'] = node.get('reasoning', result.get('type', '未命名'))[:50]
+        else:
+            result['name'] = planned_params['name']
+
+    # 兜底清理：即使模板本身带该字段，也不输出
+    if 'user_defined_name' in result:
+        del result['user_defined_name']
     
     # 4. 清理占位符（删除未替换的模板变量）
     clean_placeholders(result)

@@ -227,7 +227,7 @@ class QueryProcessor:
             是否使用多查询
         """
         # 如果查询很长，或包含公式，或包含多个运算符号
-        if len(query) > 30:
+        if len(query) > 10:
             return True
         
         math_ops = QueryProcessor.detect_math_operations(query)

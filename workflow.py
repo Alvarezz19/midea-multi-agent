@@ -118,7 +118,7 @@ if __name__ == "__main__":
     print("\n\n测试完整工作流调用:")
     print("=" * 60)
     
-    test_query = "设计一个温度控制逻辑，当温度高于 26℃ 启动风机，低于 24℃ 停止风机。"
+    test_query = "设计计算模块，输入0时，公式为：4.18×(输入A-输入B-输入C-输入D)×输入E÷3.6。输入1时，公式为：4.18×(输入A-输入B-输入C+输入D)×输入E÷3.6"
     print(f"\n用户需求: {test_query}\n")
     
     result = run_workflow(test_query)
