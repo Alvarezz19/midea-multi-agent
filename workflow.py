@@ -114,14 +114,11 @@ def run_workflow(user_query: str) -> dict:
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("KONG CUBE 智能组态生成系统 - 检索智能体测试")
-    print("=" * 60)
- 
     # 测试完整工作流
     print("\n\n测试完整工作流调用:")
     print("=" * 60)
     
-    test_query = "设计一个夏季/冬季主机负荷计算模块，输入0时为夏季，输入1时为冬季，夏季主机负荷=4.18*(冷冻回水温度-冷冻供水温度)*冷冻水流量/3.6。冬季主机负荷=4.18*(冷冻供水温度-冷冻回水温度)*冷冻水流量/3.6"
+    test_query = "设计计算模块，输入0时，公式为：4.18×(输入A-输入B-输入C-输入D)×输入E÷3.6。输入1时，公式为：4.18×(输入A-输入B-输入C+输入D)×输入E÷3.6"
     print(f"\n用户需求: {test_query}\n")
     
     result = run_workflow(test_query)
