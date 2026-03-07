@@ -5,7 +5,86 @@
 from typing import Dict, Any, List
 
 
-def format_docs_for_planner(retrieval_context: Dict[str, Any]) -> str:
+def _port_label(port: Dict[str, Any]) -> str:
+    return port.get('label') or port.get('name') or '未命名'
+
+
+def _summarize_port_overview(ports_def: Dict[str, Any]) -> str:
+    input_ports = ports_def.get('inputs', [])
+    output_ports = ports_def.get('outputs', [])
+    return f"{len(input_ports)}入 -> {len(output_ports)}出"
+
+
+def _summarize_param_keys(params_schema: Dict[str, Any]) -> str:
+    if not params_schema:
+        return "无"
+    return ', '.join(params_schema.keys())
+
+
+def _append_detail_block(lines: List[str], node: Dict[str, Any]) -> None:
+    params_schema = node.get('parameters_schema', {})
+    if params_schema:
+        lines.append("    参数定义:")
+        for key, info in params_schema.items():
+            p_type = info.get('type', 'unknown')
+            p_default = info.get('default', 'N/A')
+            p_desc = info.get('description', '')
+            constraint_parts = []
+            if 'minimum' in info:
+                constraint_parts.append(f"最小={info['minimum']}")
+            if 'maximum' in info:
+                constraint_parts.append(f"最大={info['maximum']}")
+            if 'enum' in info:
+                constraint_parts.append(f"可选={info['enum']}")
+            constraint_str = f" [{', '.join(constraint_parts)}]" if constraint_parts else ""
+            lines.append(f"       • {key} ({p_type}, 默认={p_default}){constraint_str}: {p_desc}")
+
+    ports_def = node.get('ports_definition', {})
+    if ports_def:
+        input_ports = ports_def.get('inputs', [])
+        output_ports = ports_def.get('outputs', [])
+        if input_ports:
+            lines.append("    输入端口:")
+            for port in input_ports:
+                p_idx = port.get('index', 0)
+                p_label = _port_label(port)
+                p_type = port.get('type', 'any')
+                p_desc = port.get('description', '')
+                p_cond = port.get('condition', 'always')
+                cond_str = f" (条件: {p_cond})" if p_cond != 'always' else ""
+                lines.append(f"       [{p_idx}] {p_label} ({p_type}){cond_str}: {p_desc}")
+        if output_ports:
+            lines.append("    输出端口:")
+            for port in output_ports:
+                p_idx = port.get('index', 0)
+                p_label = _port_label(port)
+                p_type = port.get('type', 'any')
+                p_desc = port.get('description', '')
+                p_cond = port.get('condition', 'always')
+                cond_str = f" (条件: {p_cond})" if p_cond != 'always' else ""
+                lines.append(f"       [{p_idx}] {p_label} ({p_type}){cond_str}: {p_desc}")
+
+    usage_guides = node.get('usage_guides', [])
+    if usage_guides:
+        lines.append("    适用场景:")
+        for guide in usage_guides:
+            lines.append(f"       • {guide}")
+
+
+def _append_summary_block(lines: List[str], node: Dict[str, Any]) -> None:
+    params_schema = node.get('parameters_schema', {})
+    ports_def = node.get('ports_definition', {})
+    description = node.get('description', '无描述')
+    lines.append(f"    功能: {description}")
+    lines.append(f"    参数键名: {_summarize_param_keys(params_schema)}")
+    lines.append(f"    端口概览: {_summarize_port_overview(ports_def)}")
+
+
+def format_docs_for_planner(
+    retrieval_context: Dict[str, Any],
+    detail_top_n: int = 5,
+    max_modules: int = 8,
+) -> str:
     """
     将检索智能体返回的完整上下文格式化为规划智能体友好的文本格式
     
@@ -17,6 +96,8 @@ def format_docs_for_planner(retrieval_context: Dict[str, Any]) -> str:
     
     Args:
         retrieval_context: 检索智能体返回的完整上下文字典
+        detail_top_n: 前 N 个模块输出详细信息，其余输出摘要信息
+        max_modules: 最多传递给规划智能体的模块数量
         
     Returns:
         格式化后的字符串，适合作为规划智能体的输入
@@ -50,75 +131,25 @@ def format_docs_for_planner(retrieval_context: Dict[str, Any]) -> str:
     lines.append("相关模块清单:")
     # lines.append("-" * 80)
     
-    relevant_nodes = retrieval_context.get('relevant_nodes', [])
+    relevant_nodes = retrieval_context.get('relevant_nodes', [])[:max_modules]
     
-    for node in relevant_nodes:
+    for index, node in enumerate(relevant_nodes, start=1):
         rank = node.get('rank', 0)
         name = node.get('name', 'Unknown')
         module_type = node.get('module_type', 'Unknown')
         category = node.get('category', 'Unknown')
         similarity = node.get('similarity_score', 0)
-        description = node.get('description', '无描述')
         
         # 模块标题
         lines.append(f"\n[{rank}] {name}")
         lines.append(f"    类型: {module_type}")
         lines.append(f"    分类: {category}")
         lines.append(f"    相似度: {similarity:.3f}")
-        
-        # 功能描述（核心信息）
-        lines.append(f"    功能: {description}")
-        
-        # 参数定义（精简版：键名、类型、默认值 —— 确保 LLM 使用正确的键名）
-        params_schema = node.get('parameters_schema', {})
-        if params_schema:
-            lines.append(f"    参数定义:")
-            for key, info in params_schema.items():
-                p_type = info.get('type', 'unknown')
-                p_default = info.get('default', 'N/A')
-                p_desc = info.get('description', '')
-                constraint_parts = []
-                if 'minimum' in info:
-                    constraint_parts.append(f"最小={info['minimum']}")
-                if 'maximum' in info:
-                    constraint_parts.append(f"最大={info['maximum']}")
-                if 'enum' in info:
-                    constraint_parts.append(f"可选={info['enum']}")
-                constraint_str = f" [{', '.join(constraint_parts)}]" if constraint_parts else ""
-                lines.append(f"       • {key} ({p_type}, 默认={p_default}){constraint_str}: {p_desc}")
-        
-        # 端口定义（精简版：索引、标签、类型 —— 确保 LLM 使用正确的端口索引）
-        ports_def = node.get('ports_definition', {})
-        if ports_def:
-            input_ports = ports_def.get('inputs', [])
-            output_ports = ports_def.get('outputs', [])
-            if input_ports:
-                lines.append(f"    输入端口:")
-                for port in input_ports:
-                    p_idx = port.get('index', 0)
-                    p_label = port.get('label', '未命名')
-                    p_type = port.get('type', 'any')
-                    p_desc = port.get('description', '')
-                    p_cond = port.get('condition', 'always')
-                    cond_str = f" (条件: {p_cond})" if p_cond != 'always' else ""
-                    lines.append(f"       [{p_idx}] {p_label} ({p_type}){cond_str}: {p_desc}")
-            if output_ports:
-                lines.append(f"    输出端口:")
-                for port in output_ports:
-                    p_idx = port.get('index', 0)
-                    p_label = port.get('label', '未命名')
-                    p_type = port.get('type', 'any')
-                    p_desc = port.get('description', '')
-                    p_cond = port.get('condition', 'always')
-                    cond_str = f" (条件: {p_cond})" if p_cond != 'always' else ""
-                    lines.append(f"       [{p_idx}] {p_label} ({p_type}){cond_str}: {p_desc}")
-        
-        # 使用场景指南（最重要的规划依据）
-        usage_guides = node.get('usage_guides', [])
-        if usage_guides:
-            lines.append(f"    适用场景:")
-            for guide in usage_guides:
-                lines.append(f"       • {guide}")
+
+        if index <= detail_top_n:
+            _append_detail_block(lines, node)
+        else:
+            _append_summary_block(lines, node)
         
         # 如果有匹配的查询变体（多查询策略）
         matched_query = node.get('matched_query')

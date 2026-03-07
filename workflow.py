@@ -2,17 +2,14 @@
 LangGraph 工作流编排
 定义 6 个智能体的协作流程（DAG + 条件路由）
 """
-from typing import TypedDict, Literal
+from typing import TypedDict
 from langgraph.graph import StateGraph, END
 from agents.retrieval_agent import RetrievalAgent
 from agents.planning_agent import PlanningAgent
 from agents.coding_agent import CodingAgent
-from agents.validation_agent import ValidationAgent
-from agents.debugging_agent import DebuggingAgent
-from tools.execution_tool import ExecutionTool
-import config
 from langsmith import traceable
 import os
+
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
 # 定义工作流状态
@@ -43,20 +40,14 @@ def create_workflow() -> StateGraph:
     retrieval_agent = RetrievalAgent()
     planning_agent = PlanningAgent()  # 启用规划智能体
     coding_agent = CodingAgent()      # 启用编码智能体
-    # validation_agent = ValidationAgent()
-    # debugging_agent = DebuggingAgent()
-    # execution_tool = ExecutionTool()
     
     # 创建状态图
     workflow = StateGraph(WorkflowState)
     
     # ========== 添加节点 ==========
     workflow.add_node("retrieval", retrieval_agent)
-    workflow.add_node("planning", planning_agent)  # 启用规划节点
-    workflow.add_node("coding", coding_agent)     # 启用编码节点
-    # workflow.add_node("execution", execution_tool)
-    # workflow.add_node("validation", validation_agent)
-    # workflow.add_node("debugging", debugging_agent)
+    workflow.add_node("planning", planning_agent)
+    workflow.add_node("coding", coding_agent)
     
     # ========== 定义边缘（流程）==========
 
@@ -106,6 +97,7 @@ def run_workflow(user_query: str) -> dict:
         "tags": ["workflow", "langgraph"],
         "metadata": {"user_query": user_query},
     }
+
     result = app.invoke(initial_state, config=invoke_config)
 
     return result
@@ -118,7 +110,7 @@ if __name__ == "__main__":
     print("\n\n测试完整工作流调用:")
     print("=" * 60)
     
-    test_query = "设计计算模块，输入0时，公式为：4.18×(输入A-输入B-输入C-输入D)×输入E÷3.6。输入1时，公式为：4.18×(输入A-输入B-输入C+输入D)×输入E÷3.6"
+    test_query = "计算主机负荷，公式为 主机负荷 = 4.18*(冷冻回水温度 - 冷冻供水温度)*冷冻水流量/3.6 。其中 冷冻回水温度、冷冻供水温度、冷冻水流量均为物理输入，主机负荷为物理输出。"
     print(f"\n用户需求: {test_query}\n")
     
     result = run_workflow(test_query)
@@ -189,25 +181,6 @@ if __name__ == "__main__":
         abs_path = os.path.abspath(output_file)
         print(f"\n✅ JSON 已保存到: {abs_path}")
 
-    # 保存工作流完整输出到 outputs 目录
-    # outputs_dir = "outputs"
-    # os.makedirs(outputs_dir, exist_ok=True)
-    # workflow_output_file = os.path.join(outputs_dir, "workflow_result.json")
-    
-    # # 序列化处理：确保所有对象都可序列化
-    # import json
-    # def default_serializer(obj):
-    #     if hasattr(obj, '__dict__'):
-    #         return obj.__dict__
-    #     return str(obj)
-
-    # try:
-    #     with open(workflow_output_file, 'w', encoding='utf-8') as f:
-    #         json.dump(result, f, ensure_ascii=False, indent=2, default=default_serializer)
-    #     print(f"\n✅ 工作流完整状态已保存到: {os.path.abspath(workflow_output_file)}")
-    # except Exception as e:
-    #     print(f"\n❌ 保存工作流输出失败: {e}")
-    
     print("\n" + "=" * 60)
     print("测试完成！")
     print("=" * 60) 

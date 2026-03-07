@@ -2,9 +2,10 @@
 规划智能体 (Planning Agent)
 职责：拥有控制逻辑专家的思维，将需求转化为逻辑步骤
 """
+import json
+import re
 from typing import Dict, List, Any, Optional, Set
 from pydantic import BaseModel, Field
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 import config
 from utils.context_formatter import format_docs_for_planner
@@ -81,17 +82,25 @@ class PlanningAgent:
             llm_provider: LLM 提供商,如不指定则使用配置文件中的默认值
             model: 指定模型名称,如不指定则使用对应提供商的默认模型
         """
+        provider = llm_provider or config.PLANNING_LLM_PROVIDER or config.LLM_PROVIDER
+        model_name = model or config.PLANNING_LLM_MODEL or None
+
         # 初始化 LLM
-        self.llm = LLMManager.get_llm(llm_provider, model=model)
+        self.llm = LLMManager.get_llm(
+            provider,
+            model=model_name,
+            temperature=config.PLANNING_LLM_TEMPERATURE,
+        )
         
         # 创建提示词模板
         self.planning_prompt = self._create_planning_prompt()
         
         if config.DEBUG:
             print(f"✅ 规划智能体初始化完成")
-            print(f"   LLM 提供商: {llm_provider or config.LLM_PROVIDER}")
-            if model:
-                print(f"   指定模型: {model}")
+            print(f"   LLM 提供商: {provider}")
+            print(f"   温度: {config.PLANNING_LLM_TEMPERATURE}")
+            if model_name:
+                print(f"   指定模型: {model_name}")
     
     def _create_planning_prompt(self) -> ChatPromptTemplate:
         """创建规划提示词模板"""
@@ -152,6 +161,71 @@ class PlanningAgent:
             ("system", system_prompt),
             ("user", user_template)
         ])
+
+    def _build_retry_messages(
+        self,
+        user_query: str,
+        slim_context: str,
+        error_message: str,
+        previous_output: str,
+    ):
+        """构建带错误反馈的重试消息"""
+        retry_prompt = ChatPromptTemplate.from_messages([
+            (
+                "system",
+                """
+你是一个工业自动化控制系统的逻辑规划专家。你需要修正上一版规划输出中的错误。
+
+请严格遵守以下规则：
+1. 只能使用【可用模块列表】中的 module_type。
+2. parameters 中的键名必须与模块定义完全一致。
+3. 连接中的节点 ID 必须全部存在。
+4. 端口索引必须使用 0-based。
+5. 输出必须是完整、可解析的 JSON，不要添加解释性文本。
+
+【可用模块列表】
+{slim_context}
+""",
+            ),
+            (
+                "user",
+                """用户需求：{user_query}
+
+你之前的规划输出存在以下问题：
+{error_message}
+
+你之前的输出：
+{previous_output}
+
+请修正后重新输出完整 JSON。""",
+            ),
+        ])
+
+        return retry_prompt.format_messages(
+            user_query=user_query,
+            slim_context=slim_context,
+            error_message=error_message,
+            previous_output=previous_output,
+        )
+
+    def _generate_plan(self, messages) -> PlanIR:
+        """统一处理 structured output 和回退解析"""
+        try:
+            structured_llm = self.llm.with_structured_output(PlanIR)
+            plan_ir = structured_llm.invoke(messages)
+            if config.DEBUG:
+                print("   ✅ Structured Output 解析成功")
+            return plan_ir
+        except Exception as e:
+            if config.DEBUG:
+                print(f"   ⚠️ Structured Output 失败，回退到正则解析: {e}")
+            return self._fallback_parse(messages)
+
+    def _validate_plan(self, plan_ir: PlanIR) -> None:
+        """统一校验规划结果"""
+        plan_ir.validate_ids()
+        if self._available_module_types:
+            plan_ir.validate_module_types(self._available_module_types)
     
     def plan(self, user_query: str, retrieval_context: Dict[str, Any]) -> PlanIR:
         """
@@ -176,7 +250,11 @@ class PlanningAgent:
         }
         
         # 清洗检索上下文为轻量级文本
-        slim_context = format_docs_for_planner(retrieval_context)
+        slim_context = format_docs_for_planner(
+            retrieval_context,
+            detail_top_n=config.PLANNING_CONTEXT_DETAIL_TOP_N,
+            max_modules=config.PLANNING_CONTEXT_MAX_MODULES,
+        )
         
         if config.DEBUG:
             print(f"   清洗后上下文大小: {len(slim_context)} 字符")
@@ -186,44 +264,40 @@ class PlanningAgent:
             user_query=user_query,
             slim_context=slim_context
         )
-        
-        # 调用 LLM 生成结构化输出
+
         plan_ir = None
-        
-        # 主路径：Structured Output（通过 function calling 直接输出 PlanIR）
-        try:
-            structured_llm = self.llm.with_structured_output(PlanIR)
-            plan_ir = structured_llm.invoke(messages)
-            
-            if config.DEBUG:
-                print(f"   ✅ Structured Output 解析成功")
-                
-        except Exception as e:
-            if config.DEBUG:
-                print(f"   ⚠️ Structured Output 失败，回退到正则解析: {e}")
-            
-            # 回退路径：手动正则解析
+        previous_output = ""
+        last_error = None
+        max_attempts = max(1, config.PLANNING_MAX_RETRIES)
+
+        for attempt in range(1, max_attempts + 1):
             try:
-                plan_ir = self._fallback_parse(messages)
-            except Exception as fallback_e:
+                current_messages = messages
+                if attempt > 1 and last_error is not None:
+                    current_messages = self._build_retry_messages(
+                        user_query=user_query,
+                        slim_context=slim_context,
+                        error_message=last_error,
+                        previous_output=previous_output,
+                    )
+                    if config.DEBUG:
+                        print(f"   🔁 开始第 {attempt} 次规划修正")
+
+                plan_ir = self._generate_plan(current_messages)
+                self._validate_plan(plan_ir)
+                break
+            except Exception as error:
+                last_error = str(error)
+                if 'plan_ir' in locals() and isinstance(plan_ir, PlanIR):
+                    previous_output = plan_ir.model_dump_json(ensure_ascii=False, indent=2)
+
+                if attempt >= max_attempts:
+                    if config.DEBUG:
+                        print(f"\n❌ 规划失败: {error}")
+                    return PlanIR(goal=f"规划失败: {error}", nodes=[], connections=[])
+
                 if config.DEBUG:
-                    print(f"\n❌ 规划失败（回退解析也失败）: {fallback_e}")
-                    import traceback
-                    traceback.print_exc()
-                return PlanIR(goal="规划失败", nodes=[], connections=[])
-        
-        # ========== 校验阶段 ==========
-        try:
-            # 验证节点ID的有效性
-            plan_ir.validate_ids()
-            
-            # 验证 module_type 白名单
-            if self._available_module_types:
-                plan_ir.validate_module_types(self._available_module_types)
-        except ValueError as e:
-            if config.DEBUG:
-                print(f"\n❌ 规划校验失败: {e}")
-            return PlanIR(goal=f"规划校验失败: {e}", nodes=[], connections=[])
+                    print(f"   ⚠️ 第 {attempt} 次规划失败，准备重试: {error}")
         
         if config.DEBUG:
             print(f"\n✅ 规划完成:")
@@ -257,9 +331,6 @@ class PlanningAgent:
         Raises:
             ValueError: JSON 解析或 Pydantic 校验失败时
         """
-        import json
-        import re
-        
         response = self.llm.invoke(messages)
         content = response.content
         

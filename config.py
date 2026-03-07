@@ -75,6 +75,14 @@ MAX_RETRY_TIMES = int(os.getenv("MAX_RETRY_TIMES", "3"))
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "8192"))
 
+# ==================== 规划智能体配置 ====================
+PLANNING_LLM_PROVIDER = os.getenv("PLANNING_LLM_PROVIDER", "").strip()
+PLANNING_LLM_MODEL = os.getenv("PLANNING_LLM_MODEL", "").strip()
+PLANNING_LLM_TEMPERATURE = float(os.getenv("PLANNING_LLM_TEMPERATURE", "0.7"))
+PLANNING_MAX_RETRIES = int(os.getenv("PLANNING_MAX_RETRIES", "2"))
+PLANNING_CONTEXT_DETAIL_TOP_N = int(os.getenv("PLANNING_CONTEXT_DETAIL_TOP_N", "5"))
+PLANNING_CONTEXT_MAX_MODULES = int(os.getenv("PLANNING_CONTEXT_MAX_MODULES", "8"))
+
 # ==================== 检索智能体 LLM 优化（默认关闭） ====================
 # 说明：这些开关用于在检索阶段引入可选的 LLM 查询重写/轻量重排。
 # 默认全部关闭，确保成本与延迟可控；LLM 不可用时实现必须自动兜底回退。
