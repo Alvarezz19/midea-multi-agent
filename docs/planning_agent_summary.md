@@ -1,5 +1,7 @@
 # 规划智能体 (Planning Agent) 完整工作流程总结
 
+> 最后更新: 2026-03-06
+
 ## 1. 概述
 
 **规划智能体 (Planning Agent)** 是 LangGraph 工作流中的第二个节点，位于检索智能体（Retrieval Agent）和编码智能体（Coding Agent）之间。它扮演**工业自动化控制系统逻辑规划专家**的角色，核心职责是：将用户的自然语言需求（如数学公式、控制逻辑描述）转化为**结构化的逻辑控制拓扑图**（中间表示 IR），供下游编码智能体将其翻译为最终的 JSON 组态文件。
@@ -48,6 +50,8 @@ workflow.add_edge("coding", END)              # 编码 → 结束
 | `module_type` | `str` | 对应知识库中的模块类型（如 `constInput`、`multiply`、`subtract`、`divide`） |
 | `parameters` | `Dict[str, Any]` | 该模块实例的配置参数（如 `{"fixedValue": 4.18, "inputs": 3}`） |
 | `reasoning` | `str` | LLM 选择此模块的理由说明 |
+
+注意：Prompt 示例中要求模型输出 `name` 字段，但当前 `PlanNode` 数据模型只保留 `logic_id`、`module_type`、`parameters`、`reasoning` 四个字段。即使模型额外返回 `name`，它也不会成为最终 `execution_plan` 契约的一部分。
 
 ### 3.2 PlanConnection（连接关系）
 
@@ -130,8 +134,13 @@ workflow.add_edge("coding", END)              # 编码 → 结束
 └──────────────┬──────────────────┘
                ↓
 ┌─────────────────────────────────┐
-│ 6. 返回 PlanIR                   │
-│    (校验失败则返回空规划)         │
+│ 6. 失败反馈重试                  │
+│    将错误原因和上次输出回灌给LLM  │
+└──────────────┬──────────────────┘
+               ↓
+┌─────────────────────────────────┐
+│ 7. 返回 PlanIR                   │
+│    超过上限后返回失败结果         │
 └─────────────────────────────────┘
 ```
 
@@ -157,7 +166,8 @@ self._available_module_types = {
 清洗策略：
 - **保留的信息**：模块名称、`module_type`、分类、功能描述、精简的参数定义（键名/类型/默认值/约束）、端口定义（索引/标签/类型）、使用场景指南
 - **剔除的信息**：`template_json`（大块模板）、完整 `keywords` 列表、相似度分数细节
-- **附加信息**：检索元数据（查询、匹配数量、平均相似度）、规划建议（基于相似度高低给出策略提示）
+- **附加信息**：检索元数据（查询、匹配数量、平均相似度、意图、检测到的运算）、规划建议（基于相似度高低给出策略提示）
+- **分层展示**：前 `PLANNING_CONTEXT_DETAIL_TOP_N` 个模块输出详细信息，其余模块输出摘要；总模块数受 `PLANNING_CONTEXT_MAX_MODULES` 限制
 
 清洗后的文本格式示例：
 ```
@@ -219,19 +229,51 @@ self._available_module_types = {
   plan_ir = PlanIR(**plan_dict)
   ```
 
-- **兜底处理**：如果两条路径都失败，返回一个空的 `PlanIR(goal="规划失败", nodes=[], connections=[])`。
-
 **⑤ 校验阶段**
 
 对 LLM 生成的 `PlanIR` 进行两层校验：
 
 1. **节点 ID 一致性校验 (`validate_ids()`)**：
-   遍历所有 `connections`，确保 `from_node` 和 `to_node` 引用的 `logic_id` 都在 `nodes` 列表中定义过。防止 LLM 生成悬空连接。
+  遍历所有 `connections`，确保 `from_node` 和 `to_node` 引用的 `logic_id` 都在 `nodes` 列表中定义过。防止 LLM 生成悬空连接。
 
 2. **模块类型白名单校验 (`validate_module_types()`)**：
-   确保所有节点的 `module_type` 都在检索结果提供的合法类型集合中。防止 LLM 虚构不存在的模块类型。
+  确保所有节点的 `module_type` 都在检索结果提供的合法类型集合中。防止 LLM 虚构不存在的模块类型。
 
-校验失败时返回空的 `PlanIR`，附带错误信息在 `goal` 字段中。
+需要注意，这层白名单校验只会在 `retrieval_context.relevant_nodes` 中成功提取出至少一个 `module_type` 时执行。当前实现中的 `_validate_plan()` 是：
+
+```python
+if self._available_module_types:
+    plan_ir.validate_module_types(self._available_module_types)
+```
+
+因此，当检索结果为空时，规划智能体仍会继续调用 LLM，只是不会执行 `module_type` 的代码级白名单约束；此时更多依赖 Prompt 约束和错误反馈重试机制。
+
+**⑥ 带错误反馈的重试 (`_build_retry_messages`)**
+
+当前实现相对早期版本的关键增强，是 `plan()` 会在 `config.PLANNING_MAX_RETRIES` 范围内进行修正重试，而不是首次失败就直接结束：
+
+1. 首次尝试使用标准 Prompt 生成规划。
+2. 如果 Structured Output、回退 JSON 解析、或校验阶段失败，则记录错误原因。
+3. 下一次尝试时，将以下内容一并提供给模型：
+  - 原始用户需求
+  - `slim_context`
+  - 上一次失败的错误文本
+  - 上一次生成的 JSON 输出（若可序列化）
+4. 要求模型修正后重新输出完整 JSON。
+
+补充说明：代码中的 `PLANNING_MAX_RETRIES` 实际上表示**总尝试次数上限**，因为循环写法是 `for attempt in range(1, max_attempts + 1)`。当配置值为 `2` 时，表示“首次生成 + 最多 1 次修正”，而不是“首次失败后再额外重试 2 次”。
+
+**⑦ 最终失败兜底**
+
+如果所有尝试都失败，`plan()` 返回：
+
+```json
+{
+  "goal": "规划失败: <错误信息>",
+  "nodes": [],
+  "connections": []
+}
+```
 
 ---
 
@@ -267,7 +309,10 @@ self._available_module_types = {
     "retrieved_count": 10,
     "avg_confidence_score": 0.720,
     "detected_operations": ["乘法", "减法", "除法"],
-    "intent": "公式计算"
+    "intent": "mathematical_computation",
+    "rewrite_used": true,
+    "llm_queries": ["..."],
+    "llm_category_l1": ""
   }
 }
 ```
@@ -383,7 +428,8 @@ self._available_module_types = {
 
 - **主路径**：利用 LLM 的 Function Calling 直接输出 Pydantic 模型，零解析开销
 - **回退路径**：正则提取 JSON + 手动 Pydantic 校验，兼容不支持 function calling 的模型
-- **兜底处理**：两条路径都失败时返回空规划，不会导致工作流崩溃
+- **重试修正**：任一路径失败后不会立刻结束，而是将错误反馈给模型重试生成
+- **最终兜底**：超过最大重试次数后返回失败 PlanIR，不会导致工作流崩溃
 
 ### 6.4 双重校验机制
 
@@ -396,9 +442,13 @@ self._available_module_types = {
 
 | 配置项 | 来源 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `LLM_PROVIDER` | `config.py` / `.env` | `"deepseek"` | LLM 提供商（deepseek/openai/qwen/glm/kimi） |
-| `LLM_TEMPERATURE` | `config.py` / `.env` | `0.7` | 生成温度 |
-| `LLM_MAX_TOKENS` | `config.py` / `.env` | `8192` | 最大输出 token 数 |
+| `LLM_PROVIDER` | `config.py` / `.env` | `"deepseek"` | 全局默认 LLM 提供商 |
+| `PLANNING_LLM_PROVIDER` | `config.py` / `.env` | `""` | 规划智能体专用 provider，空则回退到全局 `LLM_PROVIDER` |
+| `PLANNING_LLM_MODEL` | `config.py` / `.env` | `""` | 规划智能体专用模型名，空则使用 provider 默认模型 |
+| `PLANNING_LLM_TEMPERATURE` | `config.py` / `.env` | `0.2` | 规划生成温度，低于全局默认值以提高稳定性 |
+| `PLANNING_MAX_RETRIES` | `config.py` / `.env` | `2` | 规划总尝试次数上限，包含首次生成 |
+| `PLANNING_CONTEXT_DETAIL_TOP_N` | `config.py` / `.env` | `5` | 详细展开的模块数量 |
+| `PLANNING_CONTEXT_MAX_MODULES` | `config.py` / `.env` | `8` | 传给规划模型的最大模块数 |
 | `DEBUG` | `config.py` / `.env` | `True` | 是否输出调试信息 |
 
 规划智能体支持在初始化时通过 `llm_provider` 和 `model` 参数覆盖全局配置。
@@ -423,9 +473,10 @@ self._available_module_types = {
 | 错误场景 | 处理方式 |
 |----------|----------|
 | Structured Output 失败 | 自动回退到正则解析 JSON |
-| 正则解析也失败 | 返回空的 `PlanIR(goal="规划失败", nodes=[], connections=[])` |
-| 连接引用了不存在的节点 ID | `validate_ids()` 抛出 `ValueError`，返回空规划 |
-| 使用了不在白名单中的模块类型 | `validate_module_types()` 抛出 `ValueError`，返回空规划 |
+| 正则解析失败 | 记录错误并进入下一次修正重试 |
+| 连接引用了不存在的节点 ID | `validate_ids()` 抛出 `ValueError`，进入下一次修正重试 |
+| 使用了不在白名单中的模块类型 | `validate_module_types()` 抛出 `ValueError`，进入下一次修正重试 |
+| 超过最大重试次数仍失败 | 返回失败 `PlanIR(goal="规划失败: ...", nodes=[], connections=[])` |
 | 检索上下文为空 | `format_docs_for_planner()` 返回警告文本 |
 
 ---
@@ -435,7 +486,8 @@ self._available_module_types = {
 ### 与检索智能体（上游）
 
 - **依赖**：规划智能体完全依赖检索智能体提供的 `retrieval_context`，其中包含可用模块的定义和参数规格
-- **约束**：规划时只能使用检索结果中已有的 `module_type`，通过白名单校验机制强制执行
+- **约束**：当检索结果非空时，规划只能使用检索结果中已有的 `module_type`，通过白名单校验机制强制执行
+- **空检索退化**：当检索结果为空时，规划仍会继续尝试，但白名单校验会被跳过，系统退化为“警告文本上下文 + Prompt 约束 + 失败重试”的模式
 
 ### 与编码智能体（下游）
 

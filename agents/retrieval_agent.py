@@ -486,7 +486,6 @@ class RetrievalAgent:
 
         # ========== 第3步：执行检索 ==========
         if llm_succeeded:
-            # LLM 分析成功 → 构建 enhanced 结构并走多查询检索
             enhanced = {
                 "original_query": query,
                 "query_variants": analysis["queries"],
@@ -501,7 +500,6 @@ class RetrievalAgent:
                 enhanced, top_k, category_filter, similarity_threshold
             )
         else:
-            # LLM 不可用或返回空 → 兜底：用原始查询单次检索
             if config.DEBUG:
                 print(f"   ⚡ 使用兜底策略: 原始查询单次检索")
             context = self._single_query_retrieve(
@@ -536,14 +534,14 @@ class RetrievalAgent:
         Returns:
             检索结果
         """
-
+        
         # 构建查询条件
         where_clause = {}
         if category_filter:
             where_clause["category_l1"] = category_filter
 
         documents: List[str] = []
-
+        
         try:
             # 执行向量检索
             results = self.collection.query(
@@ -551,31 +549,25 @@ class RetrievalAgent:
                 n_results=top_k,
                 where=where_clause if where_clause else None
             )
-
+            
             # 解析检索结果
             relevant_nodes = []
-            similar_cases = []
-
+            
             if results and results['documents'] and len(results['documents'][0]) > 0:
                 documents = results['documents'][0]
                 metadatas = results['metadatas'][0]
                 distances = results['distances'][0] if 'distances' in results else [0] * len(documents)
-
+                
                 for i, (doc, metadata, distance) in enumerate(zip(documents, metadatas, distances)):
-                    # 计算相似度分数（使用归一化公式，确保结果在 (0, 1] 范围）
                     similarity_score = self._normalize_distance(distance)
-
-                    # 阈值过滤
+                    
                     if similarity_score < similarity_threshold:
                         if config.DEBUG:
                             print(f"   ⚠️  过滤低分结果: {metadata.get('module_type')} (分数: {similarity_score:.3f})")
                         continue
-
-                    # 解析 JSON Schema
+                    
                     try:
                         module_schema = json.loads(metadata.get('json_schema', '{}'))
-
-                        # 提取节点信息
                         node_info = {
                             "module_type": metadata.get('module_type'),
                             "name": module_schema.get('name'),
@@ -589,30 +581,22 @@ class RetrievalAgent:
                             "similarity_score": similarity_score,
                             "rank": i + 1
                         }
-
+                        
                         relevant_nodes.append(node_info)
-
-                        # 生成示例代码（伪代码）
-                        example_code = self._generate_example_code(module_schema)
-                        similar_cases.append({
-                            "module_type": metadata.get('module_type'),
-                            "example_code": example_code
-                        })
-
+                        
                         if config.DEBUG:
                             print(f"   ✅ 匹配 #{i+1}: {metadata.get('module_type')} "
                                   f"({node_info['name']}) - 分数: {similarity_score:.3f}")
-
+                    
                     except json.JSONDecodeError as e:
                         if config.DEBUG:
                             print(f"   ❌ JSON 解析错误: {e}")
                         continue
-
-            # 构建上下文
+            
             context = {
                 "query": query,
                 "relevant_nodes": relevant_nodes,
-                "similar_cases": similar_cases,
+                "similar_cases": [],
                 "metadata": {
                     "retrieved_count": len(relevant_nodes),
                     "total_candidates": len(documents),
@@ -620,16 +604,16 @@ class RetrievalAgent:
                     "avg_confidence_score": sum(n['similarity_score'] for n in relevant_nodes) / len(relevant_nodes) if relevant_nodes else 0
                 }
             }
-
+            
             if config.DEBUG:
                 print(f"   📊 检索完成: 找到 {len(relevant_nodes)} 个相关模块\n")
-
+            
             return context
-
+        
         except Exception as e:
             if config.DEBUG:
                 print(f"   ❌ 检索失败: {e}")
-
+            
             return {
                 "query": query,
                 "relevant_nodes": [],
@@ -666,16 +650,16 @@ class RetrievalAgent:
             print(f"   🎯 使用批量多查询策略，变体数量: {len(query_variants)}")
             for v in query_variants:
                 print(f"   📝 查询变体: {v}")
-
+        
         # 构建查询条件
         where_clause = {}
         if category_filter:
             where_clause["category_l1"] = category_filter
-
+        
         per_variant_k = min(top_k, 5)  # 每个变体返回较少结果
-
+        
         all_results = {}  # 使用字典去重，key 为 module_type
-
+        
         try:
             # ====== 核心：单次批量向量检索 ======
             results = self.collection.query(
@@ -683,44 +667,41 @@ class RetrievalAgent:
                 n_results=per_variant_k,
                 where=where_clause if where_clause else None
             )
-
+            
             # 遍历每条查询变体的结果
             for variant_idx, variant in enumerate(query_variants):
                 if (not results or not results['documents']
                         or variant_idx >= len(results['documents'])):
                     continue
-
+                
                 documents = results['documents'][variant_idx]
                 metadatas = results['metadatas'][variant_idx]
                 distances = (results['distances'][variant_idx]
                              if 'distances' in results and variant_idx < len(results['distances'])
                              else [0] * len(documents))
-
+                
                 for i, (doc, metadata, distance) in enumerate(zip(documents, metadatas, distances)):
                     similarity_score = self._normalize_distance(distance)
-
-                    # 阈值过滤
+                    
                     if similarity_score < similarity_threshold:
                         if config.DEBUG:
                             print(f"   ⚠️  过滤低分结果: {metadata.get('module_type')} "
                                   f"(分数: {similarity_score:.3f}, 来源: 变体#{variant_idx+1})")
                         continue
-
+                    
                     module_type = metadata.get('module_type')
-
-                    # 去重：保留最高相似度分数
+                    
                     if (module_type in all_results
                             and similarity_score <= all_results[module_type]['similarity_score']):
                         continue
-
-                    # 解析 JSON Schema
+                    
                     try:
                         module_schema = json.loads(metadata.get('json_schema', '{}'))
                     except json.JSONDecodeError as e:
                         if config.DEBUG:
                             print(f"   ❌ JSON 解析错误: {e}")
                         continue
-
+                    
                     node_info = {
                         "module_type": module_type,
                         "name": module_schema.get('name'),
@@ -732,16 +713,16 @@ class RetrievalAgent:
                         "keywords": module_schema.get('keywords', []),
                         "usage_guides": module_schema.get('usage_guides', []),
                         "similarity_score": similarity_score,
-                        "rank": 0,  # 稍后重新计算
+                        "rank": 0,
                         "matched_query": variant,
                     }
-
+                    
                     all_results[module_type] = node_info
-
+                    
                     if config.DEBUG:
                         print(f"   ✅ 匹配: {module_type} ({node_info['name']}) "
                               f"- 分数: {similarity_score:.3f} (变体#{variant_idx+1})")
-
+        
         except Exception as e:
             if config.DEBUG:
                 print(f"   ❌ 批量检索失败: {e}")
@@ -754,34 +735,23 @@ class RetrievalAgent:
                     "error": str(e)
                 }
             }
-
-        # 按相似度排序
+        
         sorted_nodes = sorted(
             all_results.values(),
             key=lambda x: x['similarity_score'],
             reverse=True
         )[:top_k]
-
-        # 重新计算排名
+        
         for i, node in enumerate(sorted_nodes):
             node['rank'] = i + 1
-
-        # 生成示例代码
-        similar_cases = []
-        for node in sorted_nodes:
-            example_code = f"# {node['name']}\n# 类型: {node['module_type']}"
-            similar_cases.append({
-                "module_type": node['module_type'],
-                "example_code": example_code
-            })
-
+        
         if config.DEBUG:
             print(f"   🎯 批量多查询合并完成: 找到 {len(sorted_nodes)} 个相关模块")
-
+        
         return {
             "query": enhanced['original_query'],
             "relevant_nodes": sorted_nodes,
-            "similar_cases": similar_cases,
+            "similar_cases": [],
             "metadata": {
                 "retrieved_count": len(sorted_nodes),
                 "query_variants_used": len(query_variants),

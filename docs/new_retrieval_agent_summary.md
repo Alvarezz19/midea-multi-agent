@@ -1,6 +1,6 @@
 # 检索智能体 (Retrieval Agent) v2 完整工作流总结
 
-> 最后更新: 2026-03-03
+> 最后更新: 2026-03-06
 
 ## 1. 概述
 
@@ -14,7 +14,7 @@
 | 查询变体生成 | 规则拼接（运算符/变量/常量模式） | LLM 生成多层次查询策略 |
 | 意图推断 | 规则优先级判断 | LLM 直接输出枚举值 |
 | `detected_operations` | 正则扫描数学符号 | LLM 分析提取 |
-| LLM 角色 | 可选（默认关闭） | 主流程（默认启用） |
+| LLM 角色 | 可选（默认关闭） | 主流程（默认启用，失败自动兜底） |
 | 兜底策略 | 规则增强 → 向量检索 | 原始查询 → 单次向量检索 |
 | 外部依赖 | `QueryProcessor`（`utils/query_processor.py`） | 无规则依赖 |
 | 输出结构 | `retrieval_context` | **完全一致，对下游零影响** |
@@ -99,12 +99,7 @@
       "matched_query": "通道选择 常量输入 变量输入"
     }
   ],
-  "similar_cases": [
-    {
-      "module_type": "switch",
-      "example_code": "# 通道选择 (Switch)\n# 类型: switch"
-    }
-  ],
+  "similar_cases": [],
   "metadata": {
     "retrieved_count": 10,
     "query_variants_used": 8,
@@ -133,7 +128,17 @@
 | `usage_guides` | `list[str]` | 使用场景说明列表 |
 | `similarity_score` | `float` | 与查询的相似度分数，范围 (0, 1] |
 | `rank` | `int` | 按相似度排序后的排名 |
-| `matched_query` | `str` | 匹配到该模块的查询变体（多查询模式下存在） |
+| `matched_query` | `str` | 匹配到该模块的查询变体，仅多查询主路径下存在 |
+
+#### 关于 `similar_cases`
+
+当前实现中，无论是 `_single_query_retrieve()` 还是 `_multi_query_retrieve()`，都固定返回空列表：
+
+```json
+"similar_cases": []
+```
+
+代码里虽然保留了 `_generate_example_code()` 方法，但当前检索主流程并没有调用它，因此 `similar_cases` 目前不是已填充的数据通道。
 
 ---
 
@@ -173,7 +178,7 @@
 | 参数 | 类型 | 默认值 | 说明 |
 |:---|:---|:---|:---|
 | `embedding_provider` | `Optional[str]` | `None` | 嵌入模型提供商，不指定则使用 `config.EMBEDDING_PROVIDER` |
-| `llm_provider` | `Optional[str]` | `None` | LLM 提供商，不指定则使用 `config.RETRIEVAL_LLM_PROVIDER` |
+| `llm_provider` | `Optional[str]` | `None` | LLM 提供商，不指定则优先使用 `config.RETRIEVAL_LLM_PROVIDER`，再回退到全局默认 |
 | `llm_model` | `Optional[str]` | `None` | LLM 模型名，不指定则使用 `config.RETRIEVAL_LLM_MODEL` |
 
 ---
@@ -207,6 +212,8 @@
 │     └─────────────────────────────────────────┘       │
 │                                                       │
 │  ④ 增强元数据（附加 rewrite_used 等可观测字段）         │
+│     - 始终补写 rewrite_used                            │
+│     - 仅 LLM 成功时补写 llm_queries / llm_category_l1  │
 └──────────────────────────────────────────────────────┘
     │
     ▼
@@ -281,7 +288,7 @@ LLM 返回的 JSON 经过严格标准化处理：
 | **懒加载** | LLM 在首次调用 `_ensure_llm()` 时才初始化，且仅尝试一次 |
 | **超时** | 由 `config.RETRIEVAL_LLM_TIMEOUT_S`（默认 8 秒）控制 |
 | **失败回退** | LLM 初始化失败或调用失败时返回 `None`，主方法自动走兜底路径 |
-| **JSON 提取** | 支持 ` ```json ``` ` 代码块和裸 JSON 两种格式 |
+| **JSON 提取** | 支持 ` ```json ``` ` 代码块、裸 JSON，以及通过正则提取首个对象/数组 |
 
 ### 5.3 步骤二：category_l1 过滤
 
@@ -325,7 +332,6 @@ LLM 推断出的 `category_l1` 仅在属于以下合法值时才用于过滤：
   │   - 按相似度降序排序          │
   │   - 截取 Top-K               │
   │   - 重新计算排名              │
-  │   - 生成示例代码              │
   └─────────────────────────────┘
 ```
 
@@ -348,12 +354,30 @@ LLM 推断出的 `category_l1` 仅在属于以下合法值时才用于过滤：
                                │  2. 阈值过滤        │
                                │  3. 解析JSON Schema │
                                │  4. 提取节点信息     │
-                               │  5. 生成示例代码     │
                                └───────────────────┘
                                        │
                                        ▼
                                检索结果字典
 ```
+
+#### 单查询与多查询元数据差异
+
+当前实现中，两条检索路径的 `metadata` 并不完全对称：
+
+| 字段 | 单查询兜底路径 | 多查询主路径 |
+|:---|:---|:---|
+| `retrieved_count` | 有 | 有 |
+| `avg_confidence_score` | 有 | 有 |
+| `total_candidates` | 有 | 无 |
+| `category_filter` | 有 | 无 |
+| `query_variants_used` | 无 | 有 |
+| `detected_operations` | 无 | 有 |
+| `intent` | 无 | 有 |
+| `rewrite_used` | 外层统一补写 | 外层统一补写 |
+| `llm_queries` | 无 | 外层统一补写 |
+| `llm_category_l1` | 无 | 外层统一补写 |
+
+因此，`metadata.intent`、`metadata.detected_operations` 等字段只在 LLM 成功并进入多查询主路径时稳定出现；兜底路径不会自行补齐这些字段。
 
 ### 5.5 相似度计算
 
@@ -366,6 +390,12 @@ $$similarity = \frac{1}{1 + distance}$$
 - 结果范围: $(0, 1]$
 
 默认阈值 `similarity_threshold = 0.3`，低于此值的结果被过滤。
+
+### 5.6 排序与去重细节
+
+- 多查询路径使用 `module_type` 作为去重键，同一模块被多个查询变体命中时，只保留相似度最高的一条。
+- 多查询路径会在最终排序后重新计算 `rank`。
+- 单查询路径不做二次去重，`rank` 直接沿用原始结果顺序。
 
 ---
 
@@ -445,7 +475,7 @@ schemas/
 | `RETRIEVAL_LLM_MAX_QUERIES` | `8` | LLM 生成的最大查询数量 |
 | `RETRIEVAL_LLM_TIMEOUT_S` | `8` | LLM 调用超时时间（秒） |
 
-> 注：v1 中的 `RETRIEVAL_USE_LLM_REWRITE` 配置项在 v2 中不再需要（LLM 为默认行为）。
+> 注：`config.py` 中仍保留 `RETRIEVAL_USE_LLM_REWRITE` 配置项，但当前 `agents/retrieval_agent.py` 实现并未读取该开关；现行逻辑是默认尝试 LLM 分析，失败后自动回退到单查询检索。
 
 ### 7.3 向量数据库配置
 
