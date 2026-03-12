@@ -1,205 +1,258 @@
 # KONG CUBE 智能组态生成系统
-基于 LangGraph 的多智能体系统，自动将自然语言需求转换为楼宇自控组态文件。
+
+基于 LangGraph 的多智能体工作流，用于把自然语言需求转换为 KONG CUBE 可导入的组态 JSON。
+
+当前主链路已经接入 4 个节点：Analysis Agent、Retrieval Agent、Planning Agent、Coding Agent。Execution Tool、Validation Agent、Debugging Agent 仍保留代码骨架与状态字段，但尚未接入 workflow.py 的正式执行链路。
+
+## 当前状态
+
+| 组件 | 状态 | 当前职责 | 备注 |
+|:---|:---:|:---|:---|
+| Analysis Agent | ✅ | 解析用户需求，产出 retrieval_plan 和 scenario_analysis | 当前工作流入口节点 |
+| Retrieval Agent | ✅ | 消费 retrieval_plan 并执行 ChromaDB 检索 | 已从“检索+分析”收敛为纯检索执行器 |
+| Planning Agent | ✅ | 基于 analysis_result 和 retrieval_context 生成 execution_plan | 输出结构化 PlanIR |
+| Coding Agent | ✅ | 将 execution_plan 落地为最终组态 JSON 字符串 | generated_code 当前实际存的是 JSON 文本 |
+| Execution Tool | 🚧 | 代码执行沙箱 | 有实现，但未接入正式工作流 |
+| Validation Agent | 🚧 | 形式化验证 + 语义验证 | 仍以占位逻辑为主 |
+| Debugging Agent | 🚧 | 错误分析与修复 | 仍以占位逻辑为主 |
+
+## 当前工作流
+
+workflow.py 中当前启用的是线性四节点主链路：
+
+```text
+user_query
+  -> Analysis Agent
+  -> Retrieval Agent
+  -> Planning Agent
+  -> Coding Agent
+  -> END
+```
+
+对应的共享状态字段为：
+
+- user_query：原始用户需求
+- analysis_result：分析结果，包含 retrieval_plan 和 scenario_analysis
+- retrieval_context：检索得到的完整模块上下文
+- execution_plan：规划阶段生成的 PlanIR
+- generated_code：最终生成的组态 JSON 字符串
+- execution_result、validation_result、debug_history、retry_count：已预留，暂未在主链路中使用
 
 ## 项目结构
 
-```
+```text
 midea/
-├── agents/                 # 智能体模块
-│   ├── retrieval_agent.py  # 检索智能体
-│   ├── planning_agent.py   # 规划智能体
-│   ├── coding_agent.py     # 编码智能体
-│   ├── validation_agent.py # 验证智能体
-│   └── debugging_agent.py  # 调试智能体
-├── tools/                  # 工具模块
-│   └── execution_tool.py   # 代码执行沙箱
-├── json/                   # JSON 组态文件样本
-├── kong_sdk.py             # Kong CUBE SDK
-├── workflow.py             # LangGraph 工作流编排
-├── config.py               # 配置文件
-├── requirements.txt        # 依赖列表
-├── .env.example            # 环境变量模板
-└── README.md               # 本文件
+├── agents/
+│   ├── analysis_agent.py
+│   ├── retrieval_agent.py
+│   ├── planning_agent.py
+│   ├── coding_agent.py
+│   ├── validation_agent.py
+│   ├── debugging_agent.py
+│   └── retrieval_agent_old.py
+├── tools/
+│   └── execution_tool.py
+├── utils/
+│   ├── context_formatter.py
+│   ├── knowledge_base_manager.py
+│   └── model_manager.py
+├── schemas/                 # 模块 Schema 知识库
+├── chroma_db/               # ChromaDB 持久化目录
+├── generated_flow/          # 工作流生成的 JSON 输出
+├── docs/                    # 各节点设计与实现文档
+├── workflow.py              # 当前正式工作流入口
+├── workflow_trace.py        # 带 trace 的实验编排文件
+├── init_knowledge_base.py   # 首次初始化知识库
+├── update_knowledge_base.py # 交互式知识库维护工具
+├── auto_sync_schemas.py     # schemas 自动同步工具
+├── config.py                # 模型与运行配置
+└── README.md
 ```
+
+## 核心能力
+
+- 语义分析前置：Analysis Agent 将用户需求拆成 retrieval_plan 和 scenario_analysis，提升模糊需求理解能力。
+- 纯检索执行：Retrieval Agent 只负责标准化检索计划、执行向量检索、返回完整模块定义。
+- 受约束规划：Planning Agent 只能使用 retrieval_context 中的 module_type 白名单，避免虚构模块。
+- 确定性落地：Coding Agent 基于 template_json、参数和连线关系生成最终平台 JSON，而不是自由生成代码。
+- 知识库维护：支持初始化、增量更新、批量更新、重建和目录监听同步。
+- 多模型支持：LLM 支持 DeepSeek、OpenAI、通义千问、智谱 GLM、Kimi；Embedding 支持 BGE、OpenAI、Sentence Transformers、Jina 等。
 
 ## 快速开始
 
-### 1. 环境配置
+### 1. 配置环境
 
-```bash
-# 安装依赖
-pip install -r requirements.txt
+推荐先激活本地 Conda 环境：
 
-# 配置环境变量（可选）
-cp .env.example .env
-# 编辑 .env 文件，填入你的 OpenAI API Key
-# 如果不配置，将使用默认的 embedding 函数
+```powershell
+conda activate midea
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
+
+然后根据需要在 .env 中配置：
+
+- LLM_PROVIDER 及对应 API Key
+- EMBEDDING_PROVIDER 及对应模型配置
+- ANALYSIS_LLM_PROVIDER、PLANNING_LLM_PROVIDER 等可选覆盖项
+
+默认配置下：
+
+- LLM_PROVIDER 为 deepseek
+- EMBEDDING_PROVIDER 为 bge
+- Analysis Agent 温度为 0.2
+- Planning Agent 温度为 0.7
 
 ### 2. 初始化知识库
 
-首次使用前，需要加载模块定义到向量数据库：
+首次运行前，需要将 schemas 目录中的模块定义加载到 ChromaDB：
 
-```bash
+```powershell
+conda activate midea
 python init_knowledge_base.py
 ```
 
-这将扫描 `schemas/` 目录下的所有模块定义，并存储到 ChromaDB。
+该脚本会：
 
-### 3. 测试检索功能
+- 初始化 RetrievalAgent
+- 扫描 schemas 目录
+- 生成语义文本块与元数据
+- 写入 chroma_db 持久化目录
 
-```bash
+### 3. 运行当前工作流
+
+```powershell
+conda activate midea
 python workflow.py
 ```
 
-示例输出：
-```
-🔍 开始检索: 比较温度是否大于25度
-   ✅ 匹配 #1: compare (比较判断) - 分数: 0.856
-   📊 检索完成: 找到 2 个相关模块
-```
+当前脚本会：
 
-### 4. 在代码中使用
+- 调用 run_workflow(user_query)
+- 依次输出 analysis、retrieval、planning、coding 的摘要
+- 将最终生成的 JSON 保存到 generated_flow 目录
+
+### 4. 在代码中调用
+
+运行完整工作流：
 
 ```python
+from workflow import run_workflow
+
+result = run_workflow("生成一个程序，接收一个输入，输入5v的时候，输出1，输入3v的时候输出2，输入10v的时候输出0")
+
+print(result["current_step"])
+print(result["execution_plan"])
+print(result["generated_code"][:300])
+```
+
+单独调用检索智能体：
+
+```python
+from agents.analysis_agent import AnalysisAgent
 from agents.retrieval_agent import RetrievalAgent
 
-# 创建检索智能体
-agent = RetrievalAgent()
+query = "我需要比较两个温度值"
 
-# 检索相关模块
-result = agent.retrieve("我需要比较两个温度值")
+analysis_agent = AnalysisAgent()
+analysis_result = analysis_agent.analyze(query)
 
-# 查看检索结果
-for node in result['relevant_nodes']:
+retrieval_agent = RetrievalAgent()
+result = retrieval_agent.retrieve(query, analysis_result=analysis_result)
+
+for node in result["relevant_nodes"]:
     print(f"{node['name']}: {node['similarity_score']:.3f}")
 ```
 
-## 6 个智能体说明
+## 各节点输入输出契约
 
-| 智能体 | 状态 | 职责 | 输入 | 输出 |
-|:---|:---:|:---|:---|:---|
-| **Retrieval Agent** | ✅ | 从向量库检索相关知识 | 用户需求 | 上下文（节点定义、案例） |
-| **Planning Agent** | 🚧 | 拆解需求为逻辑步骤 | 需求 + 上下文 | 执行计划（YAML） |
-| **Coding Agent** | 🚧 | 生成 Python 代码 | 执行计划 | Python 代码（基于 SDK） |
-| **Execution Tool** | 🚧 | 代码沙箱执行 | Python 代码 | 执行结果 / 错误堆栈 |
-| **Validation Agent** | 🚧 | 双重验证（形式+语义） | JSON 组态 + 原始需求 | 验证报告 |
-| **Debugging Agent** | 🚧 | 错误修复 | 错误信息 + 原代码 | 修正后的代码 |
+### Analysis Agent
 
-**图例**: ✅ 已完成 | 🚧 开发中
+- 输入：user_query
+- 输出：analysis_result
+- 关键字段：retrieval_plan、scenario_analysis、metadata
 
-## 工作流程（DAG）
+### Retrieval Agent
 
-```
-开始 → 检索 → 规划 → 编码 → 执行 
-                              ↓
-                      成功 → 验证 → 通过 → 结束
-                      ↓            ↓
-                    调试 ←──────── 未通过
-                      ↓
-                   重试（最多3次）
-```
+- 输入：user_query、analysis_result
+- 输出：retrieval_context
+- 关键字段：relevant_nodes、metadata、similar_cases
 
-## 核心特性
+说明：similar_cases 当前保持兼容字段，默认返回空列表。
 
-✅ **智能语义检索**：基于向量数据库的模块检索，支持自然语言查询  
-✅ **分层知识表示**：将 JSON Schema 转换为富含语义的文本块  
-✅ **元数据索引**：支持类别过滤和相似度阈值控制  
-✅ **多模型支持**：支持 DeepSeek、OpenAI、通义千问等多种 LLM 和 Embedding 模型  
-✅ **可扩展架构**：基于 LangGraph，易于添加新智能体  
-🚧 **代码即组态**：生成 Python 中间代码，避免直接生成复杂 JSON  
-🚧 **自动闭环**：执行失败时自动调试，最多重试 3 次  
-🚧 **双重验证**：形式化检查 + LLM 语义检查  
+### Planning Agent
 
-**图例**: ✅ 已实现 | 🚧 开发中
+- 输入：user_query、retrieval_context、analysis_result
+- 输出：execution_plan
+- 关键结构：goal、nodes、connections
 
-## 🔧 技术栈
+### Coding Agent
 
-- **LangGraph**: 工作流编排
-- **ChromaDB**: 向量数据库
-- **Python 3.8+**: 开发语言
+- 输入：execution_plan、retrieval_context
+- 输出：generated_code
+- 当前输出格式：平台可导入的 JSON 字符串
 
-### 支持的模型
+## 知识库维护
 
-#### 大语言模型（LLM）
-- ⭐ **DeepSeek**: 高性价比，中文友好（推荐）
-- **OpenAI**: GPT-4, GPT-3.5-turbo
-- **通义千问**: 阿里云，中文优秀
-- **智谱 GLM**: 清华技术，中文优化
+### 交互式更新
 
-#### 嵌入模型（Embedding）
-- ⭐ **BGE-M3**: 免费本地模型，多语言支持（推荐）
-- **OpenAI**: text-embedding-ada-002
-- **Sentence Transformers**: 轻量级多语言模型
-- **Jina**: 中文优化
-
-详见 [多模型配置指南](docs/model_configuration_guide.md)
-
-## 当前进度
-
-- ✅ 项目架构设计
-- ✅ 多模型支持架构
-  - ✅ 统一模型管理器
-  - ✅ DeepSeek、OpenAI、通义千问、智谱GLM
-  - ✅ BGE、OpenAI Embedding、Sentence Transformers
-- ✅ 检索智能体完整实现
-  - ✅ JSON Schema 智能序列化
-  - ✅ 向量数据库集成（ChromaDB）
-  - ✅ 语义检索功能
-  - ✅ 知识库加载机制
-  - ✅ 单元测试覆盖
-- 🚧 规划智能体开发中
-- 🚧 编码智能体开发中
-- 🚧 其他智能体待开发
-
-## 📖 详细文档
-
-- [多模型配置指南](docs/model_configuration_guide.md) ⭐ 必读
-- [检索智能体使用指南](docs/retrieval_agent_guide.md)
-- [检索智能体实现总结](docs/retrieval_agent_implementation.md)
-- [工作安排](工作安排.md) - 知识库构建方案
-- [开发进度](开发进度.md)
-- [团队开发规范](团队开发规范.md)
-
-## TODO（下一步）
-
-### 优先级 1（核心功能）
-- [ ] 实现规划智能体（Planning Agent）
-- [ ] 集成 LLM 进行需求分析
-- [ ] 实现参数推理功能
-
-### 优先级 2（增强功能）  
-- [ ] 数据增强：生成假设性查询
-- [ ] 案例检索：从历史 JSON 学习
-- [ ] Kong SDK 的自动布局算法
-
-### 优先级 3（工程化）
-- [ ] 代码沙箱安全限制（禁用危险模块）
-- [ ] Streamlit 前端界面
-- [ ] 人工审核（Human-in-the-Loop）
-
-## 开发指南
-
-### 添加新的节点类型
-
-编辑 `kong_sdk.py` 中的 `NODE_TYPES` 字典：
-
-```python
-NODE_TYPES = {
-    "new_type": "新节点类型描述"
-}
+```powershell
+conda activate midea
+python update_knowledge_base.py
 ```
 
-### 调试单个智能体
+支持：
 
-```python
-from agents.coding_agent import CodingAgent
+- 更新单个模块
+- 批量更新多个模块
+- 删除指定模块
+- 重建整个知识库
+- 查看模块信息
+- 重新加载所有模块
+- 查看统计信息
 
-agent = CodingAgent()
-result = agent.generate_code({"title": "测试计划"})
-print(result)
+### 自动监听同步
+
+```powershell
+conda activate midea
+python auto_sync_schemas.py --mode watch --interval 5
 ```
+
+### 一次性同步
+
+```powershell
+conda activate midea
+python auto_sync_schemas.py --mode sync --dir ./schemas
+```
+
+## 文档索引
+
+docs 目录当前包含的节点与协作文档如下：
+
+- docs/analysis_agent_integration_plan.md：Analysis Agent 接入方案与设计背景
+- docs/analysis_agent_summary.md：Analysis Agent 当前职责、输出契约与流程总结
+- docs/new_retrieval_agent_summary.md：Retrieval Agent 当前工作流位置、输入输出与检索策略总结
+- docs/planning_agent_summary.md：Planning Agent 的 PlanIR 契约、重试与上下文压缩逻辑总结
+- docs/coding_agent_summary.md：Coding Agent 的模板落地、布局和连线生成逻辑总结
+- docs/optimization_plan_retrieval_planning.md：Retrieval -> Planning 协作优化方案
+- docs/knowledge_base_update_guide.md：知识库增量更新、重建与同步指南
+
+
+## 当前限制
+
+- workflow.py 只接入了 analysis、retrieval、planning、coding 四个节点，尚未实现执行-验证-调试闭环。
+- Validation Agent 和 Debugging Agent 仍包含较多 TODO 与示例逻辑，不能视为正式完成。
+- generated_code 这一字段名保留了历史命名，但当前实际内容是 JSON，不是 Python 代码。
+- 部分实验输出和 generated_flow 示例文件用于验证生成效果，不代表统一的最终接口规范。
+
+## 下一步方向
+
+- 将 Execution Tool、Validation Agent、Debugging Agent 接入正式工作流
+- 完善验证与错误修复闭环
+- 继续收敛 Planning Agent 的参数推理与模块选择稳定性
+- 增强 Coding Agent 对动态端口和复杂模板的适配能力
+- 引入更完整的测试覆盖和评估样本集
 
 ## 许可证
 
-内部项目 - 仅供美的楼宇科技使用
+内部项目，仅供美的楼宇科技使用。
