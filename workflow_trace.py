@@ -8,6 +8,7 @@ import json
 import time
 from datetime import datetime
 from langgraph.graph import StateGraph, END
+from agents.analysis_agent import AnalysisAgent
 from agents.retrieval_agent import RetrievalAgent
 from agents.planning_agent import PlanningAgent
 from agents.coding_agent import CodingAgent
@@ -24,6 +25,7 @@ os.environ["LANGCHAIN_TRACING_V2"] = "false"
 class WorkflowState(TypedDict):
     """工作流全局状态"""
     user_query: str  # 用户输入的需求
+    analysis_result: dict  # 分析智能体输出
     retrieval_context: dict  # 检索到的完整上下文（原始数据）
     execution_plan: dict  # 执行计划
     generated_code: str  # 生成的 Python 代码
@@ -181,6 +183,7 @@ def create_workflow(node_io_records: list[dict] | None = None) -> StateGraph:
         配置好的状态图
     """
     # 初始化所有智能体
+    analysis_agent = AnalysisAgent()
     retrieval_agent = RetrievalAgent()
     planning_agent = PlanningAgent()  # 启用规划智能体
     coding_agent = CodingAgent()      # 启用编码智能体
@@ -195,6 +198,7 @@ def create_workflow(node_io_records: list[dict] | None = None) -> StateGraph:
     workflow = StateGraph(WorkflowState)
     
     # ========== 添加节点 ==========
+    workflow.add_node("analysis", _wrap_node("analysis", analysis_agent, node_io_records))
     workflow.add_node("retrieval", _wrap_node("retrieval", retrieval_agent, node_io_records))
     workflow.add_node("planning", _wrap_node("planning", planning_agent, node_io_records))  # 启用规划节点
     workflow.add_node("coding", _wrap_node("coding", coding_agent, node_io_records))     # 启用编码节点
@@ -204,7 +208,8 @@ def create_workflow(node_io_records: list[dict] | None = None) -> StateGraph:
     
     # ========== 定义边缘（流程）==========
 
-    workflow.set_entry_point("retrieval")
+    workflow.set_entry_point("analysis")
+    workflow.add_edge("analysis", "retrieval")       # 分析 -> 检索
     workflow.add_edge("retrieval", "planning")        # 检索 -> 规划
     workflow.add_edge("planning", "coding")           # 规划 -> 编码
     workflow.add_edge("coding", END)                  # 编码 -> 结束（临时）
@@ -234,6 +239,7 @@ def run_workflow(user_query: str) -> dict:
     # 初始化状态
     initial_state = {
         "user_query": user_query,
+        "analysis_result": {},
         "retrieval_context": {},
         "execution_plan": {},
         "generated_code": "",

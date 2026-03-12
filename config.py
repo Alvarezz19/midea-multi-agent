@@ -83,6 +83,14 @@ PLANNING_MAX_RETRIES = int(os.getenv("PLANNING_MAX_RETRIES", "2"))
 PLANNING_CONTEXT_DETAIL_TOP_N = int(os.getenv("PLANNING_CONTEXT_DETAIL_TOP_N", "5"))
 PLANNING_CONTEXT_MAX_MODULES = int(os.getenv("PLANNING_CONTEXT_MAX_MODULES", "8"))
 
+# ==================== 分析智能体配置 ====================
+ANALYSIS_LLM_PROVIDER = os.getenv("ANALYSIS_LLM_PROVIDER", "").strip()
+ANALYSIS_LLM_MODEL = os.getenv("ANALYSIS_LLM_MODEL", "").strip()
+ANALYSIS_LLM_TEMPERATURE = float(os.getenv("ANALYSIS_LLM_TEMPERATURE", "0.2"))
+ANALYSIS_LLM_TIMEOUT_S = float(os.getenv("ANALYSIS_LLM_TIMEOUT_S", "30"))
+ANALYSIS_MAX_AMBIGUITIES = int(os.getenv("ANALYSIS_MAX_AMBIGUITIES", "5"))
+ANALYSIS_MAX_ASSUMPTIONS = int(os.getenv("ANALYSIS_MAX_ASSUMPTIONS", "5"))
+
 # ==================== 检索智能体 LLM 优化（默认关闭） ====================
 # 说明：这些开关用于在检索阶段引入可选的 LLM 查询重写/轻量重排。
 # 默认全部关闭，确保成本与延迟可控；LLM 不可用时实现必须自动兜底回退。

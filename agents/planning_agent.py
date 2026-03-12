@@ -107,6 +107,9 @@ class PlanningAgent:
         system_prompt = """
 你是一个工业自动化控制系统的逻辑规划专家。你的任务是根据用户的自然语言需求,使用提供的模块(积木)设计一个逻辑控制图。
 
+### 业务场景参考:
+{analysis_context}
+
 ### 你的任务:
 1. 分析用户的计算公式或控制逻辑。
 2. 从【可用模块列表】中选择合适的模块。**严禁虚构模块**,只能使用列表中的 module_type。
@@ -120,6 +123,7 @@ class PlanningAgent:
 - **参数配置**:确保 `parameters` 字段中的键名与模块定义中的参数名完全一致。
 - **参数类型**:注意参数的类型(integer, number, boolean, string),确保类型正确。
 - **端口连接**:仔细检查端口索引,确保连接正确(输出端口连接到输入端口)。
+- **业务场景参考**:它只用于帮助你理解需求,不能替代【可用模块列表】。最终只能使用可用模块列表中的 module_type。
 
 ### 可用模块列表:
 {slim_context}
@@ -166,6 +170,7 @@ class PlanningAgent:
         self,
         user_query: str,
         slim_context: str,
+        analysis_context: str,
         error_message: str,
         previous_output: str,
     ):
@@ -185,6 +190,9 @@ class PlanningAgent:
 
 【可用模块列表】
 {slim_context}
+
+【业务场景参考】
+{analysis_context}
 """,
             ),
             (
@@ -204,14 +212,69 @@ class PlanningAgent:
         return retry_prompt.format_messages(
             user_query=user_query,
             slim_context=slim_context,
+            analysis_context=analysis_context,
             error_message=error_message,
             previous_output=previous_output,
         )
 
+    def _format_analysis_context(self, analysis_result: Optional[Dict[str, Any]]) -> str:
+        if not isinstance(analysis_result, dict):
+            return "无额外业务场景参考。"
+
+        scenario = analysis_result.get("scenario_analysis", {})
+        if not isinstance(scenario, dict):
+            return "无额外业务场景参考。"
+
+        lines = []
+        summary = (scenario.get("summary", "") or "").strip()
+        if summary:
+            lines.append(f"- 业务摘要: {summary}")
+
+        field_mappings = [
+            ("business_goal", "业务目标"),
+            ("system_type", "系统类型"),
+            ("equipment_object", "设备对象"),
+            ("actuator", "执行器"),
+            ("controlled_variable", "被控量"),
+            ("feedback_variable", "反馈量"),
+            ("setpoint_variable", "设定值"),
+            ("output_signal", "期望输出"),
+            ("control_strategy", "控制策略"),
+            ("control_mode", "控制模式"),
+        ]
+        for key, label in field_mappings:
+            value = (scenario.get(key, "") or "").strip()
+            if value:
+                lines.append(f"- {label}: {value}")
+
+        input_signals = scenario.get("input_signals", [])
+        if isinstance(input_signals, list) and input_signals:
+            lines.append(f"- 输入信号: {', '.join(str(item) for item in input_signals[:5])}")
+
+        output_signals = scenario.get("output_signals", [])
+        if isinstance(output_signals, list) and output_signals:
+            lines.append(f"- 输出信号: {', '.join(str(item) for item in output_signals[:5])}")
+
+        ambiguities = scenario.get("ambiguities", [])
+        if isinstance(ambiguities, list) and ambiguities:
+            lines.append(f"- 模糊点: {'; '.join(str(item) for item in ambiguities[:config.ANALYSIS_MAX_AMBIGUITIES])}")
+
+        assumptions = scenario.get("assumptions", [])
+        if isinstance(assumptions, list) and assumptions:
+            lines.append(f"- 假设: {'; '.join(str(item) for item in assumptions[:config.ANALYSIS_MAX_ASSUMPTIONS])}")
+
+        if not lines:
+            return "无额外业务场景参考。"
+
+        return "\n".join(lines)
+
     def _generate_plan(self, messages) -> PlanIR:
         """统一处理 structured output 和回退解析"""
         try:
-            structured_llm = self.llm.with_structured_output(PlanIR)
+            structured_llm = self.llm.with_structured_output(
+                PlanIR,
+                method="function_calling",
+            )
             plan_ir = structured_llm.invoke(messages)
             if config.DEBUG:
                 print("   ✅ Structured Output 解析成功")
@@ -227,7 +290,12 @@ class PlanningAgent:
         if self._available_module_types:
             plan_ir.validate_module_types(self._available_module_types)
     
-    def plan(self, user_query: str, retrieval_context: Dict[str, Any]) -> PlanIR:
+    def plan(
+        self,
+        user_query: str,
+        retrieval_context: Dict[str, Any],
+        analysis_result: Optional[Dict[str, Any]] = None,
+    ) -> PlanIR:
         """
         生成执行计划
         
@@ -255,6 +323,7 @@ class PlanningAgent:
             detail_top_n=config.PLANNING_CONTEXT_DETAIL_TOP_N,
             max_modules=config.PLANNING_CONTEXT_MAX_MODULES,
         )
+        analysis_context = self._format_analysis_context(analysis_result)
         
         if config.DEBUG:
             print(f"   清洗后上下文大小: {len(slim_context)} 字符")
@@ -262,7 +331,8 @@ class PlanningAgent:
         # 构建 prompt
         messages = self.planning_prompt.format_messages(
             user_query=user_query,
-            slim_context=slim_context
+            slim_context=slim_context,
+            analysis_context=analysis_context,
         )
 
         plan_ir = None
@@ -277,6 +347,7 @@ class PlanningAgent:
                     current_messages = self._build_retry_messages(
                         user_query=user_query,
                         slim_context=slim_context,
+                        analysis_context=analysis_context,
                         error_message=last_error,
                         previous_output=previous_output,
                     )
@@ -362,9 +433,10 @@ class PlanningAgent:
         """
         user_query = state.get("user_query", "")
         retrieval_context = state.get("retrieval_context", {})
+        analysis_result = state.get("analysis_result", {})
         
         # 生成规划
-        plan_ir = self.plan(user_query, retrieval_context)
+        plan_ir = self.plan(user_query, retrieval_context, analysis_result)
         
         # 将 PlanIR 转换为字典存入状态
         state["execution_plan"] = plan_ir.model_dump()

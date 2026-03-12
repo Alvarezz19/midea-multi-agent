@@ -46,52 +46,64 @@ class LLMManager:
     def _get_deepseek(**kwargs):
         """获取 DeepSeek LLM"""
         from langchain_openai import ChatOpenAI
+
+        timeout = kwargs.get('timeout')
         
         return ChatOpenAI(
             api_key=config.DEEPSEEK_API_KEY,
             base_url=config.DEEPSEEK_BASE_URL,
             model=kwargs.get('model', config.DEEPSEEK_MODEL),
             temperature=kwargs.get('temperature', config.LLM_TEMPERATURE),
-            max_tokens=kwargs.get('max_tokens', config.LLM_MAX_TOKENS)
+            max_tokens=kwargs.get('max_tokens', config.LLM_MAX_TOKENS),
+            timeout=timeout,
         )
     
     @staticmethod
     def _get_openai(**kwargs):
         """获取 OpenAI LLM"""
         from langchain_openai import ChatOpenAI
+
+        timeout = kwargs.get('timeout')
         
         return ChatOpenAI(
             api_key=config.OPENAI_API_KEY,
             base_url=config.OPENAI_BASE_URL,
             model=kwargs.get('model', config.OPENAI_MODEL),
             temperature=kwargs.get('temperature', config.LLM_TEMPERATURE),
-            max_tokens=kwargs.get('max_tokens', config.LLM_MAX_TOKENS)
+            max_tokens=kwargs.get('max_tokens', config.LLM_MAX_TOKENS),
+            timeout=timeout,
         )
     
     @staticmethod
     def _get_qwen(**kwargs):
         """获取通义千问 LLM"""
         from langchain_openai import ChatOpenAI
+
+        timeout = kwargs.get('timeout')
         
         return ChatOpenAI(
             api_key=config.QWEN_API_KEY,
             base_url=config.QWEN_BASE_URL,
             model=kwargs.get('model', config.QWEN_MODEL),
             temperature=kwargs.get('temperature', config.LLM_TEMPERATURE),
-            max_tokens=kwargs.get('max_tokens', config.LLM_MAX_TOKENS)
+            max_tokens=kwargs.get('max_tokens', config.LLM_MAX_TOKENS),
+            timeout=timeout,
         )
     
     @staticmethod
     def _get_glm(**kwargs):
         """获取智谱 GLM LLM"""
         from langchain_openai import ChatOpenAI
+
+        timeout = kwargs.get('timeout')
         
         return ChatOpenAI(
             api_key=config.GLM_API_KEY,
             base_url=config.GLM_BASE_URL,
             model=kwargs.get('model', config.GLM_MODEL),
             temperature=kwargs.get('temperature', config.LLM_TEMPERATURE),
-            max_tokens=kwargs.get('max_tokens', config.LLM_MAX_TOKENS)
+            max_tokens=kwargs.get('max_tokens', config.LLM_MAX_TOKENS),
+            timeout=timeout,
         )
 
     @staticmethod
@@ -101,12 +113,14 @@ class LLMManager:
 
         # Kimi 部分模型仅允许 temperature=1
         kwargs.pop("temperature", None)
+        timeout = kwargs.get('timeout')
         return ChatOpenAI(
             api_key=config.KIMI_API_KEY,
             base_url=config.KIMI_BASE_URL,
             model=kwargs.get('model', config.KIMI_MODEL),
             temperature=1.0,
-            max_tokens=kwargs.get('max_tokens', config.LLM_MAX_TOKENS)
+            max_tokens=kwargs.get('max_tokens', config.LLM_MAX_TOKENS),
+            timeout=timeout,
         )
 
 
