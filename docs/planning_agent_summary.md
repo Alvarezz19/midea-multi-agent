@@ -1,154 +1,196 @@
-# 规划智能体 (Planning Agent) 完整工作流程总结
+# 规划智能体 (Planning Agent) 当前工作流总结
 
-> 最后更新: 2026-03-06
+> 最后更新: 2026-03-09
 
 ## 1. 概述
 
-**规划智能体 (Planning Agent)** 是 LangGraph 工作流中的第二个节点，位于检索智能体（Retrieval Agent）和编码智能体（Coding Agent）之间。它扮演**工业自动化控制系统逻辑规划专家**的角色，核心职责是：将用户的自然语言需求（如数学公式、控制逻辑描述）转化为**结构化的逻辑控制拓扑图**（中间表示 IR），供下游编码智能体将其翻译为最终的 JSON 组态文件。
+当前版本的 Planning Agent 是 LangGraph 工作流中的第三个节点，位于 Analysis Agent 和 Retrieval Agent 之后、Coding Agent 之前。
 
-### 在工作流中的位置
+它的职责不是直接生成最终 JSON，而是把：
 
+1. 用户原始需求 user_query
+2. 检索智能体返回的模块白名单 retrieval_context
+3. 分析智能体提供的业务场景参考 analysis_result
+
+组合成一份结构化的中间表示 PlanIR，再写入 execution_plan，供 Coding Agent 使用。
+
+Planning Agent 当前扮演的是“受检索结果约束的逻辑规划器”：
+
+1. retrieval_context 决定可用模块范围。
+2. analysis_result 决定规划理解方向。
+3. execution_plan 决定下游如何实例化模块和连线。
+
+---
+
+## 2. 在工作流中的位置
+
+当前主链路为：
+
+```text
+用户需求
+  -> Analysis Agent
+  -> Retrieval Agent
+  -> Planning Agent
+  -> Coding Agent
+  -> END
 ```
-用户需求 → [检索智能体] → [规划智能体] → [编码智能体] → JSON 组态文件
-                ↓                ↓                ↓
-          retrieval_context   execution_plan   generated_code
-```
 
-工作流定义在 `workflow.py` 中，流程为：
+对应的 workflow.py 节点关系是：
+
 ```python
-workflow.set_entry_point("retrieval")
-workflow.add_edge("retrieval", "planning")    # 检索 → 规划
-workflow.add_edge("planning", "coding")       # 规划 → 编码
-workflow.add_edge("coding", END)              # 编码 → 结束
+workflow.set_entry_point("analysis")
+workflow.add_edge("analysis", "retrieval")
+workflow.add_edge("retrieval", "planning")
+workflow.add_edge("planning", "coding")
+workflow.add_edge("coding", END)
 ```
+
+因此，Planning Agent 不再是“检索后的第二个节点”这种旧表述，而是当前线性工作流中的第三步。
 
 ---
 
-## 2. 源文件结构
+## 3. 相关文件
 
-| 文件 | 职责 |
-|------|------|
-| `agents/planning_agent.py` | 规划智能体主体实现，包含数据结构定义、LLM 调用、输出校验 |
-| `utils/context_formatter.py` | `format_docs_for_planner()` 函数，负责将检索上下文清洗为 LLM 友好的精简文本 |
-| `utils/model_manager.py` | `LLMManager` 类，统一管理多种 LLM 提供商的实例化 |
-| `config.py` | 全局配置（LLM 提供商、温度、最大 token 数等） |
-| `workflow.py` | LangGraph 工作流编排，定义规划智能体的节点注册和边连接 |
-
----
-
-## 3. 数据结构定义（中间表示 IR）
-
-规划智能体使用 Pydantic 模型定义了三层结构化数据模型，这是规划与编码之间的**协议契约**。
-
-### 3.1 PlanNode（模块节点）
-
-代表逻辑图中的一个模块实例：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `logic_id` | `str` | 唯一的逻辑标识符，使用有意义的名称（如 `temp_diff_calc`、`const_4_18`） |
-| `module_type` | `str` | 对应知识库中的模块类型（如 `constInput`、`multiply`、`subtract`、`divide`） |
-| `parameters` | `Dict[str, Any]` | 该模块实例的配置参数（如 `{"fixedValue": 4.18, "inputs": 3}`） |
-| `reasoning` | `str` | LLM 选择此模块的理由说明 |
-
-注意：Prompt 示例中要求模型输出 `name` 字段，但当前 `PlanNode` 数据模型只保留 `logic_id`、`module_type`、`parameters`、`reasoning` 四个字段。即使模型额外返回 `name`，它也不会成为最终 `execution_plan` 契约的一部分。
-
-### 3.2 PlanConnection（连接关系）
-
-代表两个模块之间的一条数据流连线：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `from_node` | `str` | 上游节点的 `logic_id` |
-| `from_port_index` | `int` | 上游节点的输出端口索引（0-based），通常为 0 |
-| `to_node` | `str` | 下游节点的 `logic_id` |
-| `to_port_index` | `int` | 下游节点的输入端口索引（0-based） |
-
-### 3.3 PlanIR（整体规划）
-
-聚合所有节点和连接的顶层结构：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `goal` | `str` | 对当前计算任务的简述 |
-| `nodes` | `List[PlanNode]` | 模块节点列表 |
-| `connections` | `List[PlanConnection]` | 模块间的连接关系列表 |
+| 文件 | 作用 |
+|:---|:---|
+| agents/planning_agent.py | Planning Agent 主实现，包含 IR 模型、Prompt、重试、校验逻辑 |
+| utils/context_formatter.py | format_docs_for_planner()，将 retrieval_context 压缩为适合规划模型阅读的 slim_context |
+| agents/analysis_agent.py | 上游语义分析节点，生成 scenario_analysis 供规划阶段软引用 |
+| agents/retrieval_agent.py | 上游检索节点，提供 relevant_nodes 白名单与技术规格 |
+| config.py | Planning Agent 的模型与上下文配置 |
+| workflow.py | 工作流节点编排 |
 
 ---
 
-## 4. 完整工作流程（详细步骤）
+## 4. 中间表示契约
 
-### 4.1 入口：`__call__(self, state)` — LangGraph 节点调用接口
+Planning Agent 与 Coding Agent 之间通过 PlanIR 契约通信。
 
-当 LangGraph 执行到 `planning` 节点时，自动调用此方法。
+### 4.1 PlanNode
 
-**执行逻辑：**
-1. 从工作流状态 `state` 中提取 `user_query`（用户原始需求）和 `retrieval_context`（检索智能体产出的上下文）
-2. 调用核心方法 `self.plan(user_query, retrieval_context)` 生成 `PlanIR`
-3. 将 `PlanIR` 通过 `.model_dump()` 序列化为字典，写入 `state["execution_plan"]`
-4. 更新 `state["current_step"]` 为 `"planning_completed"`
-5. 返回更新后的 `state`
+表示一个模块实例：
 
-### 4.2 初始化：`__init__(self, llm_provider, model)`
+| 字段 | 类型 | 说明 |
+|:---|:---|:---|
+| logic_id | str | 逻辑层唯一标识符，如 temp_diff_calc、const_4_18 |
+| module_type | str | 模块类型，必须来自 retrieval_context.relevant_nodes |
+| parameters | Dict[str, Any] | 模块参数配置 |
+| reasoning | str | 选择该模块的理由 |
 
-在工作流创建时（`create_workflow()` 中 `PlanningAgent()` 被实例化），执行初始化：
+注意：Prompt 示例中出现过 name 字段，但当前真正的 PlanNode 契约只有 logic_id、module_type、parameters、reasoning 四个字段。name 不属于最终 execution_plan 契约。
 
-1. **获取 LLM 实例**：通过 `LLMManager.get_llm()` 获取指定提供商（DeepSeek / OpenAI / Qwen / GLM / Kimi）的 ChatOpenAI 实例
-2. **创建提示词模板**：调用 `_create_planning_prompt()` 预加载 System Prompt 和 User Prompt 模板
+### 4.2 PlanConnection
 
-### 4.3 核心推理：`plan(self, user_query, retrieval_context)` → PlanIR
+表示两个节点之间的一条连接：
 
-这是规划智能体最核心的方法，完整的执行流程如下：
+| 字段 | 类型 | 说明 |
+|:---|:---|:---|
+| from_node | str | 上游节点 logic_id |
+| from_port_index | int | 上游输出端口索引，0-based |
+| to_node | str | 下游节点 logic_id |
+| to_port_index | int | 下游输入端口索引，0-based |
 
+### 4.3 PlanIR
+
+整体规划结果：
+
+| 字段 | 类型 | 说明 |
+|:---|:---|:---|
+| goal | str | 对当前规划目标的简述 |
+| nodes | List[PlanNode] | 节点列表 |
+| connections | List[PlanConnection] | 连接关系列表 |
+
+### 4.4 内建校验
+
+PlanIR 当前内建两类校验：
+
+1. validate_ids()：所有连接引用的 logic_id 必须存在。
+2. validate_module_types()：所有 node.module_type 必须在检索结果白名单内。
+
+---
+
+## 5. 输入与输出
+
+### 5.1 输入
+
+Planning Agent 从共享状态中读取：
+
+| 字段 | 类型 | 来源 | 说明 |
+|:---|:---|:---|:---|
+| user_query | str | 用户输入 | 用户原始需求 |
+| retrieval_context | dict | Retrieval Agent | 检索到的模块定义、参数、端口、模板等完整信息 |
+| analysis_result | dict | Analysis Agent | 业务场景分析结果，主要用于 prompt 软参考 |
+
+其中 retrieval_context 是唯一的硬约束输入，analysis_result 是软参考输入。
+
+### 5.2 analysis_result 在规划阶段的作用
+
+Planning Agent 通过 _format_analysis_context() 从 analysis_result.scenario_analysis 中提取简洁的业务提示，包括：
+
+1. summary
+2. business_goal
+3. system_type
+4. equipment_object
+5. actuator
+6. controlled_variable
+7. feedback_variable
+8. setpoint_variable
+9. output_signal
+10. control_strategy
+11. control_mode
+12. input_signals
+13. output_signals
+14. ambiguities
+15. assumptions
+
+这些内容只作为 Prompt 中的“业务场景参考”，不会替代 retrieval_context 的模块白名单约束。
+
+### 5.3 输出
+
+Planning Agent 写回：
+
+| 字段 | 类型 | 说明 |
+|:---|:---|:---|
+| execution_plan | dict | PlanIR 经 model_dump() 序列化后的结果 |
+| current_step | str | planning_completed |
+
+---
+
+## 6. 完整规划流程
+
+### 6.1 LangGraph 节点入口
+
+__call__(state) 的执行顺序是：
+
+1. 从 state 读取 user_query。
+2. 从 state 读取 retrieval_context。
+3. 从 state 读取 analysis_result。
+4. 调用 plan(user_query, retrieval_context, analysis_result)。
+5. 将返回的 PlanIR 序列化写入 state["execution_plan"]。
+6. 将 current_step 更新为 planning_completed。
+
+### 6.2 核心流程图
+
+```text
+user_query + retrieval_context + analysis_result
+    │
+    ▼
+plan()
+    │
+    ├─ 1. 提取 module_type 白名单
+    ├─ 2. format_docs_for_planner() 压缩检索上下文
+    ├─ 3. _format_analysis_context() 压缩业务场景参考
+    ├─ 4. 构建 Prompt
+    ├─ 5. 先走 Structured Output
+    ├─ 6. 失败则回退到 JSON 正则解析
+    ├─ 7. 校验 IDs 与 module_type 白名单
+    ├─ 8. 失败则带错误反馈重试
+    └─ 9. 返回 PlanIR 或失败 PlanIR
 ```
-┌─────────────────────────────────┐
-│ 1. 提取模块白名单               │
-│    从 retrieval_context 中提取   │
-│    所有有效的 module_type 集合   │
-└──────────────┬──────────────────┘
-               ↓
-┌─────────────────────────────────┐
-│ 2. 上下文清洗                    │
-│    调用 format_docs_for_planner │
-│    生成 slim_context（精简文本） │
-└──────────────┬──────────────────┘
-               ↓
-┌─────────────────────────────────┐
-│ 3. 构建 Prompt                   │
-│    将 slim_context 和 user_query │
-│    注入提示词模板                │
-└──────────────┬──────────────────┘
-               ↓
-┌─────────────────────────────────┐
-│ 4. 调用 LLM 生成结构化输出       │
-│    主路径: Structured Output     │
-│    回退路径: 正则解析 JSON       │
-└──────────────┬──────────────────┘
-               ↓
-┌─────────────────────────────────┐
-│ 5. 校验阶段                      │
-│    ① validate_ids(): 验证连接    │
-│       中的节点ID是否存在         │
-│    ② validate_module_types():    │
-│       验证模块类型是否在白名单中 │
-└──────────────┬──────────────────┘
-               ↓
-┌─────────────────────────────────┐
-│ 6. 失败反馈重试                  │
-│    将错误原因和上次输出回灌给LLM  │
-└──────────────┬──────────────────┘
-               ↓
-┌─────────────────────────────────┐
-│ 7. 返回 PlanIR                   │
-│    超过上限后返回失败结果         │
-└─────────────────────────────────┘
-```
 
-#### 步骤详解
+### 6.3 步骤一：提取模块白名单
 
-**① 提取模块白名单**
-
-从检索上下文的 `relevant_nodes` 中提取所有 `module_type`，构建一个 `Set[str]`，用于后续校验 LLM 生成的节点是否使用了合法的模块类型。
+从 retrieval_context.relevant_nodes 中提取所有合法 module_type：
 
 ```python
 self._available_module_types = {
@@ -156,116 +198,116 @@ self._available_module_types = {
     for node in retrieval_context.get('relevant_nodes', [])
     if node.get('module_type')
 }
-# 示例结果: {'constInput', 'multiply', 'subtract', 'divide', 'swInput', ...}
 ```
 
-**② 上下文清洗（format_docs_for_planner）**
+这一步的意义是把“规划自由度”限制在检索结果给出的模块集合里。
 
-这是"减脂"关键步骤。该函数将检索智能体返回的包含完整 `template_json`、`keywords` 等冗余数据的上下文，精简为 LLM 易读的结构化文本。
+### 6.4 步骤二：压缩检索上下文
 
-清洗策略：
-- **保留的信息**：模块名称、`module_type`、分类、功能描述、精简的参数定义（键名/类型/默认值/约束）、端口定义（索引/标签/类型）、使用场景指南
-- **剔除的信息**：`template_json`（大块模板）、完整 `keywords` 列表、相似度分数细节
-- **附加信息**：检索元数据（查询、匹配数量、平均相似度、意图、检测到的运算）、规划建议（基于相似度高低给出策略提示）
-- **分层展示**：前 `PLANNING_CONTEXT_DETAIL_TOP_N` 个模块输出详细信息，其余模块输出摘要；总模块数受 `PLANNING_CONTEXT_MAX_MODULES` 限制
+Planning Agent 不会把 retrieval_context 原样交给 LLM，而是调用 format_docs_for_planner() 做视图降维。
 
-清洗后的文本格式示例：
-```
-知识库检索结果
+保留的信息主要有：
 
-检索查询: 设计夏季主机负荷模块...
-检索统计:
-   - 找到模块数: 10
-   - 平均相似度: 0.720
+1. 模块名称
+2. module_type
+3. 分类
+4. 功能描述
+5. 参数键名、类型、默认值、约束
+6. 端口索引、标签、类型、描述
+7. 使用场景
+8. 检索元数据摘要
 
-相关模块清单:
+被剔除或压缩的信息主要有：
 
-[1] 常量(常量输入)
-    类型: constInput
-    分类: 变量模块/常量
-    功能: 常数模块输出一个固定的数值...
-    参数定义:
-       • fixedValue (double, 默认=0): 常量的具体值
-    输出端口:
-       [0] 输出 (number): 输出参数配置中的数值
-    适用场景:
-       • 在公式中作为固定系数，如 4.18、3.6 等转换系数
-...
-```
+1. template_json 原文
+2. 大块无关结构
+3. 过长的关键词与模板细节
 
-**③ 构建 Prompt**
+上下文规模由以下配置控制：
 
-提示词分为两部分：
+1. PLANNING_CONTEXT_DETAIL_TOP_N
+2. PLANNING_CONTEXT_MAX_MODULES
 
-- **System Prompt**：设定角色（工业自动化控制系统逻辑规划专家），明确任务规则：
-  - 只能使用可用模块列表中的 `module_type`，严禁虚构
-  - 逻辑 ID 需唯一且有意义
-  - 端口索引使用 0-based
-  - 常量需要检查模块是否支持 `fixedValue` 参数，不支持则实例化 `constInput`
-  - 参数键名必须与模块定义完全一致
-  - 注意参数类型（integer/number/boolean/string）
-  - 指定严格的 JSON 输出格式
+### 6.5 步骤三：压缩业务场景参考
 
-- **User Prompt**：注入用户需求文本
+_format_analysis_context() 会把上游的 scenario_analysis 转成一段简洁文本，作为 System Prompt 中的业务参考块。
 
-**④ 调用 LLM 生成结构化输出**
+它的设计原则是：
 
-采用**双路径策略**，确保鲁棒性：
+1. 提供业务理解方向。
+2. 不把 analysis_result 变成新的硬约束源。
+3. 模糊点和假设只保留少量关键内容，避免 Prompt 噪声膨胀。
 
-- **主路径 — Structured Output（Function Calling）**：
-  ```python
-  structured_llm = self.llm.with_structured_output(PlanIR)
-  plan_ir = structured_llm.invoke(messages)
-  ```
-  利用 LLM 的 Function Calling / Tool Calling 能力，直接输出符合 `PlanIR` Pydantic 模型的结构化数据。这是首选方式，解析成功率最高。
+### 6.6 步骤四：构建 Prompt
 
-- **回退路径 — 正则解析（_fallback_parse）**：
-  当 Structured Output 失败时（如某些模型不支持 function calling），回退到普通文本生成 + 正则提取 JSON 的方式：
-  ```python
-  response = self.llm.invoke(messages)
-  content = response.content
-  json_match = re.search(r'```json\s*(.*?)\s*```', content, re.DOTALL)
-  plan_dict = json.loads(json_str)
-  plan_ir = PlanIR(**plan_dict)
-  ```
+当前 Prompt 有三个关键组成部分：
 
-**⑤ 校验阶段**
+1. analysis_context：来自 Analysis Agent 的业务场景参考。
+2. slim_context：来自 Retrieval Agent 的模块清单和技术规格摘要。
+3. user_query：用户原始需求。
 
-对 LLM 生成的 `PlanIR` 进行两层校验：
+Prompt 对模型施加的核心规则包括：
 
-1. **节点 ID 一致性校验 (`validate_ids()`)**：
-  遍历所有 `connections`，确保 `from_node` 和 `to_node` 引用的 `logic_id` 都在 `nodes` 列表中定义过。防止 LLM 生成悬空连接。
+1. 只能使用可用模块列表中的 module_type。
+2. logic_id 必须唯一且有意义。
+3. 端口索引必须使用 0-based。
+4. 参数键名必须与模块定义完全一致。
+5. 常量优先检查是否能通过参数设置，否则需要显式实例化 constInput。
+6. analysis_context 只能帮助理解场景，不能替代可用模块列表。
 
-2. **模块类型白名单校验 (`validate_module_types()`)**：
-  确保所有节点的 `module_type` 都在检索结果提供的合法类型集合中。防止 LLM 虚构不存在的模块类型。
+### 6.7 步骤五：Structured Output 主路径
 
-需要注意，这层白名单校验只会在 `retrieval_context.relevant_nodes` 中成功提取出至少一个 `module_type` 时执行。当前实现中的 `_validate_plan()` 是：
+Planning Agent 首选：
 
 ```python
-if self._available_module_types:
-    plan_ir.validate_module_types(self._available_module_types)
+structured_llm = self.llm.with_structured_output(
+    PlanIR,
+    method="function_calling",
+)
 ```
 
-因此，当检索结果为空时，规划智能体仍会继续调用 LLM，只是不会执行 `module_type` 的代码级白名单约束；此时更多依赖 Prompt 约束和错误反馈重试机制。
+也就是要求模型直接按 PlanIR 契约生成结构化输出。这是当前最稳定的主路径。
 
-**⑥ 带错误反馈的重试 (`_build_retry_messages`)**
+### 6.8 步骤六：回退解析路径
 
-当前实现相对早期版本的关键增强，是 `plan()` 会在 `config.PLANNING_MAX_RETRIES` 范围内进行修正重试，而不是首次失败就直接结束：
+如果 Structured Output 失败，则调用 _fallback_parse()：
 
-1. 首次尝试使用标准 Prompt 生成规划。
-2. 如果 Structured Output、回退 JSON 解析、或校验阶段失败，则记录错误原因。
-3. 下一次尝试时，将以下内容一并提供给模型：
-  - 原始用户需求
-  - `slim_context`
-  - 上一次失败的错误文本
-  - 上一次生成的 JSON 输出（若可序列化）
-4. 要求模型修正后重新输出完整 JSON。
+1. 先调用普通 llm.invoke(messages)。
+2. 优先提取 ```json 代码块。
+3. 提取不到时尝试直接将全文作为 JSON 解析。
+4. 再交给 PlanIR 做 Pydantic 校验。
 
-补充说明：代码中的 `PLANNING_MAX_RETRIES` 实际上表示**总尝试次数上限**，因为循环写法是 `for attempt in range(1, max_attempts + 1)`。当配置值为 `2` 时，表示“首次生成 + 最多 1 次修正”，而不是“首次失败后再额外重试 2 次”。
+因此当前规划阶段并不是“只有 Function Calling 一条路”，而是保留了兼容不同模型的回退链路。
 
-**⑦ 最终失败兜底**
+### 6.9 步骤七：结果校验
 
-如果所有尝试都失败，`plan()` 返回：
+当前统一由 _validate_plan() 执行：
+
+1. 一定执行 plan_ir.validate_ids()。
+2. 只有当 _available_module_types 非空时，才执行 module_type 白名单校验。
+
+这意味着：
+
+1. 正常情况下，Planning Agent 会受到检索结果的硬约束。
+2. 当检索结果为空时，仍会尝试规划，但 module_type 白名单校验会被跳过。
+
+### 6.10 步骤八：带错误反馈的重试
+
+如果生成或校验失败，Planning Agent 不会立刻退出，而是进入带错误反馈的修正重试。
+
+下一轮重试时，模型会看到：
+
+1. 原始用户需求
+2. slim_context
+3. analysis_context
+4. 上一轮错误原因
+5. 上一轮生成内容
+
+这样做的目的，是把失败原因显式反馈给模型，而不是盲目重试。
+
+### 6.11 步骤九：最终兜底
+
+当达到 max_attempts 仍失败时，返回失败 PlanIR：
 
 ```json
 {
@@ -275,223 +317,119 @@ if self._available_module_types:
 }
 ```
 
----
-
-## 5. 输入与输出规格
-
-### 5.1 输入（从工作流状态中读取）
-
-| 字段 | 类型 | 来源 | 说明 |
-|------|------|------|------|
-| `user_query` | `str` | 用户输入 | 用户的自然语言需求描述 |
-| `retrieval_context` | `dict` | 检索智能体输出 | 包含检索到的模块列表及其详细定义 |
-
-`retrieval_context` 的关键结构：
-```json
-{
-  "query": "用户原始查询",
-  "relevant_nodes": [
-    {
-      "module_type": "multiply",
-      "name": "乘法运算",
-      "description": "...",
-      "category": "运算模块/数学运算",
-      "parameters_schema": { ... },
-      "ports_definition": { "inputs": [...], "outputs": [...] },
-      "template_json": { ... },
-      "keywords": [...],
-      "usage_guides": [...],
-      "similarity_score": 0.755,
-      "rank": 2
-    }
-  ],
-  "metadata": {
-    "retrieved_count": 10,
-    "avg_confidence_score": 0.720,
-    "detected_operations": ["乘法", "减法", "除法"],
-    "intent": "mathematical_computation",
-    "rewrite_used": true,
-    "llm_queries": ["..."],
-    "llm_category_l1": ""
-  }
-}
-```
-
-### 5.2 输出（写入工作流状态）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `execution_plan` | `dict` | `PlanIR` 序列化后的字典，包含 `goal`、`nodes`、`connections` |
-| `current_step` | `str` | 更新为 `"planning_completed"` |
-
-`execution_plan` 输出示例（来自实际运行记录）：
-```json
-{
-  "goal": "设计夏季主机负荷计算模块，实现公式：4.18×(冷冻回水温度-冷冻供水温度)×冷冻水流量÷3.6",
-  "nodes": [
-    {
-      "logic_id": "input_return_temp",
-      "module_type": "swInput",
-      "parameters": { "user_defined_name": "冷冻回水温度" },
-      "reasoning": "用于接收冷冻回水温度的输入值"
-    },
-    {
-      "logic_id": "input_supply_temp",
-      "module_type": "swInput",
-      "parameters": { "user_defined_name": "冷冻供水温度" },
-      "reasoning": "用于接收冷冻供水温度的输入值"
-    },
-    {
-      "logic_id": "input_flow",
-      "module_type": "swInput",
-      "parameters": { "user_defined_name": "冷冻水流量" },
-      "reasoning": "用于接收冷冻水流量的输入值"
-    },
-    {
-      "logic_id": "const_4_18",
-      "module_type": "constInput",
-      "parameters": { "user_defined_name": "系数4.18", "fixedValue": 4.18 },
-      "reasoning": "提供公式中的常数系数4.18"
-    },
-    {
-      "logic_id": "const_3_6",
-      "module_type": "constInput",
-      "parameters": { "user_defined_name": "系数3.6", "fixedValue": 3.6 },
-      "reasoning": "提供公式中的除数常数3.6"
-    },
-    {
-      "logic_id": "calc_temp_diff",
-      "module_type": "subtract",
-      "parameters": { "name": "温差计算", "inputs": 2 },
-      "reasoning": "计算冷冻回水温度与冷冻供水温度的差值"
-    },
-    {
-      "logic_id": "multiply_all",
-      "module_type": "multiply",
-      "parameters": { "name": "乘积计算", "inputs": 3 },
-      "reasoning": "将4.18、温差和流量三个数值相乘"
-    },
-    {
-      "logic_id": "divide_by_3_6",
-      "module_type": "divide",
-      "parameters": { "name": "除以3.6", "inputs": 2 },
-      "reasoning": "将乘积结果除以3.6得到最终负荷值"
-    }
-  ],
-  "connections": [
-    { "from_node": "input_return_temp", "from_port_index": 0, "to_node": "calc_temp_diff", "to_port_index": 0 },
-    { "from_node": "input_supply_temp", "from_port_index": 0, "to_node": "calc_temp_diff", "to_port_index": 1 },
-    { "from_node": "calc_temp_diff", "from_port_index": 0, "to_node": "multiply_all", "to_port_index": 1 },
-    { "from_node": "const_4_18", "from_port_index": 0, "to_node": "multiply_all", "to_port_index": 0 },
-    { "from_node": "input_flow", "from_port_index": 0, "to_node": "multiply_all", "to_port_index": 2 },
-    { "from_node": "multiply_all", "from_port_index": 0, "to_node": "divide_by_3_6", "to_port_index": 0 },
-    { "from_node": "const_3_6", "from_port_index": 0, "to_node": "divide_by_3_6", "to_port_index": 1 }
-  ]
-}
-```
-
-对应的逻辑拓扑图：
-```
-冷冻回水温度(swInput) ──[0]──→ [0]温差计算(subtract)
-冷冻供水温度(swInput) ──[0]──→ [1]温差计算(subtract)
-
-系数4.18(constInput)  ──[0]──→ [0]乘积计算(multiply, inputs=3)
-温差计算(subtract)    ──[0]──→ [1]乘积计算(multiply)
-冷冻水流量(swInput)   ──[0]──→ [2]乘积计算(multiply)
-
-乘积计算(multiply)    ──[0]──→ [0]除以3.6(divide, inputs=2)
-系数3.6(constInput)   ──[0]──→ [1]除以3.6(divide)
-                                    ↓
-                               最终负荷值
-```
+这保证了工作流不会因为规划阶段异常而直接崩溃。
 
 ---
 
-## 6. 关键设计原则
+## 7. Prompt 设计要点
 
-### 6.1 视图分离（上下文清洗）
+当前版本和旧版相比，最大的变化不是 JSON 结构，而是 Prompt 已显式接入 analysis_context。
 
-通过 `format_docs_for_planner()` 函数，将检索智能体返回的完整上下文（包含 `template_json`、完整 `keywords` 等噪音数据）清洗为 LLM 只需关注的核心信息：
+也就是说，Planning Agent 现在同时受两类上游信息影响：
 
-- **保留**：模块名称、类型、功能描述、参数定义（键名+类型+默认值+约束）、端口定义（索引+标签+类型）、使用场景指南
-- **剔除**：`template_json` 模板、完整 `keywords`、相似度分数等
+1. retrieval_context：技术白名单与模块规格。
+2. analysis_result：业务场景理解与模糊点提示。
 
-这确保 LLM 的注意力集中在逻辑推理上，而非被无关的模板细节干扰。
+两者关系必须这样理解：
 
-### 6.2 逻辑抽象（logic_id 解耦）
+1. analysis_result 决定理解方向。
+2. retrieval_context 决定可用积木。
 
-引入 `logic_id` 作为逻辑层面的唯一标识符，将"逻辑设计"与"物理生成"解耦：
-- 规划智能体只关心逻辑拓扑（哪些模块、如何连接）
-- 编码智能体负责将 `logic_id` 映射为实际的 UUID、坐标位置、wires 连接数组等物理属性
-
-### 6.3 结构化输出 + 双路径容错
-
-- **主路径**：利用 LLM 的 Function Calling 直接输出 Pydantic 模型，零解析开销
-- **回退路径**：正则提取 JSON + 手动 Pydantic 校验，兼容不支持 function calling 的模型
-- **重试修正**：任一路径失败后不会立刻结束，而是将错误反馈给模型重试生成
-- **最终兜底**：超过最大重试次数后返回失败 PlanIR，不会导致工作流崩溃
-
-### 6.4 双重校验机制
-
-1. **连接完整性**：确保所有连线的 `from_node`/`to_node` 都指向已定义的节点，防止悬空连接
-2. **模块类型白名单**：确保 LLM 选择的 `module_type` 都在检索结果的可用范围内，防止虚构模块
+如果 analysis_result 暗示“应该做 PID 控制”，但 retrieval_context 没有 PID 模块，Planning Agent 依然不能虚构 PID 模块。
 
 ---
 
-## 7. 配置参数
+## 8. 配置参数
 
-| 配置项 | 来源 | 默认值 | 说明 |
-|--------|------|--------|------|
-| `LLM_PROVIDER` | `config.py` / `.env` | `"deepseek"` | 全局默认 LLM 提供商 |
-| `PLANNING_LLM_PROVIDER` | `config.py` / `.env` | `""` | 规划智能体专用 provider，空则回退到全局 `LLM_PROVIDER` |
-| `PLANNING_LLM_MODEL` | `config.py` / `.env` | `""` | 规划智能体专用模型名，空则使用 provider 默认模型 |
-| `PLANNING_LLM_TEMPERATURE` | `config.py` / `.env` | `0.2` | 规划生成温度，低于全局默认值以提高稳定性 |
-| `PLANNING_MAX_RETRIES` | `config.py` / `.env` | `2` | 规划总尝试次数上限，包含首次生成 |
-| `PLANNING_CONTEXT_DETAIL_TOP_N` | `config.py` / `.env` | `5` | 详细展开的模块数量 |
-| `PLANNING_CONTEXT_MAX_MODULES` | `config.py` / `.env` | `8` | 传给规划模型的最大模块数 |
-| `DEBUG` | `config.py` / `.env` | `True` | 是否输出调试信息 |
+当前实际相关配置如下：
 
-规划智能体支持在初始化时通过 `llm_provider` 和 `model` 参数覆盖全局配置。
+| 配置项 | 默认值 | 说明 |
+|:---|:---|:---|
+| PLANNING_LLM_PROVIDER | "" | 规划节点专用 provider，为空时回退全局 LLM_PROVIDER |
+| PLANNING_LLM_MODEL | "" | 规划节点专用模型，为空时使用 provider 默认模型 |
+| PLANNING_LLM_TEMPERATURE | 0.7 | 规划阶段温度 |
+| PLANNING_MAX_RETRIES | 2 | 总尝试次数上限，包含首次生成 |
+| PLANNING_CONTEXT_DETAIL_TOP_N | 5 | 详细展开的模块数量 |
+| PLANNING_CONTEXT_MAX_MODULES | 8 | 传给规划模型的最大模块数量 |
 
----
-
-## 8. 性能参考
-
-根据实际运行记录（用户需求：`4.18×(冷冻回水温度-冷冻供水温度)×冷冻水流量÷3.6`）：
-
-| 指标 | 值 |
-|------|-----|
-| 规划耗时 | 27.55 秒 |
-| 生成节点数 | 8 个 |
-| 生成连接数 | 7 条 |
-| 使用模块类型 | `swInput`(3)、`constInput`(2)、`subtract`(1)、`multiply`(1)、`divide`(1) |
+需要特别注意：PLANNING_MAX_RETRIES 当前实际语义是“总尝试次数”，不是“首次失败后的额外重试次数”。配置为 2 时，表示首次生成加最多 1 次修正。
 
 ---
 
 ## 9. 错误处理策略
 
-| 错误场景 | 处理方式 |
-|----------|----------|
-| Structured Output 失败 | 自动回退到正则解析 JSON |
-| 正则解析失败 | 记录错误并进入下一次修正重试 |
-| 连接引用了不存在的节点 ID | `validate_ids()` 抛出 `ValueError`，进入下一次修正重试 |
-| 使用了不在白名单中的模块类型 | `validate_module_types()` 抛出 `ValueError`，进入下一次修正重试 |
-| 超过最大重试次数仍失败 | 返回失败 `PlanIR(goal="规划失败: ...", nodes=[], connections=[])` |
-| 检索上下文为空 | `format_docs_for_planner()` 返回警告文本 |
+| 场景 | 处理方式 |
+|:---|:---|
+| Structured Output 失败 | 回退到 _fallback_parse() |
+| JSON 提取或解析失败 | 进入下一轮重试 |
+| 连接引用了不存在的节点 ID | validate_ids() 抛错，进入下一轮重试 |
+| 使用了不存在于检索白名单的 module_type | validate_module_types() 抛错，进入下一轮重试 |
+| 超过最大尝试次数仍失败 | 返回失败 PlanIR |
+| retrieval_context 为空 | 仍尝试规划，但 module_type 白名单校验可能跳过 |
 
 ---
 
 ## 10. 与上下游智能体的协作关系
 
-### 与检索智能体（上游）
+### 10.1 与 Analysis Agent
 
-- **依赖**：规划智能体完全依赖检索智能体提供的 `retrieval_context`，其中包含可用模块的定义和参数规格
-- **约束**：当检索结果非空时，规划只能使用检索结果中已有的 `module_type`，通过白名单校验机制强制执行
-- **空检索退化**：当检索结果为空时，规划仍会继续尝试，但白名单校验会被跳过，系统退化为“警告文本上下文 + Prompt 约束 + 失败重试”的模式
+Analysis Agent 为 Planning Agent 提供业务语义支撑。
 
-### 与编码智能体（下游）
+Planning Agent 当前会消费的不是 analysis_result 全量对象，而是其中适合 Prompt 的场景摘要与关键槽位。
 
-- **输出协议**：`PlanIR` 是两者之间的契约，编码智能体根据 `execution_plan` 中的节点列表和连接关系，结合模块的 `template_json` 模板，生成最终的 JSON 组态文件
-- **职责边界**：
-  - 规划智能体负责**逻辑正确性**（选什么模块、怎么连接、参数设多少）
-  - 编码智能体负责**物理生成**（分配 UUID、计算坐标位置、填充 wires 数组、处理模板占位符）
+### 10.2 与 Retrieval Agent
+
+Retrieval Agent 提供的是技术侧硬约束，包括：
+
+1. 可用 module_type 白名单。
+2. 参数定义。
+3. 端口定义。
+4. 使用场景。
+5. 模板相关元信息。
+
+Planning Agent 只依赖 retrieval_context 作为模块可用性的最终依据。
+
+### 10.3 与 Coding Agent
+
+Coding Agent 接收 execution_plan 后，会：
+
+1. 把 logic_id 映射成真实 UUID。
+2. 根据 connections 生成 wires。
+3. 根据 retrieval_context 中对应模块的 template_json 生成最终平台 JSON。
+
+因此 Planning Agent 只负责逻辑正确性，不负责物理生成细节。
+
+---
+
+## 11. 当前版本相对旧文档的主要变化
+
+以下旧说法已经不适用于当前实现：
+
+1. Planning Agent 只读取 user_query 和 retrieval_context。
+2. 工作流入口是 Retrieval Agent。
+3. Planning Agent 只依赖检索上下文，不利用分析结果。
+4. 规划提示词里没有业务场景参考块。
+5. PLANNING_LLM_TEMPERATURE 默认是 0.2。
+
+当前正确描述应该是：
+
+1. 工作流入口是 Analysis Agent。
+2. Planning Agent 实际读取 user_query、retrieval_context、analysis_result 三个输入。
+3. analysis_result 只做软参考，retrieval_context 才是硬约束来源。
+4. Prompt 已显式包含业务场景参考。
+5. 当前配置默认温度是 0.7。
+
+---
+
+## 12. 小结
+
+当前版本的 Planning Agent 已经从“只看检索结果的规划器”升级成“结合分析语义、但仍受检索白名单约束的规划器”。
+
+它的核心设计可以概括为：
+
+1. 用 analysis_result 增强理解。
+2. 用 retrieval_context 约束可用模块。
+3. 用 PlanIR 解耦规划与编码。
+4. 用 Structured Output + 回退解析 + 错误反馈重试保证鲁棒性。
+
+这也是当前工作流里语义理解、模块检索、拓扑规划三层分工真正闭合的关键节点。

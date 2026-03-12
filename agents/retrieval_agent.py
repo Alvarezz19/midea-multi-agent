@@ -1,27 +1,17 @@
 """
-检索智能体 (Retrieval Agent) — v2
-职责：基于用户需求，通过 LLM 进行意图推断和查询生成，
-      然后从向量数据库中检索相关的领域知识。
-
-变更说明（相对 retrieval_agent_old.py）：
-  - 移除 QueryProcessor 规则查询增强
-  - LLM 意图分析与查询生成成为主流程
-  - LLM 不可用时，兜底使用原始查询做单次检索
-  - 输出结构（retrieval_context）与旧版完全一致
+检索智能体 (Retrieval Agent)
+职责：消费 Analysis Agent 生成的检索计划，并从向量数据库中检索相关领域知识。
 """
 from typing import Dict, List, Any, Optional
 import json
 import os
-import re
-import time
 import chromadb
 import config
-from langchain_core.prompts import ChatPromptTemplate
-from utils.model_manager import EmbeddingManager, LLMManager
+from utils.model_manager import EmbeddingManager
 
 
 class RetrievalAgent:
-    """检索智能体（LLM 驱动）"""
+    """检索智能体（纯检索执行器）"""
 
     def __init__(
         self,
@@ -30,13 +20,13 @@ class RetrievalAgent:
         llm_model: Optional[str] = None,
     ):
         """
-        初始化向量数据库、嵌入模型和 LLM
+        初始化向量数据库和嵌入模型
 
         Args:
             embedding_provider: 嵌入模型提供商 (bge, openai, sentence-transformers, jina)
                                如果不指定，使用配置文件中的默认值
-            llm_provider: LLM 提供商；为空则复用全局默认
-            llm_model: LLM 模型名；为空则复用对应 provider 默认
+            llm_provider: 为兼容旧调用保留，当前未使用
+            llm_model: 为兼容旧调用保留，当前未使用
         """
         # ==================== ChromaDB 初始化 ====================
         self.client = chromadb.PersistentClient(path=config.CHROMA_PERSIST_DIR)
@@ -68,229 +58,58 @@ class RetrievalAgent:
             if config.DEBUG:
                 print("📦 创建新的知识库集合")
 
-        # ==================== LLM 初始化（懒加载） ====================
-        self._llm_provider = (
-            (llm_provider or "").strip()
-            or (config.RETRIEVAL_LLM_PROVIDER or "").strip()
-            or None
-        )
-        self._llm_model = (
-            (llm_model or "").strip()
-            or (config.RETRIEVAL_LLM_MODEL or "").strip()
-            or None
-        )
-        self._llm = None
-        self._llm_init_attempted = False
-
-        # Prompt 与缓存
-        self._analyze_prompt = self._create_analyze_prompt()
-        self._analyze_cache: Dict[str, Dict[str, Any]] = {}
-
-    # ==================== LLM 管理 ====================
-
-    def _ensure_llm(self):
-        """懒加载 LLM，仅尝试初始化一次"""
-        if self._llm_init_attempted:
-            return self._llm
-
-        self._llm_init_attempted = True
-        try:
-            kwargs: Dict[str, Any] = {}
-            if self._llm_model:
-                kwargs["model"] = self._llm_model
-            kwargs["timeout"] = config.RETRIEVAL_LLM_TIMEOUT_S
-            self._llm = LLMManager.get_llm(self._llm_provider, **kwargs)
-            if config.DEBUG:
-                print(f"✅ 检索智能体 LLM 初始化成功")
-        except Exception as e:
-            self._llm = None
-            if config.DEBUG:
-                print(f"⚠️  检索智能体 LLM 初始化失败，将使用兜底策略: {e}")
-        return self._llm
-
-    # ==================== LLM 意图分析 Prompt ====================
-
-    def _create_analyze_prompt(self) -> ChatPromptTemplate:
-        """创建 LLM 意图分析与查询生成的 Prompt"""
-        system_prompt = """你是一个工业楼控/自动化模块检索专家。你的任务是分析用户需求，推断意图，并生成适合向量数据库检索的多个查询变体。
-
-【知识库结构】
-知识库中包含以下类型的模块定义（JSON Schema）：
-- 应用层模块：焓值、含湿量、露点温度、湿球温度、PID控制器、自适应PID、通用电加热加减载逻辑等（复杂功能，直接可用）
-- 逻辑模块：比较判断、边沿触发、触发开关、回差控制、逻辑运算、数据锁存、通道选择、线性变换、限值、RS触发器、SR触发器
-- 运算模块：加、减、乘、除、绝对值、幂运算、对数、模、取位、取整、三角函数、统计运算、位运算、位组合、移位
-- 变量模块：变量、常量、物理输入、物理输出、节点监测、系统时间、引用、BACIP_IO、Modbus_IO、MQTT订阅、MQTT发布
-- 定时模块：定时更新、定时脉冲、延时关、延时开
-- 累计模块：计数器、累加器、运行时间
-- 其他：备注模块
-
-【你需要输出的内容】
-
-1. **queries**（最重要）：生成 {max_queries} 条以内的检索查询变体，用于向量数据库检索。
-   生成策略（按层优先级）：
-   - 第1层：应用场景查询（1条）— 保留完整的需求语义，如"夏季主机负荷计算"
-   - 第2层：核心功能拆解（1-2条）— 提取计算逻辑，如"温度差值计算"、"流量乘温差公式"
-   - 第3层：基础组件关键词（2-4条）— 直接使用基础模块名称，如"减法运算"、"乘法运算"、"常量输入"、"通道选择"
-   
-   **要求**：
-   - 必须包含基础组件层查询（如具体的运算模块名称）
-   - 对于公式需求，拆解出每个需要的基础运算
-   - 对于条件判断需求，包含逻辑控制组件名称
-
-2. **category_l1**：推断的一级分类（用于缩小检索范围）
-   - 如果是现成应用场景 → "应用"
-   - 如果需要条件判断 → "逻辑模块"
-   - 如果主要是数学计算 → "运算模块"
-   - 如果涉及数据采集/输出 → "变量模块"
-   - **对于复杂组合需求（需要多类模块），留空字符串**
-
-3. **intent**：意图分类，必须是以下枚举值之一：
-   - "mathematical_computation"：包含数学公式或运算
-   - "comparison"：包含比较/判断逻辑
-   - "logic_operation"：包含逻辑运算（与或非）
-   - "timing_control"：包含定时/延时控制
-   - "statistical_analysis"：包含统计计算（平均/最大/最小）
-   - "variable_input"：主要涉及数据输入/输出
-   - "general_query"：无法归类的通用查询
-
-4. **detected_operations**：检测到的运算类型列表
-   - 从以下枚举值中选取：["加法", "减法", "乘法", "除法", "模运算", "幂运算"]
-   - 仅当需求中包含对应的数学运算时才列入
-   - 没有数学运算时返回空列表
-
-5. **keywords**：提取的领域术语和关键词列表
-
-【约束】
-- 输出必须是严格的 JSON 格式，不要输出任何额外解释文字
-- intent 必须使用上述枚举值，不能自定义
-- detected_operations 必须使用上述枚举值"""
-
-        user_template = """用户需求：{query}
-
-请分析并输出 JSON：
-{{
-  "queries": ["查询变体1", "查询变体2", "..."],
-  "category_l1": "一级分类或空字符串",
-  "intent": "意图枚举值",
-  "detected_operations": ["运算1", "运算2"],
-  "keywords": ["关键词1", "关键词2"]
-}}"""
-
-        return ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
-            ("user", user_template),
-        ])
-
-    # ==================== LLM 意图分析核心方法 ====================
-
     @staticmethod
-    def _extract_json_text(content: str) -> str:
-        """从 LLM 输出中提取 JSON 文本"""
-        json_match = re.search(r"```json\s*(.*?)\s*```", content, re.DOTALL | re.IGNORECASE)
-        if json_match:
-            return json_match.group(1).strip()
+    def _clean_text(value: Any) -> str:
+        if not isinstance(value, str):
+            return ""
+        return value.strip()
 
-        obj_match = re.search(r"(\{.*\}|\[.*\])", content, re.DOTALL)
-        if obj_match:
-            return obj_match.group(1).strip()
+    @classmethod
+    def _clean_text_list(cls, value: Any, max_items: Optional[int] = None) -> List[str]:
+        if not isinstance(value, list):
+            return []
 
-        return content.strip()
+        result = []
+        for item in value:
+            text = cls._clean_text(item)
+            if text:
+                result.append(text)
 
-    def _llm_analyze_query(self, query: str) -> Optional[Dict[str, Any]]:
-        """
-        调用 LLM 进行意图推断和查询变体生成
+        if max_items is not None:
+            return result[:max_items]
+        return result
 
-        Args:
-            query: 用户原始需求文本
+    def _normalize_retrieval_plan(self, retrieval_plan: Any, query: str) -> Dict[str, Any]:
+        if not isinstance(retrieval_plan, dict):
+            retrieval_plan = {}
 
-        Returns:
-            分析结果字典，包含 queries/category_l1/intent/detected_operations/keywords
-            LLM 调用失败时返回 None
-        """
-        # 缓存命中
-        cached = self._analyze_cache.get(query)
-        if cached is not None:
-            return cached
-
-        llm = self._ensure_llm()
-        if llm is None:
-            return None
-
-        messages = self._analyze_prompt.format_messages(
-            query=query,
-            max_queries=config.RETRIEVAL_LLM_MAX_QUERIES,
+        queries = self._clean_text_list(
+            retrieval_plan.get("queries", []),
+            config.RETRIEVAL_LLM_MAX_QUERIES,
         )
 
-        start = time.perf_counter()
-        try:
-            response = llm.invoke(messages)
-            raw = self._extract_json_text(getattr(response, "content", "") or "")
-            plan = json.loads(raw) if raw else {}
-            elapsed = (time.perf_counter() - start) * 1000
-            if config.DEBUG:
-                print(f"   🤖 LLM 意图分析完成 ({elapsed:.0f}ms)")
-        except Exception as e:
-            elapsed = (time.perf_counter() - start) * 1000
-            if config.DEBUG:
-                print(f"   ⚠️  LLM 意图分析失败 ({elapsed:.0f}ms): {e}")
-            return None
-
-        if not isinstance(plan, dict):
-            return None
-
-        # 标准化 queries
-        raw_queries = plan.get("queries", [])
-        if not isinstance(raw_queries, list):
-            raw_queries = []
-        queries = [q.strip() for q in raw_queries
-                   if isinstance(q, str) and q.strip()][:config.RETRIEVAL_LLM_MAX_QUERIES]
-
-        # 标准化 intent（确保是合法枚举值）
         valid_intents = {
             "mathematical_computation", "comparison", "logic_operation",
             "timing_control", "statistical_analysis", "variable_input",
-            "general_query"
+            "general_query",
         }
-        raw_intent = (plan.get("intent", "") or "").strip()
+        raw_intent = self._clean_text(retrieval_plan.get("intent", ""))
         intent = raw_intent if raw_intent in valid_intents else "general_query"
 
-        # 标准化 detected_operations（确保是合法枚举值）
         valid_operations = {"加法", "减法", "乘法", "除法", "模运算", "幂运算"}
-        raw_ops = plan.get("detected_operations", [])
+        raw_ops = retrieval_plan.get("detected_operations", [])
         if not isinstance(raw_ops, list):
             raw_ops = []
-        detected_operations = [op for op in raw_ops
-                               if isinstance(op, str) and op in valid_operations]
+        detected_operations = [op for op in raw_ops if isinstance(op, str) and op in valid_operations]
 
-        # 标准化 category_l1
-        category_l1 = (plan.get("category_l1", "") or "").strip()
-
-        # 标准化 keywords
-        raw_keywords = plan.get("keywords", [])
-        if not isinstance(raw_keywords, list):
-            raw_keywords = []
-        keywords = [k for k in raw_keywords if isinstance(k, str) and k.strip()]
-
-        result = {
+        return {
             "queries": queries,
-            "category_l1": category_l1,
+            "category_l1": self._clean_text(retrieval_plan.get("category_l1", "")),
             "intent": intent,
             "detected_operations": detected_operations,
-            "keywords": keywords,
+            "keywords": self._clean_text_list(retrieval_plan.get("keywords", [])),
+            "original_query": query,
         }
-
-        # 写入缓存
-        self._analyze_cache[query] = result
-
-        if config.DEBUG:
-            print(f"   📋 意图: {intent}")
-            if detected_operations:
-                print(f"   🔧 检测到运算: {', '.join(detected_operations)}")
-            print(f"   📝 生成 {len(queries)} 个查询变体")
-            for i, q in enumerate(queries, 1):
-                print(f"      [{i}] {q}")
-
-        return result
 
     # ==================== 相似度计算 ====================
 
@@ -446,14 +265,15 @@ class RetrievalAgent:
     def retrieve(self, query: str, top_k: int = 10,
                  category_filter: Optional[str] = None,
                  similarity_threshold: float = 0.3,
+                 analysis_result: Optional[Dict[str, Any]] = None,
                  ) -> Dict[str, Any]:
         """
-        检索相关知识（LLM 驱动）
+                检索相关知识
 
         流程：
-          1. 调用 LLM 进行意图推断和查询变体生成
-          2. 根据 LLM 结果走批量多查询或单查询检索
-          3. LLM 不可用时兜底：使用原始查询做单次检索
+                    1. 读取分析智能体提供的检索计划
+                    2. 根据检索计划走批量多查询或单查询检索
+                    3. 检索计划不可用时兜底：使用原始查询做单次检索
 
         Args:
             query: 用户查询/需求
@@ -468,13 +288,16 @@ class RetrievalAgent:
             print(f"\n🔍 开始检索: {query}")
             print(f"   Top-K: {top_k}, 类别过滤: {category_filter or '无'}")
 
-        # ========== 第1步：LLM 意图分析与查询生成 ==========
-        analysis = self._llm_analyze_query(query)
-        llm_succeeded = analysis is not None and len(analysis.get("queries", [])) > 0
+        retrieval_plan = self._normalize_retrieval_plan(
+            (analysis_result or {}).get("retrieval_plan", {}),
+            query,
+        )
+        analysis_available = len(retrieval_plan.get("queries", [])) > 0
+        scenario_analysis = (analysis_result or {}).get("scenario_analysis", {})
 
         # ========== 第2步：category_l1 过滤 ==========
-        if llm_succeeded and not category_filter:
-            llm_category_l1 = analysis.get("category_l1", "")
+        if analysis_available and not category_filter:
+            llm_category_l1 = retrieval_plan.get("category_l1", "")
             allowed_prefixes = {
                 "逻辑模块", "运算模块", "变量模块", "定时模块",
                 "累计模块", "应用", "基础组件", "高级组件", "备注组件", "其他",
@@ -485,12 +308,12 @@ class RetrievalAgent:
                     print(f"   🏷️  LLM 推断类别过滤: {category_filter}")
 
         # ========== 第3步：执行检索 ==========
-        if llm_succeeded:
+        if analysis_available:
             enhanced = {
                 "original_query": query,
-                "query_variants": analysis["queries"],
-                "detected_operations": analysis.get("detected_operations", []),
-                "intent": analysis.get("intent", "general_query"),
+                "query_variants": retrieval_plan["queries"],
+                "detected_operations": retrieval_plan.get("detected_operations", []),
+                "intent": retrieval_plan.get("intent", "general_query"),
             }
 
             if config.DEBUG:
@@ -509,10 +332,17 @@ class RetrievalAgent:
         # ========== 第4步：增强元数据（保持与旧版兼容） ==========
         meta = context.get("metadata") if isinstance(context.get("metadata"), dict) else {}
         meta = dict(meta)
-        meta["rewrite_used"] = llm_succeeded
-        if llm_succeeded:
-            meta["llm_queries"] = analysis.get("queries", [])
-            meta["llm_category_l1"] = analysis.get("category_l1", "")
+        meta["rewrite_used"] = analysis_available
+        meta["analysis_used"] = bool(analysis_result)
+        if analysis_available:
+            meta["llm_queries"] = retrieval_plan.get("queries", [])
+            meta["llm_category_l1"] = retrieval_plan.get("category_l1", "")
+        if isinstance(scenario_analysis, dict):
+            meta["analysis_summary"] = self._clean_text(scenario_analysis.get("summary", ""))
+            try:
+                meta["analysis_confidence"] = float(scenario_analysis.get("confidence", 0.0))
+            except (TypeError, ValueError):
+                meta["analysis_confidence"] = 0.0
         context["metadata"] = meta
 
         return context
@@ -761,46 +591,6 @@ class RetrievalAgent:
             }
         }
 
-    # ==================== 示例代码生成 ====================
-
-    def _generate_example_code(self, module_schema: Dict[str, Any]) -> str:
-        """
-        生成模块的示例代码（伪代码）
-
-        Args:
-            module_schema: 模块的 JSON Schema
-
-        Returns:
-            示例代码字符串
-        """
-        module_type = module_schema.get('module_type', '')
-        name = module_schema.get('name', '')
-        params = module_schema.get('parameters_schema', {})
-
-        lines = [
-            f"# 示例：使用 {name} 模块",
-            f"# 模块类型: {module_type}",
-            ""
-        ]
-
-        # 生成参数示例
-        param_examples = []
-        for key, info in params.items():
-            if key not in ['x', 'y', 'wires', 'id', 'z']:
-                default_val = info.get('default', '')
-                if isinstance(default_val, str):
-                    param_examples.append(f"    '{key}': '{default_val}'")
-                else:
-                    param_examples.append(f"    '{key}': {default_val}")
-
-        lines.append("node = {")
-        lines.append(f"    'type': '{module_type}',")
-        lines.append(f"    'name': '自定义名称',")
-        if param_examples:
-            lines.extend(param_examples)
-        lines.append("}")
-
-        return "\n".join(lines)
 
     # ==================== 知识库加载 ====================
 
@@ -886,9 +676,10 @@ class RetrievalAgent:
             更新后的状态
         """
         user_query = state.get("user_query", "")
+        analysis_result = state.get("analysis_result", {})
 
         # 执行检索
-        context = self.retrieve(user_query)
+        context = self.retrieve(user_query, analysis_result=analysis_result)
 
         # 更新状态
         state["retrieval_context"] = context
