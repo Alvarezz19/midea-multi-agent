@@ -2,7 +2,7 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 # ==================== LLM 配置 ====================
 # 支持的 LLM 提供商
