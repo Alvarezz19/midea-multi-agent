@@ -24,6 +24,7 @@ from utils.graph_ir import (
     SubflowDefinitionIR,
     SubflowPortIR,
 )
+from utils.retrieval_bundle_utils import build_compilable_doc_map
 
 
 class AssemblyAgent:
@@ -43,14 +44,8 @@ class AssemblyAgent:
         return {}
 
     @staticmethod
-    def _build_doc_map(retrieval_context: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-        relevant_nodes = retrieval_context.get("relevant_nodes", [])
-        doc_map = {}
-        for node in relevant_nodes:
-            module_type = node.get("module_type")
-            if module_type:
-                doc_map[module_type] = node
-        return doc_map
+    def _build_doc_map(bundle_or_context: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        return build_compilable_doc_map(bundle_or_context)
 
     def _build_subflow_definition(
         self,
@@ -64,13 +59,14 @@ class AssemblyAgent:
         if raw_definition.get("type") != "subflow":
             return None
 
-        definition_id = str(raw_definition.get("id") or module_type).strip()
-        name = str(raw_definition.get("name") or module_doc.get("name") or module_type).strip()
+        template_id = str(module_doc.get("template_id") or module_type).strip()
+        definition_id = str(module_doc.get("definition_id") or raw_definition.get("id") or template_id).strip()
+        name = str(raw_definition.get("name") or module_doc.get("template_name") or module_doc.get("name") or template_id).strip()
         in_ports = raw_definition.get("in", []) or []
         out_ports = raw_definition.get("out", []) or []
 
         return SubflowDefinitionIR(
-            template_id=module_type,
+            template_id=template_id,
             definition_id=definition_id,
             name=name,
             inputs=len(in_ports) or int(raw_definition.get("inputs", 0) or 0),
@@ -99,11 +95,11 @@ class AssemblyAgent:
     def assemble(
         self,
         execution_plan: Dict[str, Any],
-        retrieval_context: Dict[str, Any],
+        bundle_or_context: Dict[str, Any],
     ) -> Dict[str, Any]:
         plan_nodes = execution_plan.get("nodes", []) or []
         plan_connections = execution_plan.get("connections", []) or []
-        doc_map = self._build_doc_map(retrieval_context)
+        doc_map = self._build_doc_map(bundle_or_context)
         coords_map = topological_layout(plan_nodes, plan_connections)
 
         pages = [
@@ -132,7 +128,7 @@ class AssemblyAgent:
                     "type": "missing_module_doc",
                     "logic_id": logic_id,
                     "module_type": module_type,
-                    "message": "retrieval_context 中不存在该 module_type 的模板定义",
+                    "message": "retrieval documents do not contain a template definition for this module_type",
                 })
 
             subflow_definition = self._build_subflow_definition(module_type, module_doc)
@@ -224,7 +220,7 @@ class AssemblyAgent:
 
     def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
         execution_plan = state.get("execution_plan", {})
-        retrieval_context = state.get("retrieval_context", {})
-        state["assembled_graph_ir"] = self.assemble(execution_plan, retrieval_context)
+        bundle_or_context = state.get("retrieval_bundle") or state.get("retrieval_context", {})
+        state["assembled_graph_ir"] = self.assemble(execution_plan, bundle_or_context)
         state["current_step"] = "assembly_completed"
         return state

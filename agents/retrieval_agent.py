@@ -7,7 +7,12 @@ import json
 import os
 import chromadb
 import config
+from utils.console_utils import safe_print as print
 from utils.model_manager import EmbeddingManager
+from utils.retrieval_bundle_utils import (
+    build_legacy_retrieval_context,
+    load_structured_payload,
+)
 
 
 class RetrievalAgent:
@@ -41,22 +46,18 @@ class RetrievalAgent:
             from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
             self.embedding_function = DefaultEmbeddingFunction()
 
-        # 获取或创建集合
-        try:
-            self.collection = self.client.get_collection(
-                name="kong_modules_v1",
-                embedding_function=self.embedding_function
-            )
-            if config.DEBUG:
-                print(f"✅ 已加载现有知识库，包含 {self.collection.count()} 个模块")
-        except Exception:
-            self.collection = self.client.create_collection(
-                name="kong_modules_v1",
-                embedding_function=self.embedding_function,
-                metadata={"description": "KONG CUBE 模块知识库"}
-            )
-            if config.DEBUG:
-                print("📦 创建新的知识库集合")
+        self.atomic_collection_name = getattr(config, "CHROMA_COLLECTION_ATOMIC_MODULES", "kong_modules_v1")
+        self.subflow_collection_name = getattr(config, "CHROMA_COLLECTION_SUBFLOW_TEMPLATES", "ahu_subflow_templates_v1")
+        self.system_pattern_collection_name = getattr(config, "CHROMA_COLLECTION_SYSTEM_PATTERNS", "ahu_system_patterns_v1")
+
+        self.atomic_collection = self._get_collection(
+            self.atomic_collection_name,
+            create_if_missing=True,
+            description="KONG CUBE 模块知识库",
+        )
+        self.collection = self.atomic_collection
+        self.subflow_collection = self._get_collection(self.subflow_collection_name, create_if_missing=False)
+        self.system_pattern_collection = self._get_collection(self.system_pattern_collection_name, create_if_missing=False)
 
     @staticmethod
     def _clean_text(value: Any) -> str:
@@ -260,9 +261,140 @@ class RetrievalAgent:
 
         return metadata
 
+    def _get_collection(
+        self,
+        name: str,
+        create_if_missing: bool = False,
+        description: str = "",
+    ):
+        try:
+            collection = self.client.get_collection(
+                name=name,
+                embedding_function=self.embedding_function,
+            )
+            if config.DEBUG:
+                print(f"✅ 已加载知识库集合 {name}，包含 {collection.count()} 条记录")
+            return collection
+        except Exception:
+            if not create_if_missing:
+                if config.DEBUG:
+                    print(f"ℹ️  知识库集合 {name} 不存在，Phase 2 对应切片将返回空结果")
+                return None
+
+        collection = self.client.create_collection(
+            name=name,
+            embedding_function=self.embedding_function,
+            metadata={"description": description or name},
+        )
+        if config.DEBUG:
+            print(f"📦 创建新的知识库集合 {name}")
+        return collection
+
+    def _build_scenario_queries(self, scenario_analysis: Dict[str, Any], fields: List[str], fallback_query: str) -> List[str]:
+        queries: List[str] = []
+        if not isinstance(scenario_analysis, dict):
+            scenario_analysis = {}
+
+        for field in fields:
+            value = scenario_analysis.get(field)
+            if isinstance(value, str):
+                text = self._clean_text(value)
+                if text:
+                    queries.append(text)
+            elif isinstance(value, list):
+                cleaned = self._clean_text_list(value, 5)
+                queries.extend(cleaned)
+                if cleaned:
+                    queries.append(" ".join(cleaned[:3]))
+
+        high_value_fields = [
+            self._clean_text(str(scenario_analysis.get(key, "")))
+            for key in ("system_type", "business_goal", "equipment_object", "actuator", "control_strategy", "output_signal")
+            if self._clean_text(str(scenario_analysis.get(key, "")))
+        ]
+        if high_value_fields:
+            queries.append(" ".join(high_value_fields[:4]))
+
+        deduped = []
+        seen = set()
+        for item in queries + [fallback_query]:
+            cleaned = self._clean_text(item)
+            if cleaned and cleaned not in seen:
+                deduped.append(cleaned)
+                seen.add(cleaned)
+        return deduped[: config.RETRIEVAL_LLM_MAX_QUERIES]
+
+    def _query_asset_collection(
+        self,
+        collection,
+        query_variants: List[str],
+        top_k: int,
+        similarity_threshold: float,
+        asset_type: str,
+    ) -> List[Dict[str, Any]]:
+        if collection is None or not query_variants:
+            return []
+
+        merged = {}
+        try:
+            results = collection.query(
+                query_texts=query_variants,
+                n_results=min(top_k, 5),
+            )
+        except Exception as exc:
+            if config.DEBUG:
+                print(f"   ⚠️ 查询 {asset_type} 集合失败: {exc}")
+            return []
+
+        for variant_index, variant in enumerate(query_variants):
+            if not results or not results.get('metadatas') or variant_index >= len(results['metadatas']):
+                continue
+            metadatas = results['metadatas'][variant_index]
+            distances = results.get('distances', [])
+            distances = distances[variant_index] if variant_index < len(distances) else [0] * len(metadatas)
+
+            for rank, (metadata, distance) in enumerate(zip(metadatas, distances), start=1):
+                similarity_score = self._normalize_distance(distance)
+                if similarity_score < similarity_threshold:
+                    continue
+
+                payload = load_structured_payload(metadata)
+                if not payload:
+                    continue
+
+                lookup_key = self._clean_text(
+                    str(
+                        payload.get('module_type')
+                        or payload.get('pattern_id')
+                        or payload.get('template_id')
+                        or payload.get('definition_id')
+                        or metadata.get('module_type')
+                        or metadata.get('pattern_id')
+                        or ''
+                    )
+                )
+                if not lookup_key:
+                    continue
+
+                existing = merged.get(lookup_key)
+                if existing and similarity_score <= existing.get('similarity_score', 0):
+                    continue
+
+                item = dict(payload)
+                item.setdefault('asset_type', asset_type)
+                item['similarity_score'] = similarity_score
+                item['rank'] = rank
+                item['matched_query'] = variant
+                merged[lookup_key] = item
+
+        ranked = sorted(merged.values(), key=lambda item: item.get('similarity_score', 0), reverse=True)[:top_k]
+        for index, item in enumerate(ranked, start=1):
+            item['rank'] = index
+        return ranked
+
     # ==================== 检索主方法 ====================
 
-    def retrieve(self, query: str, top_k: int = 10,
+    def _retrieve_atomic_context(self, query: str, top_k: int = 10,
                  category_filter: Optional[str] = None,
                  similarity_threshold: float = 0.3,
                  analysis_result: Optional[Dict[str, Any]] = None,
@@ -345,6 +477,96 @@ class RetrievalAgent:
                 meta["analysis_confidence"] = 0.0
         context["metadata"] = meta
 
+        return context
+
+    def retrieve_bundle(
+        self,
+        query: str,
+        top_k: int = 10,
+        category_filter: Optional[str] = None,
+        similarity_threshold: float = 0.3,
+        analysis_result: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        retrieval_plan = self._normalize_retrieval_plan(
+            (analysis_result or {}).get("retrieval_plan", {}),
+            query,
+        )
+        scenario_analysis = (analysis_result or {}).get("scenario_analysis", {})
+        atomic_context = self._retrieve_atomic_context(
+            query=query,
+            top_k=top_k,
+            category_filter=category_filter,
+            similarity_threshold=similarity_threshold,
+            analysis_result=analysis_result,
+        )
+
+        subflow_templates = self._query_asset_collection(
+            self.subflow_collection,
+            self._build_scenario_queries(
+                scenario_analysis,
+                ["business_goal", "system_type", "equipment_object", "actuator", "control_strategy", "output_signal"],
+                query,
+            ),
+            top_k=top_k,
+            similarity_threshold=similarity_threshold,
+            asset_type="subflow_template",
+        )
+        system_patterns = self._query_asset_collection(
+            self.system_pattern_collection,
+            self._build_scenario_queries(
+                scenario_analysis,
+                ["system_type", "control_mode", "operating_conditions", "input_signals", "output_signals"],
+                query,
+            ),
+            top_k=top_k,
+            similarity_threshold=similarity_threshold,
+            asset_type="system_pattern",
+        )
+
+        selected_pattern = system_patterns[0] if system_patterns else {}
+        style_guides = []
+        if isinstance(selected_pattern.get("style_guides"), dict) and selected_pattern.get("style_guides"):
+            style_guides.append(selected_pattern["style_guides"])
+
+        return {
+            "atomic_modules": atomic_context.get("relevant_nodes", []),
+            "subflow_templates": subflow_templates,
+            "system_patterns": system_patterns,
+            "style_guides": style_guides,
+            "metadata": {
+                "query_text": query,
+                "query_variants": retrieval_plan.get("queries", []) or [query],
+                "intent": retrieval_plan.get("intent", "general_query"),
+                "detected_operations": retrieval_plan.get("detected_operations", []),
+                "selected_case_pattern_id": selected_pattern.get("pattern_id", ""),
+                "retrieved_atomic_count": len(atomic_context.get("relevant_nodes", [])),
+                "retrieved_subflow_count": len(subflow_templates),
+                "retrieved_pattern_count": len(system_patterns),
+                "avg_atomic_score": atomic_context.get("metadata", {}).get("avg_confidence_score", 0.0),
+                "query_bundle_version": "phase2-v1",
+            },
+        }
+
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 10,
+        category_filter: Optional[str] = None,
+        similarity_threshold: float = 0.3,
+        analysis_result: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """保持兼容的 legacy 检索接口。"""
+        bundle = self.retrieve_bundle(
+            query=query,
+            top_k=top_k,
+            category_filter=category_filter,
+            similarity_threshold=similarity_threshold,
+            analysis_result=analysis_result,
+        )
+        context = build_legacy_retrieval_context(bundle)
+        meta = dict(context.get("metadata", {}))
+        meta["category_filter"] = category_filter
+        context["metadata"] = meta
         return context
 
     # ==================== 单查询检索 ====================
@@ -678,10 +900,10 @@ class RetrievalAgent:
         user_query = state.get("user_query", "")
         analysis_result = state.get("analysis_result", {})
 
-        # 执行检索
-        context = self.retrieve(user_query, analysis_result=analysis_result)
+        bundle = self.retrieve_bundle(user_query, analysis_result=analysis_result)
+        context = build_legacy_retrieval_context(bundle)
 
-        # 更新状态
+        state["retrieval_bundle"] = bundle
         state["retrieval_context"] = context
         state["current_step"] = "retrieval_completed"
 

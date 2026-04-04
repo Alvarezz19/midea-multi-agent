@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 
 import config
+from utils.console_utils import safe_print as print
 from utils.model_manager import LLMManager
 
 

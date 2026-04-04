@@ -13,6 +13,7 @@ from typing import Any, Dict, List
 
 import config
 from utils.graph_ir import CompileReport, CompiledArtifact
+from utils.retrieval_bundle_utils import build_compilable_doc_map
 from .coding_utils import (
     fill_template,
     generate_short_uuid,
@@ -39,14 +40,8 @@ class CodingAgent:
         return {}
 
     @staticmethod
-    def _build_doc_map(retrieval_context: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-        relevant_nodes = retrieval_context.get("relevant_nodes", [])
-        doc_map = {}
-        for node in relevant_nodes:
-            module_type = node.get("module_type")
-            if module_type:
-                doc_map[module_type] = node
-        return doc_map
+    def _build_doc_map(bundle_or_context: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        return build_compilable_doc_map(bundle_or_context)
 
     @staticmethod
     def _build_reverse_edge_map(
@@ -150,9 +145,9 @@ class CodingAgent:
     def compile_graph(
         self,
         assembled_graph_ir: Dict[str, Any],
-        retrieval_context: Dict[str, Any],
+        bundle_or_context: Dict[str, Any],
     ) -> Dict[str, Any]:
-        doc_map = self._build_doc_map(retrieval_context)
+        doc_map = self._build_doc_map(bundle_or_context)
         pages = assembled_graph_ir.get("pages", []) or []
         subflow_definitions = assembled_graph_ir.get("subflow_definitions", []) or []
         node_instances = assembled_graph_ir.get("node_instances", []) or []
@@ -303,15 +298,15 @@ class CodingAgent:
 
         return artifact.model_dump()
 
-    def generate_json(self, assembled_graph_ir: Dict[str, Any], retrieval_context: Dict[str, Any]) -> str:
+    def generate_json(self, assembled_graph_ir: Dict[str, Any], bundle_or_context: Dict[str, Any]) -> str:
         """Backwards-compatible wrapper returning only the JSON text."""
-        artifact = self.compile_graph(assembled_graph_ir, retrieval_context)
+        artifact = self.compile_graph(assembled_graph_ir, bundle_or_context)
         return artifact["json_text"]
 
     def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
         assembled_graph_ir = state.get("assembled_graph_ir", {})
-        retrieval_context = state.get("retrieval_context", {})
-        compiled_artifact = self.compile_graph(assembled_graph_ir, retrieval_context)
+        bundle_or_context = state.get("retrieval_bundle") or state.get("retrieval_context", {})
+        compiled_artifact = self.compile_graph(assembled_graph_ir, bundle_or_context)
 
         state["compiled_artifact"] = compiled_artifact
         state["generated_code"] = compiled_artifact["json_text"]

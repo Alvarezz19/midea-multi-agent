@@ -32,6 +32,7 @@ class WorkflowState(TypedDict):
     user_query: str
     analysis_result: dict
     retrieval_context: dict
+    retrieval_bundle: dict
     execution_plan: dict
     assembled_graph_ir: dict
     compiled_artifact: dict
@@ -89,6 +90,7 @@ def run_workflow(user_query: str) -> dict:
         "user_query": user_query,
         "analysis_result": {},
         "retrieval_context": {},
+        "retrieval_bundle": {},
         "execution_plan": {},
         "assembled_graph_ir": {},
         "compiled_artifact": {},

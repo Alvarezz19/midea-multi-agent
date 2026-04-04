@@ -12,6 +12,7 @@ from pathlib import Path
 import chromadb
 import config
 from langchain_core.prompts import ChatPromptTemplate
+from utils.console_utils import safe_print as print
 from utils.model_manager import EmbeddingManager, LLMManager
 from utils.query_processor import QueryProcessor
 

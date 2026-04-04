@@ -4,6 +4,8 @@
 
 当你修改 `schemas` 目录下的模块 JSON 文件后，需要同步更新向量数据库。本文档介绍了多种更新方法。
 
+如果你想先了解知识库的构建原理、数据结构和它在当前工作流中的位置，先看 [`docs/knowledge_base_architecture.md`](./knowledge_base_architecture.md)。
+
 ## 核心组件
 
 - **RetrievalAgent** ([retrieval_agent.py](../agents/retrieval_agent.py)): 负责检索和加载知识库

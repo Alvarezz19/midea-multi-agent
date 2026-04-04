@@ -5,6 +5,8 @@
 from typing import Optional, Any
 import config
 
+from utils.console_utils import safe_print as print
+
 
 class LLMManager:
     """大语言模型管理器"""
