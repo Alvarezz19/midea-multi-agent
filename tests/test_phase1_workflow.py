@@ -353,6 +353,115 @@ class WorkflowPhase1Tests(unittest.TestCase):
             any(issue["rule_id"] == "ir.edge.source.must_exist" for issue in report["issues"])
         )
 
+    def test_verifier_rejects_planning_failure_empty_plan_and_zero_node_artifact(self):
+        empty_plan = {
+            "goal": "规划失败: llm unavailable",
+            "nodes": [],
+            "connections": [],
+        }
+
+        graph_ir = self.assembly_agent.assemble(empty_plan, self.retrieval_context)
+        artifact = self.coding_agent.compile_graph(graph_ir, self.retrieval_context)
+        report = self.verifier_agent.verify(graph_ir, artifact)
+
+        self.assertEqual(report["status"], "retryable_error")
+        rule_ids = {issue["rule_id"] for issue in report["issues"]}
+        self.assertIn("plan.generation.must_succeed", rule_ids)
+        self.assertIn("plan.nodes.must_not_be_empty", rule_ids)
+        self.assertIn("ir.node_instances.must_not_be_empty", rule_ids)
+        self.assertIn("compile.nodes.must_not_be_empty", rule_ids)
+
+    def test_verifier_compile_wire_target_port_uses_target_inputs(self):
+        graph_ir = {
+            "graph_ir_version": "2.0",
+            "goal": "wire port check",
+            "pages": [
+                {"page_id": "page_control", "label": "Control", "kind": "control", "order": 0},
+            ],
+            "subflow_definitions": [],
+            "node_instances": [
+                {
+                    "instance_id": "node::src",
+                    "logic_id": "src",
+                    "module_type": "constInput",
+                    "page_id": "page_control",
+                    "subflow_id": None,
+                    "template_id": None,
+                    "parameters": {},
+                    "position": {"x": 100, "y": 80},
+                    "input_count": 0,
+                    "output_count": 1,
+                    "reasoning": "",
+                },
+                {
+                    "instance_id": "node::dst",
+                    "logic_id": "dst",
+                    "module_type": "add",
+                    "page_id": "page_control",
+                    "subflow_id": None,
+                    "template_id": None,
+                    "parameters": {},
+                    "position": {"x": 280, "y": 80},
+                    "input_count": 0,
+                    "output_count": 1,
+                    "reasoning": "",
+                },
+            ],
+            "edges": [],
+            "signal_registry": [],
+            "layout_hints": {},
+            "unresolved_items": [],
+            "source_execution_plan": {
+                "goal": "wire port check",
+                "nodes": [{"logic_id": "src"}, {"logic_id": "dst"}],
+                "connections": [],
+            },
+        }
+        flow_objects = [
+            {"id": "tab1", "type": "tab", "label": "Control", "disabled": False, "info": ""},
+            {
+                "id": "src1",
+                "type": "constInput",
+                "z": "tab1",
+                "name": "SRC",
+                "x": 100,
+                "y": 80,
+                "wires": [[{"id": "dst1", "port": 2}]],
+                "inputs": 0,
+                "outputs": 1,
+            },
+            {
+                "id": "dst1",
+                "type": "add",
+                "z": "tab1",
+                "name": "DST",
+                "x": 280,
+                "y": 80,
+                "wires": [[], [], []],
+                "inputs": 1,
+                "outputs": 3,
+            },
+        ]
+        compiled_artifact = {
+            "json_text": json.dumps(flow_objects, ensure_ascii=False),
+            "flow_objects": flow_objects,
+            "compile_report": {
+                "page_count": 1,
+                "subflow_count": 0,
+                "node_count": 2,
+                "warnings": [],
+            },
+        }
+
+        report = self.verifier_agent.verify(graph_ir, compiled_artifact)
+
+        self.assertEqual(report["status"], "retryable_error")
+        wire_issue = next(
+            issue for issue in report["issues"]
+            if issue["rule_id"] == "compile.wire.port.range"
+        )
+        self.assertIn("inputs=1", wire_issue["message"])
+
     def test_workflow_run_with_stubbed_front_half(self):
         class StubAnalysis:
             def __call__(self, state):

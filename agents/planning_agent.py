@@ -126,6 +126,10 @@ class PlanningAgent:
 - **参数类型**:注意参数的类型(integer, number, boolean, string),确保类型正确。
 - **端口连接**:仔细检查端口索引,确保连接正确(输出端口连接到输入端口)。
 - **业务场景参考**:它只用于帮助你理解需求,不能替代【可用模块列表】。最终只能使用可用模块列表中的 module_type。
+- **Phase 2 规划优先级**:
+  - 先参考 `system_patterns` 里的页面/布局提示，帮助确定规划倾向。
+  - 优先复用 `subflow_templates`，只有模板不足以覆盖需求时，才退化为 `atomic_modules` 组合。
+  - `system_patterns` 只是 prompt hint，不是新的硬输出 schema；你的输出仍必须严格遵循既定 `execution_plan` JSON 结构。
 
 ### 可用模块列表:
 {slim_context}
@@ -288,6 +292,8 @@ class PlanningAgent:
 
     def _validate_plan(self, plan_ir: PlanIR) -> None:
         """统一校验规划结果"""
+        if not plan_ir.nodes:
+            raise ValueError("规划结果为空：至少需要 1 个节点。")
         plan_ir.validate_ids()
         if self._available_module_types:
             plan_ir.validate_module_types(self._available_module_types)

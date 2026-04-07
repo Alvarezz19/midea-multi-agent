@@ -7,13 +7,26 @@ import re
 import unicodedata
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import config
 
 DEFAULT_FLOW_DIR = Path("AHU\u7a0b\u5e8f")
 DEFAULT_PATTERN_LIBRARY_DIR = Path(config.AHU_PATTERN_LIBRARY_DIR)
 DEFAULT_SYSTEM_TYPE = "AHU"
+_NON_FUNCTIONAL_TYPES = {"tab", "comment", "quote"}
+_TOPOLOGY_IGNORED_KEYS = {
+    "id",
+    "z",
+    "x",
+    "y",
+    "wires",
+    "name",
+    "label",
+    "info",
+    "g",
+    "d",
+}
 
 
 def _normalize_text(value: Any) -> str:
@@ -172,7 +185,128 @@ def _build_ports_definition(port_items: Iterable[Dict[str, Any]], direction: str
     return ports
 
 
-def _build_subflow_signature(subflow_obj: Dict[str, Any]) -> Dict[str, Any]:
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _canonicalize_scalar(value: Any) -> Any:
+    if isinstance(value, str):
+        return _normalize_text(value)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value
+    return ""
+
+
+def _extract_dependency_module_types(internal_objects: List[Dict[str, Any]]) -> List[str]:
+    dependencies: Set[str] = set()
+    for obj in internal_objects:
+        if not isinstance(obj, dict):
+            continue
+        obj_type = str(obj.get("type", "")).strip()
+        if not obj_type or obj_type in _NON_FUNCTIONAL_TYPES:
+            continue
+        dependencies.add(obj_type)
+    return sorted(dependencies)
+
+
+def _build_internal_topology_hash(internal_objects: List[Dict[str, Any]]) -> str:
+    node_map: Dict[str, Dict[str, Any]] = {}
+    typed_nodes: List[Dict[str, Any]] = []
+
+    for index, obj in enumerate(internal_objects):
+        if not isinstance(obj, dict):
+            continue
+        obj_type = str(obj.get("type", "")).strip()
+        if not obj_type or obj_type in _NON_FUNCTIONAL_TYPES:
+            continue
+
+        node_id = str(obj.get("id", "")).strip() or f"node_{index}"
+        if node_id in node_map:
+            node_id = f"{node_id}#{index}"
+
+        parameters: Dict[str, Any] = {}
+        for key, value in obj.items():
+            if key in _TOPOLOGY_IGNORED_KEYS:
+                continue
+            if isinstance(value, (str, int, float, bool)):
+                parameters[key] = _canonicalize_scalar(value)
+
+        normalized_obj = {
+            "id": node_id,
+            "type": obj_type,
+            "inputs": _safe_int(obj.get("inputs", 0)),
+            "outputs": _safe_int(obj.get("outputs", 0)),
+            "parameters": parameters,
+            "wires": copy.deepcopy(obj.get("wires", [])),
+        }
+        node_map[node_id] = normalized_obj
+        typed_nodes.append(normalized_obj)
+
+    edges: List[Tuple[str, int, str, int]] = []
+    for node in typed_nodes:
+        wires = node.get("wires", [])
+        if not isinstance(wires, list):
+            continue
+        source_id = node["id"]
+        for out_port, output_group in enumerate(wires):
+            if not isinstance(output_group, list):
+                continue
+            for target in output_group:
+                if not isinstance(target, dict):
+                    continue
+                target_id = str(target.get("id", "")).strip()
+                if target_id not in node_map:
+                    continue
+                target_port = _safe_int(target.get("port", 0))
+                edges.append((source_id, out_port, target_id, target_port))
+
+    labels: Dict[str, str] = {}
+    for node in typed_nodes:
+        payload = {
+            "type": node["type"],
+            "inputs": node["inputs"],
+            "outputs": node["outputs"],
+            "parameters": node["parameters"],
+        }
+        labels[node["id"]] = hashlib.sha1(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()[:16]
+
+    for _ in range(2):
+        outgoing_by_node: Dict[str, List[Tuple[int, str, int]]] = defaultdict(list)
+        incoming_by_node: Dict[str, List[Tuple[int, str, int]]] = defaultdict(list)
+        for source_id, out_port, target_id, target_port in edges:
+            outgoing_by_node[source_id].append((out_port, labels[target_id], target_port))
+            incoming_by_node[target_id].append((target_port, labels[source_id], out_port))
+
+        next_labels: Dict[str, str] = {}
+        for node in typed_nodes:
+            node_id = node["id"]
+            payload = {
+                "self": labels[node_id],
+                "outgoing": sorted(outgoing_by_node.get(node_id, [])),
+                "incoming": sorted(incoming_by_node.get(node_id, [])),
+            }
+            next_labels[node_id] = hashlib.sha1(
+                json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            ).hexdigest()[:16]
+        labels = next_labels
+
+    canonical_payload = {
+        "node_labels": sorted(labels.values()),
+        "edges": sorted((labels[source], out_port, labels[target], target_port) for source, out_port, target, target_port in edges),
+    }
+    return hashlib.sha1(
+        json.dumps(canonical_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _build_subflow_signature(subflow_obj: Dict[str, Any], internal_objects: List[Dict[str, Any]]) -> Dict[str, Any]:
     input_ports = [port for port in subflow_obj.get("in", []) if isinstance(port, dict)]
     output_ports = [port for port in subflow_obj.get("out", []) if isinstance(port, dict)]
     return {
@@ -181,6 +315,7 @@ def _build_subflow_signature(subflow_obj: Dict[str, Any]) -> Dict[str, Any]:
         "output_count": len(output_ports),
         "input_names": [_normalize_text(port.get("name", "")) for port in input_ports],
         "output_names": [_normalize_text(port.get("name", "")) for port in output_ports],
+        "topology_hash": _build_internal_topology_hash(internal_objects),
     }
 
 
@@ -191,7 +326,7 @@ def _build_subflow_template_asset(
     system_type: str,
 ) -> Dict[str, Any]:
     raw_definition = copy.deepcopy(subflow_obj)
-    signature_payload = _build_subflow_signature(subflow_obj)
+    signature_payload = _build_subflow_signature(subflow_obj, internal_objects)
     signature_payload["system_type"] = system_type
     signature_hash = hashlib.sha1(
         json.dumps(signature_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -211,15 +346,7 @@ def _build_subflow_template_asset(
     raw_definition["inputs"] = input_count
     raw_definition["outputs"] = output_count
 
-    dependency_module_types = sorted(
-        {
-            obj.get("type")
-            for obj in internal_objects
-            if isinstance(obj, dict)
-            and isinstance(obj.get("type"), str)
-            and obj.get("type", "").startswith("subflow:")
-        }
-    )
+    dependency_module_types = _extract_dependency_module_types(internal_objects)
 
     description = _normalize_text(subflow_obj.get("info", ""))
     if not description:
@@ -564,6 +691,18 @@ def write_assets_to_chroma(
             metadata.update({key: value for key, value in item.items() if isinstance(value, (str, int, float, bool))})
             metadatas.append(metadata)
             ids.append(item_id)
+
+        desired_ids = set(ids)
+        existing_ids: Set[str] = set()
+        try:
+            existing = collection.get(include=[])
+            existing_ids = set(existing.get("ids", []) or [])
+        except Exception:
+            existing_ids = set()
+
+        stale_ids = sorted(existing_ids - desired_ids)
+        if stale_ids:
+            collection.delete(ids=stale_ids)
 
         if documents:
             collection.upsert(documents=documents, metadatas=metadatas, ids=ids)

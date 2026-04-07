@@ -50,6 +50,29 @@ class VerifierAgent:
         warnings: List[str] = []
         metrics = VerificationMetrics()
 
+        source_execution_plan = assembled_graph_ir.get("source_execution_plan", {}) or {}
+        if isinstance(source_execution_plan, dict):
+            source_goal = str(source_execution_plan.get("goal", "") or "").strip()
+            source_nodes = source_execution_plan.get("nodes", []) or []
+            if source_goal.startswith("规划失败:"):
+                issues.append(self._make_issue(
+                    issue_id=f"IR-{len(issues) + 1:03d}",
+                    scope="planning",
+                    target_id="execution_plan.goal",
+                    rule_id="plan.generation.must_succeed",
+                    message=f"规划阶段失败：{source_goal}",
+                    suggested_fix="修复 planning 失败原因后重新生成执行计划。",
+                ))
+            if isinstance(source_nodes, list) and len(source_nodes) == 0:
+                issues.append(self._make_issue(
+                    issue_id=f"IR-{len(issues) + 1:03d}",
+                    scope="planning",
+                    target_id="execution_plan.nodes",
+                    rule_id="plan.nodes.must_not_be_empty",
+                    message="执行计划为空：至少需要 1 个节点。",
+                    suggested_fix="确保 PlanningAgent 产出包含节点的 execution_plan。",
+                ))
+
         pages = assembled_graph_ir.get("pages", []) or []
         page_ids = {page.get("page_id") for page in pages if page.get("page_id")}
 
@@ -61,6 +84,15 @@ class VerifierAgent:
         }
 
         node_instances = assembled_graph_ir.get("node_instances", []) or []
+        if len(node_instances) == 0:
+            issues.append(self._make_issue(
+                issue_id=f"IR-{len(issues) + 1:03d}",
+                scope="assembly",
+                target_id="assembled_graph_ir.node_instances",
+                rule_id="ir.node_instances.must_not_be_empty",
+                message="AssembledGraphIR 没有任何节点实例。",
+                suggested_fix="检查 planning/assembly，确保至少产出 1 个节点实例。",
+            ))
         instance_map = {
             instance.get("instance_id"): instance
             for instance in node_instances
@@ -294,15 +326,15 @@ class VerifierAgent:
                         ))
                         continue
 
-                    target_outputs = int(target_node.get("outputs", 0) or 0)
-                    if target_outputs and target_port >= target_outputs:
+                    target_inputs = int(target_node.get("inputs", 0) or 0)
+                    if target_inputs and target_port >= target_inputs:
                         metrics.invalid_port_refs += 1
                         issues.append(self._make_issue(
                             issue_id=f"CP-{len(issues) + 1:03d}",
                             scope="compile",
                             target_id=obj_id or obj_type,
                             rule_id="compile.wire.port.range",
-                            message=f"wire 引用了越界端口: {target_id}[{target_port}] / outputs={target_outputs}",
+                            message=f"wire 引用了越界端口: {target_id}[{target_port}] / inputs={target_inputs}",
                         ))
 
         compile_report = compiled_artifact.get("compile_report", {}) or {}
@@ -316,6 +348,15 @@ class VerifierAgent:
             1 for obj in flow_objects
             if isinstance(obj, dict) and obj.get("type") not in {"tab", "subflow"}
         )
+        if actual_nodes == 0:
+            issues.append(self._make_issue(
+                issue_id=f"CP-{len(issues) + 1:03d}",
+                scope="compile",
+                target_id="compiled_artifact.flow_objects",
+                rule_id="compile.nodes.must_not_be_empty",
+                message="编译产物没有任何可执行节点。",
+                suggested_fix="检查 planning/assembly/coding，确保最终产物包含至少 1 个节点。",
+            ))
         if expected_pages and expected_pages != actual_pages:
             warnings.append(f"compile_report.page_count={expected_pages}，实际 tab 数={actual_pages}。")
         if expected_subflows != actual_subflows:

@@ -2,6 +2,14 @@
 
 This file defines repository-specific instructions for Codex.
 
+## Documentation Encoding
+
+- All project documentation is written in Chinese. When reading documentation files, use UTF-8 encoding.
+
+## Context Limits
+
+- If context limitations or conversation compression cause important information to be lost and would likely lead to hallucination, proactively warn the user and ask them to start a new chat/session before proceeding.
+
 ## Response Quality
 
 - Do not simply follow the user's proposed line of thinking by default.
