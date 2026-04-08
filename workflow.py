@@ -1,10 +1,11 @@
 """
 LangGraph workflow orchestration.
 
-Phase 1 refactor keeps the workflow linear, but upgrades the middle of the
-pipeline from a weak plan -> JSON jump to:
+Phase 3 keeps the workflow linear for stability, but upgrades the planning
+layer into:
 
-analysis -> retrieval -> planning -> assembly -> coding -> verification -> END
+analysis -> retrieval -> architecture_planning -> subsystem_planning
+-> global_assembly -> coding -> verification -> END
 """
 from typing import TypedDict
 import os
@@ -13,9 +14,10 @@ from langgraph.graph import END, StateGraph
 from langsmith import traceable
 
 from agents.analysis_agent import AnalysisAgent
-from agents.assembly_agent import AssemblyAgent
+from agents.architecture_planner import ArchitecturePlanner
 from agents.coding_agent import CodingAgent
-from agents.planning_agent import PlanningAgent
+from agents.global_assembler import GlobalAssembler
+from agents.subsystem_planner import SubsystemPlanner
 from agents.verifier_agent import VerifierAgent
 
 try:
@@ -31,8 +33,12 @@ class WorkflowState(TypedDict):
 
     user_query: str
     analysis_result: dict
+    requirement_spec: dict
     retrieval_context: dict
     retrieval_bundle: dict
+    decomposition_result: dict
+    architecture_plan: dict
+    subsystem_plan_map: dict
     execution_plan: dict
     assembled_graph_ir: dict
     compiled_artifact: dict
@@ -47,50 +53,40 @@ class WorkflowState(TypedDict):
     final_output: dict
 
 
-@traceable(name="create_workflow", tags=["workflow", "langgraph"])
-def create_workflow() -> StateGraph:
-    """Create the phase-1 workflow graph."""
-    if RetrievalAgent is None:
-        raise ImportError("RetrievalAgent 依赖未安装，无法创建正式工作流。")
+PHASE3_NODE_ORDER = [
+    "analysis",
+    "retrieval",
+    "architecture_planning",
+    "subsystem_planning",
+    "global_assembly",
+    "coding",
+    "verification",
+]
 
-    analysis_agent = AnalysisAgent()
-    retrieval_agent = RetrievalAgent()
-    planning_agent = PlanningAgent()
-    assembly_agent = AssemblyAgent()
-    coding_agent = CodingAgent()
-    verifier_agent = VerifierAgent()
 
-    workflow = StateGraph(WorkflowState)
+def populate_phase3_workflow(workflow: StateGraph, nodes: dict[str, object]) -> StateGraph:
+    """Register the shared Phase 3 linear topology."""
+    for node_name in PHASE3_NODE_ORDER:
+        workflow.add_node(node_name, nodes[node_name])
 
-    workflow.add_node("analysis", analysis_agent)
-    workflow.add_node("retrieval", retrieval_agent)
-    workflow.add_node("planning", planning_agent)
-    workflow.add_node("assembly", assembly_agent)
-    workflow.add_node("coding", coding_agent)
-    workflow.add_node("verification", verifier_agent)
-
-    workflow.set_entry_point("analysis")
-    workflow.add_edge("analysis", "retrieval")
-    workflow.add_edge("retrieval", "planning")
-    workflow.add_edge("planning", "assembly")
-    workflow.add_edge("assembly", "coding")
-    workflow.add_edge("coding", "verification")
-    workflow.add_edge("verification", END)
-
+    workflow.set_entry_point(PHASE3_NODE_ORDER[0])
+    for source, target in zip(PHASE3_NODE_ORDER, PHASE3_NODE_ORDER[1:]):
+        workflow.add_edge(source, target)
+    workflow.add_edge(PHASE3_NODE_ORDER[-1], END)
     return workflow
 
 
-@traceable(name="run_workflow", tags=["workflow", "langgraph"])
-def run_workflow(user_query: str) -> dict:
-    """Run the end-to-end workflow and return the final state."""
-    workflow = create_workflow()
-    app = workflow.compile()
-
-    initial_state = {
+def build_initial_state(user_query: str) -> dict:
+    """Create the canonical initial state shared by both entrypoints."""
+    return {
         "user_query": user_query,
         "analysis_result": {},
+        "requirement_spec": {},
         "retrieval_context": {},
         "retrieval_bundle": {},
+        "decomposition_result": {},
+        "architecture_plan": {},
+        "subsystem_plan_map": {},
         "execution_plan": {},
         "assembled_graph_ir": {},
         "compiled_artifact": {},
@@ -105,9 +101,47 @@ def run_workflow(user_query: str) -> dict:
         "final_output": {},
     }
 
+
+@traceable(name="create_workflow", tags=["workflow", "langgraph"])
+def create_workflow() -> StateGraph:
+    """Create the Phase 3 workflow graph."""
+    if RetrievalAgent is None:
+        raise ImportError("RetrievalAgent 依赖未安装，无法创建正式工作流。")
+
+    analysis_agent = AnalysisAgent()
+    retrieval_agent = RetrievalAgent()
+    architecture_planner = ArchitecturePlanner()
+    subsystem_planner = SubsystemPlanner()
+    global_assembler = GlobalAssembler()
+    coding_agent = CodingAgent()
+    verifier_agent = VerifierAgent()
+
+    workflow = StateGraph(WorkflowState)
+    return populate_phase3_workflow(
+        workflow,
+        {
+            "analysis": analysis_agent,
+            "retrieval": retrieval_agent,
+            "architecture_planning": architecture_planner,
+            "subsystem_planning": subsystem_planner,
+            "global_assembly": global_assembler,
+            "coding": coding_agent,
+            "verification": verifier_agent,
+        },
+    )
+
+
+@traceable(name="run_workflow", tags=["workflow", "langgraph"])
+def run_workflow(user_query: str) -> dict:
+    """Run the end-to-end workflow and return the final state."""
+    workflow = create_workflow()
+    app = workflow.compile()
+
+    initial_state = build_initial_state(user_query)
+
     invoke_config = {
         "run_name": "MideaWorkflow",
-        "tags": ["workflow", "langgraph", "phase1-ir"],
+        "tags": ["workflow", "langgraph", "phase3-layered-planning"],
         "metadata": {"user_query": user_query},
     }
 

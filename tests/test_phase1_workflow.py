@@ -466,24 +466,56 @@ class WorkflowPhase1Tests(unittest.TestCase):
         class StubAnalysis:
             def __call__(self, state):
                 state["analysis_result"] = {"scenario_analysis": {}, "retrieval_plan": {}, "metadata": {}}
+                state["requirement_spec"] = {}
                 state["current_step"] = "analysis_completed"
                 return state
 
         class StubRetrieval:
             def __call__(self, state):
                 state["retrieval_context"] = make_retrieval_context()
+                state["retrieval_bundle"] = {}
                 state["current_step"] = "retrieval_completed"
                 return state
 
-        class StubPlanning:
+        class StubArchitecturePlanning:
+            def __call__(self, state):
+                state["decomposition_result"] = {"pages": [], "subsystem_descriptors": [], "shared_signal_registry": [], "template_needs": [], "planning_order": []}
+                state["architecture_plan"] = {"goal": "sum two constants", "pages": [], "subsystem_slots": [], "global_constraints": [], "naming_strategy": {}, "layout_strategy": {}, "pattern_bindings": [], "warnings": []}
+                state["current_step"] = "architecture_planned"
+                return state
+
+        class StubSubsystemPlanning:
+            def __call__(self, state):
+                state["subsystem_plan_map"] = {
+                    "compat_subsystem": {
+                        "subsystem_id": "compat_subsystem",
+                        "page_id": "page_control",
+                        "implementation_mode": "atomic_assembly",
+                        "template_binding": {},
+                        "node_instances": [],
+                        "edges": [],
+                        "imported_signals": [],
+                        "exported_signals": [],
+                        "constraints": [],
+                        "unresolved_items": [],
+                        "reasoning": "compat stub",
+                    }
+                }
+                state["current_step"] = "subsystem_planned"
+                return state
+
+        class StubGlobalAssembly:
             def __call__(self, state):
                 state["execution_plan"] = make_execution_plan()
-                state["current_step"] = "planning_completed"
+                state["assembled_graph_ir"] = AssemblyAgent().assemble(make_execution_plan(), make_retrieval_context())
+                state["current_step"] = "global_assembly_completed"
                 return state
 
         with patch.object(workflow, "AnalysisAgent", StubAnalysis), \
              patch.object(workflow, "RetrievalAgent", StubRetrieval), \
-             patch.object(workflow, "PlanningAgent", StubPlanning):
+             patch.object(workflow, "ArchitecturePlanner", StubArchitecturePlanning), \
+             patch.object(workflow, "SubsystemPlanner", StubSubsystemPlanning), \
+             patch.object(workflow, "GlobalAssembler", StubGlobalAssembly):
             result = workflow.run_workflow("sum two constants")
 
         self.assertIn("assembled_graph_ir", result)
@@ -497,6 +529,7 @@ class WorkflowPhase1Tests(unittest.TestCase):
         class StubAnalysis:
             def __call__(self, state):
                 state["analysis_result"] = {"scenario_analysis": {}, "retrieval_plan": {}, "metadata": {}}
+                state["requirement_spec"] = {}
                 state["current_step"] = "analysis_completed"
                 return state
 
@@ -504,15 +537,8 @@ class WorkflowPhase1Tests(unittest.TestCase):
             def __call__(self, state):
                 raise RuntimeError("retrieval exploded")
 
-        class StubPlanning:
-            def __call__(self, state):
-                state["execution_plan"] = make_execution_plan()
-                state["current_step"] = "planning_completed"
-                return state
-
         with patch.object(workflow_trace, "AnalysisAgent", StubAnalysis), \
              patch.object(workflow_trace, "RetrievalAgent", StubRetrieval), \
-             patch.object(workflow_trace, "PlanningAgent", StubPlanning), \
              patch.object(workflow_trace, "_save_workflow_trace", return_value={"trace_dir": "mock"}) as mock_save:
             with self.assertRaises(RuntimeError):
                 workflow_trace.run_workflow("boom")

@@ -13,6 +13,7 @@ from langchain_core.prompts import ChatPromptTemplate
 import config
 from utils.console_utils import safe_print as print
 from utils.model_manager import LLMManager
+from utils.phase3_adapters import build_requirement_spec
 
 
 class RetrievalPlan(BaseModel):
@@ -413,6 +414,8 @@ class AnalysisAgent:
 
 	def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
 		user_query = state.get("user_query", "")
-		state["analysis_result"] = self.analyze(user_query)
+		analysis_result = self.analyze(user_query)
+		state["analysis_result"] = analysis_result
+		state["requirement_spec"] = build_requirement_spec(analysis_result)
 		state["current_step"] = "analysis_completed"
 		return state

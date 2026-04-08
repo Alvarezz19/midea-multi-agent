@@ -1,7 +1,7 @@
 """
 Trace-enabled workflow entrypoint.
 
-This mirrors the phase-1 main workflow while recording per-node IO snapshots,
+This mirrors the Phase 3 main workflow while recording per-node IO snapshots,
 timing, and changed top-level state fields.
 """
 from __future__ import annotations
@@ -13,14 +13,16 @@ import json
 import os
 import time
 
-from langgraph.graph import END, StateGraph
+from langgraph.graph import StateGraph
 from langsmith import traceable
 
 from agents.analysis_agent import AnalysisAgent
-from agents.assembly_agent import AssemblyAgent
+from agents.architecture_planner import ArchitecturePlanner
 from agents.coding_agent import CodingAgent
-from agents.planning_agent import PlanningAgent
+from agents.global_assembler import GlobalAssembler
+from agents.subsystem_planner import SubsystemPlanner
 from agents.verifier_agent import VerifierAgent
+from workflow import build_initial_state, populate_phase3_workflow
 
 try:
     from agents.retrieval_agent import RetrievalAgent
@@ -33,8 +35,12 @@ os.environ["LANGCHAIN_TRACING_V2"] = "false"
 class WorkflowState(TypedDict):
     user_query: str
     analysis_result: dict
+    requirement_spec: dict
     retrieval_context: dict
     retrieval_bundle: dict
+    decomposition_result: dict
+    architecture_plan: dict
+    subsystem_plan_map: dict
     execution_plan: dict
     assembled_graph_ir: dict
     compiled_artifact: dict
@@ -187,8 +193,9 @@ def create_workflow(node_io_records: list[dict] | None = None) -> StateGraph:
 
     analysis_agent = AnalysisAgent()
     retrieval_agent = RetrievalAgent()
-    planning_agent = PlanningAgent()
-    assembly_agent = AssemblyAgent()
+    architecture_planner = ArchitecturePlanner()
+    subsystem_planner = SubsystemPlanner()
+    global_assembler = GlobalAssembler()
     coding_agent = CodingAgent()
     verifier_agent = VerifierAgent()
 
@@ -196,23 +203,18 @@ def create_workflow(node_io_records: list[dict] | None = None) -> StateGraph:
         node_io_records = []
 
     workflow = StateGraph(WorkflowState)
-
-    workflow.add_node("analysis", _wrap_node("analysis", analysis_agent, node_io_records))
-    workflow.add_node("retrieval", _wrap_node("retrieval", retrieval_agent, node_io_records))
-    workflow.add_node("planning", _wrap_node("planning", planning_agent, node_io_records))
-    workflow.add_node("assembly", _wrap_node("assembly", assembly_agent, node_io_records))
-    workflow.add_node("coding", _wrap_node("coding", coding_agent, node_io_records))
-    workflow.add_node("verification", _wrap_node("verification", verifier_agent, node_io_records))
-
-    workflow.set_entry_point("analysis")
-    workflow.add_edge("analysis", "retrieval")
-    workflow.add_edge("retrieval", "planning")
-    workflow.add_edge("planning", "assembly")
-    workflow.add_edge("assembly", "coding")
-    workflow.add_edge("coding", "verification")
-    workflow.add_edge("verification", END)
-
-    return workflow
+    return populate_phase3_workflow(
+        workflow,
+        {
+            "analysis": _wrap_node("analysis", analysis_agent, node_io_records),
+            "retrieval": _wrap_node("retrieval", retrieval_agent, node_io_records),
+            "architecture_planning": _wrap_node("architecture_planning", architecture_planner, node_io_records),
+            "subsystem_planning": _wrap_node("subsystem_planning", subsystem_planner, node_io_records),
+            "global_assembly": _wrap_node("global_assembly", global_assembler, node_io_records),
+            "coding": _wrap_node("coding", coding_agent, node_io_records),
+            "verification": _wrap_node("verification", verifier_agent, node_io_records),
+        },
+    )
 
 
 @traceable(name="run_workflow_trace", tags=["workflow", "langgraph", "trace"])
@@ -223,28 +225,11 @@ def run_workflow(user_query: str) -> dict:
     workflow = create_workflow(node_io_records=node_io_records)
     app = workflow.compile()
 
-    initial_state = {
-        "user_query": user_query,
-        "analysis_result": {},
-        "retrieval_context": {},
-        "retrieval_bundle": {},
-        "execution_plan": {},
-        "assembled_graph_ir": {},
-        "compiled_artifact": {},
-        "verification_report": {},
-        "generated_code": "",
-        "execution_result": {},
-        "validation_result": {},
-        "debug_history": [],
-        "retry_count": 0,
-        "current_step": "start",
-        "next_step": "",
-        "final_output": {},
-    }
+    initial_state = build_initial_state(user_query)
 
     invoke_config = {
         "run_name": "MideaWorkflowTrace",
-        "tags": ["workflow", "langgraph", "phase1-ir", "trace"],
+        "tags": ["workflow", "langgraph", "phase3-layered-planning", "trace"],
         "metadata": {"user_query": user_query},
     }
 
