@@ -220,7 +220,27 @@ class VerifierAgent:
 
         unresolved_items = assembled_graph_ir.get("unresolved_items", []) or []
         for unresolved in unresolved_items:
-            warnings.append(unresolved.get("message", "存在未解决项。"))
+            message = str(unresolved.get("message", "") or "存在未解决项。")
+            severity = str(unresolved.get("severity", "warning") or "warning").strip().lower()
+            if severity == "error":
+                target_id = str(
+                    unresolved.get("target_id")
+                    or unresolved.get("signal_name")
+                    or unresolved.get("subsystem_id")
+                    or unresolved.get("type")
+                    or "unresolved_item"
+                )
+                unresolved_type = str(unresolved.get("type", "") or "item").strip() or "item"
+                issues.append(self._make_issue(
+                    issue_id=f"IR-{len(issues) + 1:03d}",
+                    scope=str(unresolved.get("scope", "") or "assembly"),
+                    target_id=target_id,
+                    rule_id=f"ir.unresolved.{unresolved_type}",
+                    message=message,
+                    suggested_fix=str(unresolved.get("suggested_fix", "") or "修复未解决项后重新执行 assembly/compile。"),
+                ))
+            else:
+                warnings.append(message)
 
         raw_json_text = compiled_artifact.get("json_text", "[]")
         flow_objects = compiled_artifact.get("flow_objects", [])

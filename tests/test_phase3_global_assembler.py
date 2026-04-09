@@ -224,6 +224,30 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
         report = VerifierAgent().verify(graph_ir, artifact)
         self.assertEqual(report["status"], "passed")
 
+    def test_global_assembler_rejects_synthetic_shared_signal_source_for_internal_signal(self):
+        subsystem_plan_map = make_subsystem_plan_map()
+        subsystem_plan_map["supply_fan_ctrl"]["exported_signals"] = []
+
+        with patch.object(config, "DEBUG", False):
+            assembler = GlobalAssembler()
+            graph_ir = assembler.assemble(
+                architecture_plan=make_architecture_plan(),
+                subsystem_plan_map=subsystem_plan_map,
+                bundle_or_context=make_bundle(),
+                requirement_spec=make_requirement_spec(),
+            )
+
+        self.assertTrue(
+            any(item.get("type") == "synthetic_shared_signal_source" for item in graph_ir["unresolved_items"])
+        )
+
+        artifact = CodingAgent().compile_graph(graph_ir, make_bundle())
+        report = VerifierAgent().verify(graph_ir, artifact)
+        self.assertEqual(report["status"], "retryable_error")
+        self.assertTrue(
+            any(issue.get("rule_id") == "ir.unresolved.synthetic_shared_signal_source" for issue in report["issues"])
+        )
+
     def test_global_assembler_records_unresolved_item_for_ambiguous_shared_signal(self):
         subsystem_plan_map = make_subsystem_plan_map()
         subsystem_plan_map["backup_fan_ctrl"] = {
@@ -270,6 +294,13 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
 
         self.assertTrue(
             any(item.get("type") == "ambiguous_shared_signal" for item in graph_ir["unresolved_items"])
+        )
+
+        artifact = CodingAgent().compile_graph(graph_ir, make_bundle())
+        report = VerifierAgent().verify(graph_ir, artifact)
+        self.assertEqual(report["status"], "retryable_error")
+        self.assertTrue(
+            any(issue.get("rule_id") == "ir.unresolved.ambiguous_shared_signal" for issue in report["issues"])
         )
 
 

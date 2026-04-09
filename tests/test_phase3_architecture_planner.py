@@ -101,6 +101,14 @@ class Phase3ArchitecturePlannerTests(unittest.TestCase):
         self.assertIn("dx_ctrl", slot_map)
         self.assertTrue(slot_map["supply_fan_ctrl"]["preferred_template_ids"])
         self.assertEqual(slot_map["supply_fan_ctrl"]["preferred_implementation"], "reuse_template")
+        template_role_by_id = {
+            item["template_id"]: item["template_role"]
+            for item in bundle["subflow_templates"]
+        }
+        self.assertEqual(
+            template_role_by_id[slot_map["supply_fan_ctrl"]["preferred_template_ids"][0]],
+            "supply_fan_control",
+        )
         descriptor_map = {item["subsystem_id"]: item for item in decomposition_result["subsystem_descriptors"]}
         self.assertEqual(descriptor_map["dx_ctrl"]["page_id"], slot_map["dx_ctrl"]["page_id"])
 

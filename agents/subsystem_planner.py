@@ -221,8 +221,10 @@ class SubsystemPlanner:
                     "unresolved_items": [
                         {
                             "type": "missing_atomic_candidates",
+                            "severity": "error",
                             "subsystem_id": subsystem_id,
                             "message": "No atomic_modules available for subsystem fallback.",
+                            "suggested_fix": "补齐 atomic_modules，或为该子系统提供可复用的 subflow template。",
                         }
                     ],
                 }
@@ -258,8 +260,10 @@ class SubsystemPlanner:
             unresolved_items.append(
                 {
                     "type": "missing_placeholder_source",
+                    "severity": "error",
                     "subsystem_id": subsystem_id,
                     "message": "No zero-input atomic module available to satisfy fallback inputs.",
+                    "suggested_fix": "补齐可作为输入占位源的零输入原子模块，或为该子系统提供完整模板。",
                 }
             )
 

@@ -107,7 +107,13 @@ class ArchitecturePlanner:
                 str(template.get(key, "")).lower()
                 for key in ("template_name", "template_role", "description", "category")
             )
-            score = sum(1 for keyword in keywords if keyword.lower() in searchable or keyword.lower() in goal_text)
+            template_role = str(template.get("template_role", "")).strip()
+            score = 0
+            if template_role == subsystem_type:
+                score += 20
+            score += sum(3 for keyword in keywords if keyword.lower() in searchable)
+            if template_role and template_role.lower() in goal_text:
+                score += 2
             if score > 0:
                 scored.append((score, template_id))
 

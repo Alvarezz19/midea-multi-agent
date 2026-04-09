@@ -99,6 +99,28 @@ class GlobalAssembler(AssemblyAgent):
             params["fixedValue"] = 0
         return params
 
+    @staticmethod
+    def _external_signal_keys(requirement_spec: Dict[str, Any]) -> set[str]:
+        if not isinstance(requirement_spec, dict):
+            return set()
+
+        signals = requirement_spec.get("signals", {}) if isinstance(requirement_spec.get("signals"), dict) else {}
+        candidates = []
+        for key in ("inputs", "software_points"):
+            values = signals.get(key, [])
+            if isinstance(values, list):
+                candidates.extend(values)
+
+        global_modes = requirement_spec.get("global_modes", [])
+        if isinstance(global_modes, list):
+            candidates.extend(global_modes)
+
+        return {
+            normalized
+            for value in candidates
+            if (normalized := normalize_signal_name(value))
+        }
+
     def assemble(
         self,
         architecture_plan: Dict[str, Any],
@@ -108,6 +130,7 @@ class GlobalAssembler(AssemblyAgent):
     ) -> Dict[str, Any]:
         requirement_spec = requirement_spec or {}
         doc_map = self._build_doc_map(bundle_or_context)
+        external_signal_keys = self._external_signal_keys(requirement_spec)
         pages = [
             PageIR(
                 page_id=str(page.get("page_id", "")).strip(),
@@ -141,8 +164,10 @@ class GlobalAssembler(AssemblyAgent):
                 unresolved_items.append(
                     {
                         "type": "missing_page",
+                        "severity": "error",
                         "subsystem_id": subsystem_id,
                         "message": f"Subsystem references unknown page_id={page_id}, falling back to {self.DEFAULT_PAGE_ID}.",
+                        "suggested_fix": "确保 architecture_plan.pages 中存在该 page_id，或修正 subsystem_plan_map 的 page_id。",
                     }
                 )
                 page_id = self.DEFAULT_PAGE_ID
@@ -195,8 +220,10 @@ class GlobalAssembler(AssemblyAgent):
                     unresolved_items.append(
                         {
                             "type": "missing_local_edge_endpoint",
+                            "severity": "error",
                             "subsystem_id": subsystem_id,
                             "message": f"Local edge references missing nodes: {from_logic} -> {to_logic}.",
+                            "suggested_fix": "修正 subsystem_plan_map 中的局部边定义，确保 from_node/to_node 都能映射到真实节点。",
                         }
                     )
                     continue
@@ -268,8 +295,10 @@ class GlobalAssembler(AssemblyAgent):
                 unresolved_items.append(
                     {
                         "type": "ambiguous_shared_signal",
+                        "severity": "error",
                         "signal_name": signal_name,
                         "message": f"Multiple exporters found for shared signal {signal_name}.",
+                        "suggested_fix": "在 ArchitecturePlanner/SubsystemPlanner 中收敛共享信号归属，确保一个共享信号只有唯一导出方。",
                     }
                 )
             if export_candidates:
@@ -303,12 +332,15 @@ class GlobalAssembler(AssemblyAgent):
                 unresolved_items.append(
                     {
                         "type": "missing_placeholder_source",
+                        "severity": "error",
                         "signal_name": signal_name,
                         "message": f"No placeholder source module available for shared signal {signal_name}.",
+                        "suggested_fix": "补齐可作为占位输入源的零输入原子模块，或让该信号由真实子系统导出。",
                     }
                 )
                 continue
 
+            is_declared_external = signal_key in external_signal_keys
             placeholder_counter += 1
             module_type = str(placeholder_source_doc.get("module_type", "")).strip()
             placeholder_logic_id = f"placeholder_{placeholder_counter}"
@@ -333,6 +365,16 @@ class GlobalAssembler(AssemblyAgent):
                     reasoning="Synthetic placeholder source injected by GlobalAssembler.",
                 )
             )
+            if not is_declared_external:
+                unresolved_items.append(
+                    {
+                        "type": "synthetic_shared_signal_source",
+                        "severity": "error",
+                        "signal_name": signal_name,
+                        "message": f"Shared signal {signal_name} has no real exporter; GlobalAssembler injected a synthetic placeholder source.",
+                        "suggested_fix": "让真实子系统通过 exported_signals 导出该信号，或在 requirement_spec 中明确它是外部输入/全局模式。",
+                    }
+                )
             edge_counter += 1
             signal_id = f"signal::placeholder::{signal_key or placeholder_counter}"
             edges.append(
