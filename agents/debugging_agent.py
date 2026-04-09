@@ -1,6 +1,12 @@
 """
 调试智能体 (Debugging Agent)
-职责：故障修复，分析错误并生成修正代码
+
+状态:
+- 正式主链: 否。当前主链尚未接入 RepairRouter / RepairAgent。
+- 当前用途: 保留旧 generated_code / execution_result / validation_result
+  修复闭环下的占位实现。
+- 迁移计划: 待 Phase 4 Repair 方案稳定后，再决定迁移到 legacy/ 目录
+  还是按新契约重写。
 """
 from typing import Dict, List, Any
 from langchain_openai import ChatOpenAI
@@ -9,7 +15,7 @@ import config
 
 
 class DebuggingAgent:
-    """调试智能体"""
+    """旧调试/修复占位实现，不在当前正式主链中。"""
     
     def __init__(self):
         """初始化 LLM"""

@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 
 import config
 from utils.console_utils import safe_print as print
+from utils.phase3_adapters import normalize_signal_name
 from utils.phase3_contracts import empty_subsystem_plan
 from utils.retrieval_bundle_utils import get_atomic_modules, build_compilable_doc_map
 from .coding_utils import resolve_input_count, resolve_output_count
@@ -138,8 +139,11 @@ class SubsystemPlanner:
         semantic_role: str,
     ) -> List[Dict[str, Any]]:
         bindings: List[Dict[str, Any]] = []
-        for port_index in range(max(count, len(signal_names))):
-            signal_name = signal_names[port_index] if port_index < len(signal_names) else f"{semantic_role}_{port_index + 1}"
+        if count <= 0:
+            return bindings
+        limit = min(count, len(signal_names))
+        for port_index in range(limit):
+            signal_name = signal_names[port_index]
             bindings.append(
                 {
                     "signal_name": signal_name,
@@ -153,19 +157,128 @@ class SubsystemPlanner:
             )
         return bindings
 
+    @staticmethod
+    def _shared_signal_registry(
+        requirement_spec: Dict[str, Any],
+        decomposition_result: Dict[str, Any],
+        architecture_plan: Dict[str, Any],
+    ) -> Dict[str, Dict[str, Any]]:
+        registry_items = (
+            architecture_plan.get("shared_signal_registry", []) or []
+            or decomposition_result.get("shared_signal_registry", []) or []
+        )
+        registry: Dict[str, Dict[str, Any]] = {}
+        for item in registry_items:
+            if not isinstance(item, dict):
+                continue
+            signal_key = normalize_signal_name(item.get("signal_name") or item.get("signal_key"))
+            if signal_key:
+                registry[signal_key] = dict(item)
+
+        for mode in requirement_spec.get("global_modes", []) or []:
+            signal_name = str(mode).strip()
+            signal_key = normalize_signal_name(signal_name)
+            if not signal_key or signal_key in registry:
+                continue
+            registry[signal_key] = {
+                "signal_name": signal_name,
+                "signal_key": signal_key,
+                "owner_subsystem_id": "",
+                "allowed_external": True,
+                "required_exporter_count": 0,
+                "consumers": [],
+                "source_reason": "Synthesized from requirement_spec.global_modes.",
+            }
+        return registry
+
+    @staticmethod
+    def _dedupe_signal_names(values: List[str]) -> List[str]:
+        ordered: List[str] = []
+        seen = set()
+        for value in values:
+            signal_name = str(value).strip()
+            signal_key = normalize_signal_name(signal_name)
+            if not signal_key or signal_key in seen:
+                continue
+            seen.add(signal_key)
+            ordered.append(signal_name)
+        return ordered
+
+    def _compose_interface_signal_names(
+        self,
+        descriptor: Dict[str, Any],
+        shared_signal_registry: Dict[str, Dict[str, Any]],
+        default_imports: List[str],
+        default_exports: List[str],
+    ) -> tuple[List[str], List[str]]:
+        subsystem_id = str(descriptor.get("subsystem_id", "")).strip()
+        import_names = list(default_imports)
+        export_names = list(default_exports)
+        default_import_keys = {normalize_signal_name(item) for item in default_imports if normalize_signal_name(item)}
+
+        for entry in shared_signal_registry.values():
+            signal_name = str(entry.get("signal_name", "")).strip()
+            if not signal_name:
+                continue
+            consumers = [str(item).strip() for item in entry.get("consumers", []) or [] if str(item).strip()]
+            owner_subsystem_id = str(entry.get("owner_subsystem_id", "")).strip()
+            signal_key = normalize_signal_name(signal_name)
+
+            if subsystem_id == owner_subsystem_id and int(entry.get("required_exporter_count", 0) or 0) > 0:
+                export_names.append(signal_name)
+            if subsystem_id in consumers and owner_subsystem_id != subsystem_id:
+                should_inject = bool(owner_subsystem_id) or not default_imports or signal_key in default_import_keys
+                if not should_inject:
+                    continue
+                import_names.append(signal_name)
+
+        return self._dedupe_signal_names(import_names), self._dedupe_signal_names(export_names)
+
     def _plan_template_reuse(
         self,
         descriptor: Dict[str, Any],
         slot: Dict[str, Any],
         template_doc: Dict[str, Any],
+        shared_signal_registry: Dict[str, Dict[str, Any]],
     ) -> Dict[str, Any]:
         subsystem_id = str(descriptor.get("subsystem_id", "")).strip()
         page_id = str(descriptor.get("page_id", "")).strip()
         template_id = str(template_doc.get("template_id") or template_doc.get("module_type") or "").strip()
         main_logic_id = f"{subsystem_id}_main"
         input_count, output_count = self._resolve_counts(template_doc, {})
-        import_names = self._signal_names(descriptor.get("imports", []), f"{subsystem_id}_input", input_count)
-        export_names = self._signal_names(descriptor.get("exports", []), f"{subsystem_id}_output", output_count)
+        import_names, export_names = self._compose_interface_signal_names(
+            descriptor,
+            shared_signal_registry,
+            self._signal_names(descriptor.get("imports", []), f"{subsystem_id}_input", input_count),
+            self._signal_names(descriptor.get("exports", []), f"{subsystem_id}_output", output_count),
+        )
+        unresolved_items: List[Dict[str, Any]] = []
+        if len(import_names) > input_count:
+            unresolved_items.append(
+                {
+                    "type": "template_input_interface_mismatch",
+                    "severity": "error",
+                    "scope": "planning",
+                    "subsystem_id": subsystem_id,
+                    "message": f"Template {template_id} only exposes {input_count} inputs but planner projected {len(import_names)} imported signals.",
+                    "suggested_fix": "更换更匹配的子流程模板，或在架构层减少该子系统的共享输入约束。",
+                }
+            )
+            import_names = import_names[:input_count]
+        if len(export_names) > output_count:
+            unresolved_items.append(
+                {
+                    "type": "template_output_interface_mismatch",
+                    "severity": "error",
+                    "scope": "planning",
+                    "subsystem_id": subsystem_id,
+                    "message": f"Template {template_id} only exposes {output_count} outputs but planner projected {len(export_names)} exported signals.",
+                    "suggested_fix": "更换更匹配的子流程模板，或在架构层修正该子系统的导出信号归属。",
+                }
+            )
+            export_names = export_names[:output_count]
+        active_input_count = len(import_names)
+        active_output_count = len(export_names)
 
         subsystem_plan = empty_subsystem_plan(subsystem_id=subsystem_id, page_id=page_id)
         subsystem_plan.update(
@@ -182,15 +295,15 @@ class SubsystemPlanner:
                         "page_id": page_id,
                         "template_id": template_id,
                         "parameters": {"name": str(template_doc.get("template_name") or descriptor.get("goal") or subsystem_id)},
-                        "input_count": input_count,
-                        "output_count": output_count,
+                        "input_count": active_input_count,
+                        "output_count": active_output_count,
                         "position": {"x": 0, "y": 0},
                         "reasoning": f"Reuse template {template_id} for subsystem {subsystem_id}.",
                     }
                 ],
                 "edges": [],
-                "imported_signals": self._build_signal_bindings(import_names, main_logic_id, page_id, input_count, "import"),
-                "exported_signals": self._build_signal_bindings(export_names, main_logic_id, page_id, output_count, "export"),
+                "imported_signals": self._build_signal_bindings(import_names, main_logic_id, page_id, active_input_count, "import"),
+                "exported_signals": self._build_signal_bindings(export_names, main_logic_id, page_id, active_output_count, "export"),
                 "constraints": [
                     {
                         "constraint_id": f"{subsystem_id}::implementation",
@@ -198,6 +311,7 @@ class SubsystemPlanner:
                         "source": "architecture_plan.subsystem_slots",
                     }
                 ],
+                "unresolved_items": unresolved_items,
                 "reasoning": str(slot.get("reasoning", "")).strip() or "Template reuse path selected.",
             }
         )
@@ -208,6 +322,7 @@ class SubsystemPlanner:
         descriptor: Dict[str, Any],
         slot: Dict[str, Any],
         atomic_modules: List[Dict[str, Any]],
+        shared_signal_registry: Dict[str, Dict[str, Any]],
     ) -> Dict[str, Any]:
         subsystem_id = str(descriptor.get("subsystem_id", "")).strip()
         page_id = str(descriptor.get("page_id", "")).strip()
@@ -231,13 +346,18 @@ class SubsystemPlanner:
             )
             return subsystem_plan
 
-        import_seed = descriptor.get("imports", []) or []
+        import_seed, export_seed = self._compose_interface_signal_names(
+            descriptor,
+            shared_signal_registry,
+            list(descriptor.get("imports", []) or []),
+            list(descriptor.get("exports", []) or []),
+        )
         desired_inputs = len(import_seed) or 1
         primary_logic_id = f"{subsystem_id}_main"
         primary_parameters = self._default_parameters(primary_doc, str(descriptor.get("goal") or subsystem_id), desired_inputs)
         primary_input_count, primary_output_count = self._resolve_counts(primary_doc, primary_parameters)
         import_names = self._signal_names(import_seed, f"{subsystem_id}_input", primary_input_count)
-        export_names = self._signal_names(descriptor.get("exports", []), f"{subsystem_id}_output", max(1, primary_output_count))
+        export_names = self._signal_names(export_seed, f"{subsystem_id}_output", max(1, primary_output_count))
 
         node_instances: List[Dict[str, Any]] = [
             {
@@ -303,6 +423,7 @@ class SubsystemPlanner:
                 "template_binding": {
                     "template_id": "",
                     "reasoning": "Preferred templates unavailable; fell back to atomic modules.",
+                    "degraded": True,
                 },
                 "node_instances": node_instances,
                 "edges": edges,
@@ -316,7 +437,10 @@ class SubsystemPlanner:
                     }
                 ],
                 "unresolved_items": unresolved_items,
-                "reasoning": str(slot.get("reasoning", "")).strip() or "Atomic fallback path selected.",
+                "reasoning": (
+                    str(slot.get("reasoning", "")).strip()
+                    or "Atomic fallback path selected because no qualified reusable template was available."
+                ),
             }
         )
         return subsystem_plan
@@ -328,9 +452,13 @@ class SubsystemPlanner:
         architecture_plan: Dict[str, Any],
         retrieval_bundle: Dict[str, Any],
     ) -> Dict[str, Dict[str, Any]]:
-        del requirement_spec
         doc_map = build_compilable_doc_map(retrieval_bundle)
         atomic_modules = get_atomic_modules(retrieval_bundle)
+        shared_signal_registry = self._shared_signal_registry(
+            requirement_spec,
+            decomposition_result,
+            architecture_plan,
+        )
         subsystem_descriptors = {
             str(item.get("subsystem_id", "")).strip(): item
             for item in decomposition_result.get("subsystem_descriptors", []) or []
@@ -355,9 +483,9 @@ class SubsystemPlanner:
             slot = subsystem_slots.get(subsystem_id, {})
             template_doc = self._select_template_doc(slot, doc_map)
             if template_doc:
-                subsystem_plan = self._plan_template_reuse(descriptor, slot, template_doc)
+                subsystem_plan = self._plan_template_reuse(descriptor, slot, template_doc, shared_signal_registry)
             else:
-                subsystem_plan = self._plan_atomic_fallback(descriptor, slot, atomic_modules)
+                subsystem_plan = self._plan_atomic_fallback(descriptor, slot, atomic_modules, shared_signal_registry)
             subsystem_plan_map[subsystem_id] = subsystem_plan
 
         if config.DEBUG:

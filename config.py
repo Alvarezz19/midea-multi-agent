@@ -63,10 +63,11 @@ JINA_API_KEY = os.getenv("JINA_API_KEY", "")
 JINA_MODEL = os.getenv("JINA_MODEL", "jina-embeddings-v2-base-zh")
 
 # ==================== 向量数据库配置 ====================
-CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "./chroma_db")
+CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "./outputs/chroma_db")
 CHROMA_COLLECTION_ATOMIC_MODULES = os.getenv("CHROMA_COLLECTION_ATOMIC_MODULES", "kong_modules_v1")
 CHROMA_COLLECTION_SUBFLOW_TEMPLATES = os.getenv("CHROMA_COLLECTION_SUBFLOW_TEMPLATES", "ahu_subflow_templates_v1")
 CHROMA_COLLECTION_SYSTEM_PATTERNS = os.getenv("CHROMA_COLLECTION_SYSTEM_PATTERNS", "ahu_system_patterns_v1")
+PHASE2_CHROMA_COLLECTION_OWNER = os.getenv("PHASE2_CHROMA_COLLECTION_OWNER", "phase2_ahu_assets")
 
 # ==================== Phase 2 AHU Asset Output ====================
 AHU_PATTERN_LIBRARY_DIR = os.getenv("AHU_PATTERN_LIBRARY_DIR", "AHU程序/pattern_library")

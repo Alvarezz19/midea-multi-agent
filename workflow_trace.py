@@ -34,25 +34,31 @@ os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
 class WorkflowState(TypedDict):
     user_query: str
+
+    # Phase 3 formal fields
     analysis_result: dict
     requirement_spec: dict
-    retrieval_context: dict
     retrieval_bundle: dict
     decomposition_result: dict
     architecture_plan: dict
     subsystem_plan_map: dict
-    execution_plan: dict
     assembled_graph_ir: dict
     compiled_artifact: dict
     verification_report: dict
+    final_output: dict
+
+    # Compat fields
+    retrieval_context: dict
+    execution_plan: dict
     generated_code: str
+
+    # Historical / reserved fields
     execution_result: dict
     validation_result: dict
     debug_history: list
     retry_count: int
     current_step: str
     next_step: str
-    final_output: dict
 
 
 def _make_serializable(obj: Any) -> Any:
@@ -83,6 +89,126 @@ def _get_changed_fields(before_state: dict, after_state: dict) -> list[str]:
         if key not in before_state or before_state.get(key) != value:
             changed_fields.append(key)
     return changed_fields
+
+
+def _to_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return default
+
+
+def _count_subsystem_modes(subsystem_plan_map: dict[str, Any]) -> dict[str, int]:
+    counts = {
+        "reuse_template_subsystem_count": 0,
+        "atomic_assembly_subsystem_count": 0,
+    }
+    for plan in (subsystem_plan_map or {}).values():
+        mode = str((plan or {}).get("implementation_mode", "")).strip()
+        if mode == "reuse_template":
+            counts["reuse_template_subsystem_count"] += 1
+        elif mode == "atomic_assembly":
+            counts["atomic_assembly_subsystem_count"] += 1
+    return counts
+
+
+def _build_trace_summary(
+    user_query: str,
+    node_io_records: list[dict],
+    final_state: dict,
+    total_elapsed_seconds: float,
+) -> dict:
+    retrieval_metadata = ((final_state or {}).get("retrieval_bundle", {}) or {}).get("metadata", {}) or {}
+    subsystem_plan_map = (final_state or {}).get("subsystem_plan_map", {}) or {}
+    assembled_graph_ir = (final_state or {}).get("assembled_graph_ir", {}) or {}
+    compiled_artifact = (final_state or {}).get("compiled_artifact", {}) or {}
+    verification_report = (final_state or {}).get("verification_report", {}) or {}
+
+    unresolved_items = list(assembled_graph_ir.get("unresolved_items", []) or [])
+    unresolved_error_count = sum(
+        1 for item in unresolved_items if str((item or {}).get("severity", "")).strip().lower() == "error"
+    )
+    unresolved_warning_count = sum(
+        1 for item in unresolved_items if str((item or {}).get("severity", "")).strip().lower() == "warning"
+    )
+    unresolved_item_types = sorted(
+        {
+            str((item or {}).get("type", "")).strip()
+            for item in unresolved_items
+            if str((item or {}).get("type", "")).strip()
+        }
+    )
+
+    last_successful_node = next(
+        (record.get("node_name", "") for record in reversed(node_io_records) if record.get("status") == "success"),
+        "",
+    )
+    failed_record = next(
+        (record for record in reversed(node_io_records) if record.get("status") == "error"),
+        {},
+    )
+    failed_output = failed_record.get("output", {}) if isinstance(failed_record, dict) else {}
+
+    verification_status = str(verification_report.get("status", "")).strip()
+    if failed_record:
+        workflow_status = "failed"
+    elif verification_status:
+        workflow_status = verification_status
+    else:
+        workflow_status = "completed"
+
+    verification_error_count = len(verification_report.get("issues", []) or [])
+    verification_warning_count = len(verification_report.get("warnings", []) or [])
+    verification_metrics = verification_report.get("metrics", {}) or {}
+    compile_report = compiled_artifact.get("compile_report", {}) or {}
+    subsystem_mode_counts = _count_subsystem_modes(subsystem_plan_map)
+
+    acceptance_summary = (
+        f"status={verification_status or workflow_status}; "
+        f"scope={verification_report.get('repair_scope', 'n/a')}; "
+        f"errors={verification_error_count}; warnings={verification_warning_count}; "
+        f"unresolved={len(unresolved_items)}; "
+        f"reuse_template={subsystem_mode_counts['reuse_template_subsystem_count']}; "
+        f"atomic_assembly={subsystem_mode_counts['atomic_assembly_subsystem_count']}"
+    )
+
+    return {
+        "execution_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "user_query": user_query,
+        "total_elapsed_seconds": round(total_elapsed_seconds, 2),
+        "node_count": len(node_io_records),
+        "workflow_status": workflow_status,
+        "failed_node": str(failed_record.get("node_name", "")).strip(),
+        "error_type": str((failed_output or {}).get("error_type", "")).strip(),
+        "error_message": str((failed_output or {}).get("error_message", "")).strip(),
+        "last_successful_node": str(last_successful_node).strip(),
+        "selected_case_pattern_id": str(retrieval_metadata.get("selected_case_pattern_id", "")).strip(),
+        "retrieved_atomic_count": _to_int(retrieval_metadata.get("retrieved_atomic_count", 0)),
+        "retrieved_subflow_count": _to_int(retrieval_metadata.get("retrieved_subflow_count", 0)),
+        "retrieved_pattern_count": _to_int(retrieval_metadata.get("retrieved_pattern_count", 0)),
+        "reuse_template_subsystem_count": subsystem_mode_counts["reuse_template_subsystem_count"],
+        "atomic_assembly_subsystem_count": subsystem_mode_counts["atomic_assembly_subsystem_count"],
+        "unresolved_item_count": len(unresolved_items),
+        "unresolved_error_count": unresolved_error_count,
+        "unresolved_warning_count": unresolved_warning_count,
+        "unresolved_item_types": unresolved_item_types,
+        "verification_status": verification_status,
+        "verification_repair_scope": str(verification_report.get("repair_scope", "")).strip(),
+        "verification_issue_summary": str(verification_report.get("issue_summary", "")).strip(),
+        "verification_error_count": verification_error_count,
+        "verification_warning_count": verification_warning_count,
+        "verification_metrics": {
+            "missing_required_inputs": _to_int(verification_metrics.get("missing_required_inputs", 0)),
+            "isolated_nodes": _to_int(verification_metrics.get("isolated_nodes", 0)),
+            "invalid_port_refs": _to_int(verification_metrics.get("invalid_port_refs", 0)),
+        },
+        "compile_report_summary": {
+            "page_count": _to_int(compile_report.get("page_count", 0)),
+            "subflow_count": _to_int(compile_report.get("subflow_count", 0)),
+            "node_count": _to_int(compile_report.get("node_count", 0)),
+        },
+        "acceptance_summary": acceptance_summary,
+    }
 
 
 def _wrap_node(node_name: str, node_callable: Callable[[dict], dict], node_io_records: list[dict]) -> Callable[[dict], dict]:
@@ -125,13 +251,14 @@ def _save_workflow_trace(user_query: str, node_io_records: list[dict], final_sta
     trace_dir = os.path.join("outputs", f"workflow_trace_{timestamp}")
     os.makedirs(trace_dir, exist_ok=True)
 
-    summary = {
-        "execution_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "user_query": user_query,
-        "total_elapsed_seconds": round(total_elapsed_seconds, 2),
-        "node_count": len(node_io_records),
-        "nodes": node_io_records,
-    }
+    trace_summary = _build_trace_summary(
+        user_query=user_query,
+        node_io_records=node_io_records,
+        final_state=final_state,
+        total_elapsed_seconds=total_elapsed_seconds,
+    )
+    summary = dict(trace_summary)
+    summary["nodes"] = node_io_records
 
     summary_json_path = os.path.join(trace_dir, "workflow_node_io_record.json")
     with open(summary_json_path, "w", encoding="utf-8") as file:
@@ -147,9 +274,54 @@ def _save_workflow_trace(user_query: str, node_io_records: list[dict], final_sta
         f"**用户需求**: {user_query}\n",
         f"**总耗时**: {summary['total_elapsed_seconds']}s\n",
         f"**节点数量**: {len(node_io_records)}\n",
+        f"**工作流状态**: {summary['workflow_status']}\n",
+        f"**最后成功节点**: {summary['last_successful_node'] or 'N/A'}\n",
+        f"**失败节点**: {summary['failed_node'] or 'N/A'}\n",
+        f"**Pattern**: {summary['selected_case_pattern_id'] or 'N/A'}\n",
+        (
+            f"**检索摘要**: atomic={summary['retrieved_atomic_count']} / "
+            f"subflow={summary['retrieved_subflow_count']} / "
+            f"pattern={summary['retrieved_pattern_count']}\n"
+        ),
+        (
+            f"**子系统实现**: reuse_template={summary['reuse_template_subsystem_count']} / "
+            f"atomic_assembly={summary['atomic_assembly_subsystem_count']}\n"
+        ),
+        (
+            f"**未解析项**: total={summary['unresolved_item_count']} / "
+            f"errors={summary['unresolved_error_count']} / "
+            f"warnings={summary['unresolved_warning_count']} / "
+            f"types={', '.join(summary['unresolved_item_types']) if summary['unresolved_item_types'] else 'none'}\n"
+        ),
+        (
+            f"**验收摘要**: status={summary['verification_status'] or 'N/A'} / "
+            f"scope={summary['verification_repair_scope'] or 'N/A'} / "
+            f"errors={summary['verification_error_count']} / "
+            f"warnings={summary['verification_warning_count']}\n"
+        ),
+        f"**验收结论**: {summary['verification_issue_summary'] or summary['acceptance_summary']}\n",
+        (
+            f"**关键指标**: missing_required_inputs={summary['verification_metrics']['missing_required_inputs']} / "
+            f"isolated_nodes={summary['verification_metrics']['isolated_nodes']} / "
+            f"invalid_port_refs={summary['verification_metrics']['invalid_port_refs']}\n"
+        ),
+        (
+            f"**编译计数**: pages={summary['compile_report_summary']['page_count']} / "
+            f"subflows={summary['compile_report_summary']['subflow_count']} / "
+            f"nodes={summary['compile_report_summary']['node_count']}\n"
+        ),
+    ]
+
+    if summary["error_type"] or summary["error_message"]:
+        markdown_lines.extend([
+            f"**错误类型**: {summary['error_type'] or 'N/A'}\n",
+            f"**错误信息**: {summary['error_message'] or 'N/A'}\n",
+        ])
+
+    markdown_lines.extend([
         f"**运行目录**: {os.path.abspath(trace_dir)}\n",
         "---\n",
-    ]
+    ])
 
     for record in node_io_records:
         markdown_lines.append(f"## {record['node_index']}. 节点: {record['node_name']}\n")

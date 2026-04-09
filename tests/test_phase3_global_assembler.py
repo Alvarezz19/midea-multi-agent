@@ -95,9 +95,9 @@ def make_requirement_spec() -> dict:
         "system_type": "AHU",
         "scenario_summary": "送风机与电加热联动控制",
         "subsystems": [],
-        "signals": {"inputs": [], "outputs": [], "software_points": [], "alarm_points": []},
+        "signals": {"inputs": ["schedule_enable"], "outputs": [], "software_points": ["schedule_enable"], "alarm_points": []},
         "required_pages": ["IO/通讯", "控制"],
-        "global_modes": [],
+        "global_modes": ["schedule_enable"],
         "ambiguities": [],
         "assumptions": [],
         "acceptance_criteria": [],
@@ -116,6 +116,26 @@ def make_architecture_plan() -> dict:
         "subsystem_slots": [
             {"subsystem_id": "supply_fan_ctrl", "page_id": "page_control", "priority": 1},
             {"subsystem_id": "heater_ctrl", "page_id": "page_control", "priority": 2},
+        ],
+        "shared_signal_registry": [
+            {
+                "signal_name": "schedule_enable",
+                "signal_key": "schedule_enable",
+                "owner_subsystem_id": "",
+                "allowed_external": True,
+                "required_exporter_count": 0,
+                "consumers": ["supply_fan_ctrl"],
+                "source_reason": "global mode",
+            },
+            {
+                "signal_name": "supply_fan_available_flag",
+                "signal_key": "supply_fan_available_flag",
+                "owner_subsystem_id": "supply_fan_ctrl",
+                "allowed_external": False,
+                "required_exporter_count": 1,
+                "consumers": ["heater_ctrl"],
+                "source_reason": "fan export",
+            },
         ],
         "global_constraints": [],
         "naming_strategy": {"signal_prefix": "ahu"},
@@ -248,7 +268,92 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
             any(issue.get("rule_id") == "ir.unresolved.synthetic_shared_signal_source" for issue in report["issues"])
         )
 
+    def test_global_assembler_allows_external_placeholder_for_declared_global_mode(self):
+        subsystem_plan_map = make_subsystem_plan_map()
+        subsystem_plan_map["supply_fan_ctrl"]["imported_signals"] = [
+            {
+                "signal_name": "schedule_enable",
+                "node_logic_id": "fan_main",
+                "port_index": 0,
+                "page_id": "page_control",
+            }
+        ]
+        subsystem_plan_map["supply_fan_ctrl"]["node_instances"][0]["input_count"] = 1
+
+        with patch.object(config, "DEBUG", False):
+            assembler = GlobalAssembler()
+            graph_ir = assembler.assemble(
+                architecture_plan=make_architecture_plan(),
+                subsystem_plan_map=subsystem_plan_map,
+                bundle_or_context=make_bundle(),
+                requirement_spec=make_requirement_spec(),
+            )
+
+        self.assertFalse(
+            any(item.get("type") == "synthetic_shared_signal_source" for item in graph_ir["unresolved_items"])
+        )
+        self.assertTrue(
+            any(edge["to_instance"] == "node::supply_fan_ctrl::fan_main" for edge in graph_ir["edges"])
+        )
+
     def test_global_assembler_records_unresolved_item_for_ambiguous_shared_signal(self):
+        subsystem_plan_map = make_subsystem_plan_map()
+        architecture_plan = make_architecture_plan()
+        architecture_plan["shared_signal_registry"][1]["owner_subsystem_id"] = ""
+        subsystem_plan_map["backup_fan_ctrl"] = {
+            "subsystem_id": "backup_fan_ctrl",
+            "page_id": "page_control",
+            "implementation_mode": "reuse_template",
+            "template_binding": {"template_id": "fan_template"},
+            "node_instances": [
+                {
+                    "logic_id": "backup_fan_main",
+                    "module_type": "fan_template",
+                    "page_id": "page_control",
+                    "template_id": "fan_template",
+                    "parameters": {"name": "Backup Fan"},
+                    "input_count": 0,
+                    "output_count": 1,
+                    "position": {"x": 100, "y": 260},
+                    "reasoning": "backup fan template",
+                }
+            ],
+            "edges": [],
+            "imported_signals": [],
+            "exported_signals": [
+                {
+                    "signal_name": "supply_fan_available_flag",
+                    "node_logic_id": "backup_fan_main",
+                    "port_index": 0,
+                    "page_id": "page_control",
+                }
+            ],
+            "constraints": [],
+            "unresolved_items": [],
+            "reasoning": "backup fan subsystem",
+        }
+
+        with patch.object(config, "DEBUG", False):
+            assembler = GlobalAssembler()
+            graph_ir = assembler.assemble(
+                architecture_plan=architecture_plan,
+                subsystem_plan_map=subsystem_plan_map,
+                bundle_or_context=make_bundle(),
+                requirement_spec=make_requirement_spec(),
+            )
+
+        self.assertTrue(
+            any(item.get("type") == "ambiguous_shared_signal" for item in graph_ir["unresolved_items"])
+        )
+
+        artifact = CodingAgent().compile_graph(graph_ir, make_bundle())
+        report = VerifierAgent().verify(graph_ir, artifact)
+        self.assertEqual(report["status"], "retryable_error")
+        self.assertTrue(
+            any(issue.get("rule_id") == "ir.unresolved.ambiguous_shared_signal" for issue in report["issues"])
+        )
+
+    def test_global_assembler_prefers_declared_owner_when_multiple_exporters_exist(self):
         subsystem_plan_map = make_subsystem_plan_map()
         subsystem_plan_map["backup_fan_ctrl"] = {
             "subsystem_id": "backup_fan_ctrl",
@@ -292,16 +397,14 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
                 requirement_spec=make_requirement_spec(),
             )
 
-        self.assertTrue(
+        self.assertFalse(
             any(item.get("type") == "ambiguous_shared_signal" for item in graph_ir["unresolved_items"])
         )
-
-        artifact = CodingAgent().compile_graph(graph_ir, make_bundle())
-        report = VerifierAgent().verify(graph_ir, artifact)
-        self.assertEqual(report["status"], "retryable_error")
-        self.assertTrue(
-            any(issue.get("rule_id") == "ir.unresolved.ambiguous_shared_signal" for issue in report["issues"])
+        shared_edge = next(
+            edge for edge in graph_ir["edges"]
+            if edge["to_instance"] == "node::heater_ctrl::heater_main"
         )
+        self.assertEqual(shared_edge["from_instance"], "node::supply_fan_ctrl::fan_main")
 
 
 if __name__ == "__main__":

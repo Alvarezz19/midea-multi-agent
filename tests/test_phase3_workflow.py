@@ -147,9 +147,10 @@ class Phase3WorkflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
         for text in texts:
             lowered = str(text).lower()
             vector = [
-                10.0 if any(token in lowered for token in ("送风机", "supply_fan_control")) else 0.0,
-                10.0 if any(token in lowered for token in ("电加热", "heater_control")) else 0.0,
-                10.0 if any(token in lowered for token in ("直膨", "dx_control")) else 0.0,
+                1.0 if any(token in lowered for token in ("送风机", "supply_fan_control")) else 0.0,
+                1.0 if any(token in lowered for token in ("电加热", "heater_control")) else 0.0,
+                1.0 if any(token in lowered for token in ("直膨", "dx_control")) else 0.0,
+                1.0 if any(token in lowered for token in ("冷水阀", "chw_valve_control", "chilled water")) else 0.0,
                 1.0 if any(token in lowered for token in ("ahu", "空调")) else 0.0,
             ]
             embeddings.append(vector)
@@ -243,6 +244,87 @@ def _real_analysis_result() -> dict:
     }
 
 
+def _real_multisubsystem_analysis_result(case_name: str) -> dict:
+    cases = {
+        "fan_heater": {
+            "query": "为 AHU 生成送风机与电加热联动控制",
+            "retrieval_queries": ["AHU 送风机 电加热 联动控制", "送风机标准控制", "电加热标准控制"],
+            "summary": "AHU 送风机与电加热联动控制",
+            "business_goal": "末端组空送风机与电加热联动控制 supply_fan_control heater_control",
+            "equipment_object": "末端组空送风机、电加热 supply_fan_control heater_control",
+            "actuator": "送风机、电加热 supply_fan_control heater_control",
+            "controlled_variable": "送风温度",
+            "output_signal": "送风机可用标志、电加热启停命令",
+            "control_strategy": "标准控制 + 联锁",
+            "input_signals": ["送风机运行状态", "送风机故障状态", "送风机启停手/自动"],
+            "output_signals": ["送风机可用标志", "电加热启停命令"],
+            "operating_conditions": ["定时启停"],
+            "interlocks": ["送风机故障联锁"],
+        },
+        "fan_chw": {
+            "query": "为 AHU 生成送风机与冷水阀联动控制",
+            "retrieval_queries": ["AHU 送风机 冷水阀 联动控制", "送风机标准控制", "冷水阀标准控制"],
+            "summary": "AHU 送风机与冷水阀联动控制",
+            "business_goal": "送风机与冷水阀联动调节送风温度 supply_fan_control chw_valve_control",
+            "equipment_object": "送风机、冷水阀 supply_fan_control chw_valve_control",
+            "actuator": "送风机、冷水阀 supply_fan_control chw_valve_control",
+            "controlled_variable": "送风温度",
+            "output_signal": "送风机可用标志、冷水阀开度命令",
+            "control_strategy": "PID + 联锁",
+            "input_signals": ["送风温度", "送风机运行状态", "送风机启停手/自动"],
+            "output_signals": ["送风机可用标志", "冷水阀开度命令"],
+            "operating_conditions": ["定时启停"],
+            "interlocks": ["送风机故障联锁"],
+        },
+        "fan_dx": {
+            "query": "为 AHU 生成送风机与直膨联动控制",
+            "retrieval_queries": ["AHU 送风机 直膨 联动控制", "送风机标准控制", "直膨标准控制"],
+            "summary": "AHU 送风机与直膨联动控制",
+            "business_goal": "送风机与直膨机组联动控制 supply_fan_control dx_control",
+            "equipment_object": "送风机、直膨机组 supply_fan_control dx_control",
+            "actuator": "送风机、直膨 supply_fan_control dx_control",
+            "controlled_variable": "送风温度",
+            "output_signal": "送风机可用标志、直膨运行命令",
+            "control_strategy": "标准控制 + 联锁",
+            "input_signals": ["送风机运行状态", "送风机故障状态", "送风机启停手/自动"],
+            "output_signals": ["送风机可用标志", "直膨运行命令"],
+            "operating_conditions": ["定时启停"],
+            "interlocks": ["送风机故障联锁", "直膨机状态联锁"],
+        },
+    }
+    case = cases[case_name]
+    return {
+        "retrieval_plan": {
+            "queries": case["retrieval_queries"],
+            "category_l1": "",
+            "intent": "general_query",
+            "detected_operations": [],
+            "keywords": ["AHU", "送风机"],
+        },
+        "scenario_analysis": {
+            "summary": case["summary"],
+            "business_goal": case["business_goal"],
+            "system_type": "AHU",
+            "equipment_object": case["equipment_object"],
+            "actuator": case["actuator"],
+            "controlled_variable": case["controlled_variable"],
+            "feedback_variable": case["controlled_variable"],
+            "setpoint_variable": "送风温度设定值",
+            "output_signal": case["output_signal"],
+            "control_strategy": case["control_strategy"],
+            "control_mode": "手/自动，定时启停",
+            "input_signals": case["input_signals"],
+            "output_signals": case["output_signals"],
+            "operating_conditions": case["operating_conditions"],
+            "interlocks_or_limits": case["interlocks"],
+            "calculation_logic": [],
+            "ambiguities": [],
+            "assumptions": [],
+            "confidence": 0.93,
+        },
+    }
+
+
 class FakeStructuredResponse:
     def __init__(self, payload: dict[str, Any]) -> None:
         self.payload = payload
@@ -327,6 +409,96 @@ class Phase3WorkflowTests(unittest.TestCase):
         self.assertIn("subsystem_plan_map", result)
 
 
+class Phase3WorkflowTraceSummaryTests(unittest.TestCase):
+    def test_build_trace_summary_collects_phase3_acceptance_fields(self):
+        final_state = workflow.build_initial_state("送风机控制")
+        bundle = make_bundle()
+        bundle["metadata"].update(
+            {
+                "retrieved_atomic_count": 1,
+                "retrieved_subflow_count": 1,
+                "retrieved_pattern_count": 1,
+            }
+        )
+        final_state["retrieval_bundle"] = bundle
+        final_state["subsystem_plan_map"] = {
+            "supply_fan_ctrl": {"implementation_mode": "reuse_template"},
+            "heater_ctrl": {"implementation_mode": "atomic_assembly"},
+        }
+        final_state["assembled_graph_ir"] = {
+            "unresolved_items": [
+                {"type": "synthetic_shared_signal_source", "severity": "error"},
+                {"type": "layout_hint_missing", "severity": "warning"},
+            ]
+        }
+        final_state["compiled_artifact"] = {
+            "compile_report": {"page_count": 2, "subflow_count": 1, "node_count": 5}
+        }
+        final_state["verification_report"] = {
+            "status": "retryable_error",
+            "repair_scope": "planning",
+            "issue_summary": "发现 1 个结构错误。",
+            "issues": [{"issue_id": "V-001"}],
+            "warnings": ["布局建议缺失"],
+            "metrics": {
+                "missing_required_inputs": 1,
+                "isolated_nodes": 0,
+                "invalid_port_refs": 2,
+            },
+        }
+        node_io_records = [
+            {"node_name": "analysis", "status": "success", "output": {}},
+            {"node_name": "retrieval", "status": "success", "output": {}},
+            {"node_name": "verification", "status": "success", "output": {}},
+        ]
+
+        summary = workflow_trace._build_trace_summary(
+            user_query="送风机控制",
+            node_io_records=node_io_records,
+            final_state=final_state,
+            total_elapsed_seconds=12.34,
+        )
+
+        self.assertEqual(summary["workflow_status"], "retryable_error")
+        self.assertEqual(summary["selected_case_pattern_id"], "ahu_test_pattern")
+        self.assertEqual(summary["retrieved_atomic_count"], 1)
+        self.assertEqual(summary["retrieved_subflow_count"], 1)
+        self.assertEqual(summary["retrieved_pattern_count"], 1)
+        self.assertEqual(summary["reuse_template_subsystem_count"], 1)
+        self.assertEqual(summary["atomic_assembly_subsystem_count"], 1)
+        self.assertEqual(summary["unresolved_item_count"], 2)
+        self.assertEqual(summary["unresolved_error_count"], 1)
+        self.assertEqual(summary["unresolved_warning_count"], 1)
+        self.assertEqual(summary["verification_repair_scope"], "planning")
+        self.assertEqual(summary["verification_error_count"], 1)
+        self.assertEqual(summary["verification_warning_count"], 1)
+        self.assertEqual(summary["verification_metrics"]["invalid_port_refs"], 2)
+        self.assertIn("synthetic_shared_signal_source", summary["unresolved_item_types"])
+        self.assertIn("status=retryable_error", summary["acceptance_summary"])
+
+    def test_build_trace_summary_marks_failed_node_and_last_successful_node(self):
+        summary = workflow_trace._build_trace_summary(
+            user_query="boom",
+            node_io_records=[
+                {"node_name": "analysis", "status": "success", "output": {}},
+                {
+                    "node_name": "retrieval",
+                    "status": "error",
+                    "output": {"error_type": "RuntimeError", "error_message": "retrieval exploded"},
+                },
+            ],
+            final_state=workflow.build_initial_state("boom"),
+            total_elapsed_seconds=1.23,
+        )
+
+        self.assertEqual(summary["workflow_status"], "failed")
+        self.assertEqual(summary["failed_node"], "retrieval")
+        self.assertEqual(summary["error_type"], "RuntimeError")
+        self.assertEqual(summary["error_message"], "retrieval exploded")
+        self.assertEqual(summary["last_successful_node"], "analysis")
+        self.assertEqual(summary["verification_status"], "")
+
+
 class Phase3WorkflowRealIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.persist_dir = Path(tempfile.mkdtemp(prefix="phase3-workflow-real-"))
@@ -362,6 +534,36 @@ class Phase3WorkflowRealIntegrationTests(unittest.TestCase):
         )
         self.assertTrue(result["compiled_artifact"]["flow_objects"])
         self.assertTrue(result["execution_plan"]["nodes"])
+
+    def test_workflow_runs_multi_subsystem_cases_with_real_phase2_assets(self):
+        cases = {
+            "fan_heater": {"subsystems": {"supply_fan_ctrl", "heater_ctrl"}},
+            "fan_chw": {"subsystems": {"supply_fan_ctrl", "chw_valve_ctrl"}},
+            "fan_dx": {"subsystems": {"supply_fan_ctrl", "dx_ctrl"}},
+        }
+
+        for case_name, expectation in cases.items():
+            fake_llm = FakeAnalysisLLM(_real_multisubsystem_analysis_result(case_name))
+
+            with self.subTest(case=case_name), \
+                 patch.object(config, "DEBUG", False), \
+                 patch.object(config, "CHROMA_PERSIST_DIR", str(self.persist_dir)), \
+                 patch.object(EmbeddingManager, "get_embedding", return_value=self.embedding_function), \
+                 patch.object(LLMManager, "get_llm", return_value=fake_llm):
+                result = workflow.run_workflow(_real_multisubsystem_analysis_result(case_name)["scenario_analysis"]["summary"])
+
+            self.assertEqual(result["verification_report"]["status"], "passed")
+            self.assertTrue(expectation["subsystems"].issubset(set(result["subsystem_plan_map"].keys())))
+            for subsystem_id in expectation["subsystems"]:
+                self.assertEqual(result["subsystem_plan_map"][subsystem_id]["implementation_mode"], "reuse_template")
+            unresolved_types = {
+                item.get("type")
+                for item in result["assembled_graph_ir"].get("unresolved_items", [])
+            }
+            self.assertNotIn("synthetic_shared_signal_source", unresolved_types)
+            self.assertNotIn("ambiguous_shared_signal", unresolved_types)
+            self.assertGreaterEqual(result["retrieval_bundle"]["metadata"]["retrieved_subflow_count"], 2)
+            self.assertTrue(result["assembled_graph_ir"]["edges"])
 
 
 if __name__ == "__main__":

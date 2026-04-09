@@ -1,6 +1,12 @@
 """
 规划智能体 (Planning Agent)
-职责：拥有控制逻辑专家的思维，将需求转化为逻辑步骤
+
+状态:
+- 正式主链: 否。Phase 3 正式规划链已切换为
+  ArchitecturePlanner -> SubsystemPlanner -> GlobalAssembler。
+- 当前用途: 保留为旧 execution_plan compat planner，仍被 Phase 2 bundle
+  consumers / compat 回归测试直接覆盖。
+- 迁移计划: 等 compat 调用方清退后，再评估迁移到 legacy/ 目录。
 """
 import json
 import re
@@ -75,7 +81,7 @@ class PlanIR(BaseModel):
 
 
 class PlanningAgent:
-    """规划智能体"""
+    """旧主链 compat planner，不是当前 Phase 3 正式规划节点。"""
     
     def __init__(self, llm_provider: Optional[str] = None, model: Optional[str] = None):
         """初始化 LLM

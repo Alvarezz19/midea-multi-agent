@@ -89,6 +89,7 @@ class ArchitecturePlan(TypedDict, total=False):
     goal: str
     pages: List[ArchitecturePage]
     subsystem_slots: List[SubsystemSlot]
+    shared_signal_registry: List[Dict[str, Any]]
     global_constraints: List[Dict[str, Any]]
     naming_strategy: Dict[str, Any]
     layout_strategy: Dict[str, Any]
@@ -178,6 +179,7 @@ def empty_architecture_plan() -> ArchitecturePlan:
         "goal": "",
         "pages": [],
         "subsystem_slots": [],
+        "shared_signal_registry": [],
         "global_constraints": [],
         "naming_strategy": {},
         "layout_strategy": {},

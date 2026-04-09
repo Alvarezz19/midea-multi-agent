@@ -172,6 +172,9 @@ class AHUKnowledgeBuilderTests(unittest.TestCase):
         self.assertTrue((output_dir / "manifest.json").exists())
         self.assertEqual(assets_a["manifest"]["subflow_template_count"], 1)
         self.assertEqual(assets_a["manifest"]["system_pattern_count"], 1)
+        self.assertEqual(assets_a["manifest"]["asset_chain_role"], "rebuildable_cache")
+        self.assertEqual(len(assets_a["manifest"]["source_flows"]), 2)
+        self.assertTrue(all(item["sha1"] for item in assets_a["manifest"]["source_flows"]))
 
     def test_subflow_template_id_reflects_stable_topology_signature(self):
         tmp_path = _make_workspace_case_dir()

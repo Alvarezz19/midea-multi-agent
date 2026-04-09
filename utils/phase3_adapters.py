@@ -17,6 +17,19 @@ _SUBSYSTEM_RULES: List[Tuple[str, str, Tuple[str, ...], str]] = [
     ("dx_ctrl", "dx_control", ("直膨", "dx"), "直膨控制"),
 ]
 
+_SUBSYSTEM_DEFAULT_IMPORTS: Dict[str, List[str]] = {
+    "heater_control": ["送风机可用标志"],
+    "chw_valve_control": ["送风机可用标志"],
+    "dx_control": ["送风机可用标志"],
+}
+
+_GLOBAL_MODE_RULES: List[Tuple[str, Tuple[str, ...]]] = [
+    ("auto_manual", ("自动", "manual", "手动", "手/自动", "auto")),
+    ("season_mode", ("季节", "summer", "winter", "制冷", "制热", "夏季", "冬季")),
+    ("schedule_enable", ("定时", "schedule", "时段", "时序", "启停时间")),
+    ("local_remote", ("远程", "本地", "remote", "local")),
+]
+
 
 def _normalize_text(value: Any) -> str:
     if not isinstance(value, str):
@@ -87,6 +100,28 @@ def _extract_candidate_texts(scenario: Dict[str, Any]) -> List[str]:
     return [text for text in texts if text]
 
 
+def _infer_global_modes(scenario: Dict[str, Any]) -> List[str]:
+    joined = " ".join(_extract_candidate_texts(scenario)).lower()
+    modes: List[str] = []
+    for mode_name, keywords in _GLOBAL_MODE_RULES:
+        if any(keyword in joined for keyword in keywords):
+            modes.append(mode_name)
+    return _dedupe_strings(modes)
+
+
+def _infer_software_points(scenario: Dict[str, Any], global_modes: List[str]) -> List[str]:
+    software_points: List[str] = list(global_modes)
+    for text in _clean_text_list(scenario.get("input_signals", [])) + _clean_text_list(scenario.get("output_signals", [])):
+        lowered = text.lower()
+        if any(token in lowered for token in ("手/自动", "自动", "manual", "auto")):
+            software_points.append("auto_manual")
+        if any(token in lowered for token in ("远程", "本地", "remote", "local")):
+            software_points.append("local_remote")
+        if any(token in lowered for token in ("定时", "schedule", "时段")):
+            software_points.append("schedule_enable")
+    return _dedupe_strings(software_points)
+
+
 def _infer_subsystems(scenario: Dict[str, Any]) -> List[RequirementSubsystem]:
     texts = _extract_candidate_texts(scenario)
     lowered_texts = [text.lower() for text in texts]
@@ -107,6 +142,8 @@ def _infer_subsystems(scenario: Dict[str, Any]) -> List[RequirementSubsystem]:
             if any(keyword in signal.lower() for keyword in keywords)
         ]
         goal = _normalize_text(scenario.get("business_goal", "")) or default_goal
+        if not matching_inputs:
+            matching_inputs.extend(_SUBSYSTEM_DEFAULT_IMPORTS.get(subsystem_type, []))
         subsystems.append(
             {
                 "subsystem_id": subsystem_id,
@@ -115,8 +152,8 @@ def _infer_subsystems(scenario: Dict[str, Any]) -> List[RequirementSubsystem]:
                 "page_hint": "控制",
                 "priority": index,
                 "preferred_templates": [],
-                "imports": matching_inputs,
-                "exports": matching_outputs,
+                "imports": _dedupe_strings(matching_inputs),
+                "exports": _dedupe_strings(matching_outputs),
                 "reasoning": f"Detected from scenario fields matching {subsystem_type}.",
             }
         )
@@ -140,21 +177,9 @@ def _infer_required_pages(system_type: str, subsystems: List[RequirementSubsyste
         pages.append("故障")
     if any("状态" in text for text in texts) and "直膨机状态" not in pages:
         pages.append("状态")
+    if any(mode == "schedule_enable" for mode in _infer_global_modes(scenario)):
+        pages.append("定时")
     return _dedupe_strings(pages)
-
-
-def _infer_global_modes(scenario: Dict[str, Any]) -> List[str]:
-    joined = " ".join(_extract_candidate_texts(scenario)).lower()
-    modes: List[str] = []
-    if any(token in joined for token in ("自动", "manual", "手动", "手/自动")):
-        modes.append("auto_manual")
-    if any(token in joined for token in ("季节", "summer", "winter", "制冷", "制热", "夏季", "冬季")):
-        modes.append("season_mode")
-    if any(token in joined for token in ("定时", "schedule", "时段")):
-        modes.append("schedule_enable")
-    if any(token in joined for token in ("远程", "本地", "remote", "local")):
-        modes.append("local_remote")
-    return _dedupe_strings(modes)
 
 
 def build_requirement_spec(analysis_result: Dict[str, Any]) -> Dict[str, Any]:
@@ -170,6 +195,10 @@ def build_requirement_spec(analysis_result: Dict[str, Any]) -> Dict[str, Any]:
     ambiguities = _dedupe_strings(_clean_text_list(scenario.get("ambiguities", [])))
     assumptions = _dedupe_strings(_clean_text_list(scenario.get("assumptions", [])))
     warnings: List[str] = []
+    global_modes = _infer_global_modes(scenario)
+    input_signals = _dedupe_strings(_clean_text_list(scenario.get("input_signals", [])))
+    output_signals = _dedupe_strings(_clean_text_list(scenario.get("output_signals", [])))
+    software_points = _infer_software_points(scenario, global_modes)
 
     if not subsystems:
         warnings.append("未能从场景分析中可靠识别子系统边界。")
@@ -180,6 +209,20 @@ def build_requirement_spec(analysis_result: Dict[str, Any]) -> Dict[str, Any]:
         confidence = float(confidence)
     except (TypeError, ValueError):
         confidence = 0.0
+    confidence = max(0.0, min(1.0, confidence))
+
+    if not summary:
+        warnings.append("场景摘要为空，已回退到 analysis_result 的弱投影。")
+        ambiguities.append("缺少可用于规划的稳定场景摘要。")
+    if not system_type:
+        warnings.append("未能从场景分析中识别系统类型。")
+        ambiguities.append("system_type 未明确，后续规划可能退化为通用控制。")
+    if confidence < 0.5:
+        warnings.append("场景分析置信度偏低，子系统/页面/信号投影可能不稳定。")
+        if "场景分析置信度偏低，需要人工复核关键约束。" not in ambiguities:
+            ambiguities.append("场景分析置信度偏低，需要人工复核关键约束。")
+    if not input_signals and not output_signals:
+        warnings.append("未提取到显式输入/输出信号，部分共享信号可能只能靠规则补全。")
 
     requirement_spec.update(
         {
@@ -187,17 +230,17 @@ def build_requirement_spec(analysis_result: Dict[str, Any]) -> Dict[str, Any]:
             "scenario_summary": summary,
             "subsystems": subsystems,
             "signals": {
-                "inputs": _clean_text_list(scenario.get("input_signals", [])),
-                "outputs": _clean_text_list(scenario.get("output_signals", [])),
-                "software_points": [],
+                "inputs": input_signals,
+                "outputs": output_signals,
+                "software_points": software_points,
                 "alarm_points": _clean_text_list(scenario.get("interlocks_or_limits", [])),
             },
             "required_pages": _infer_required_pages(system_type, subsystems, scenario),
-            "global_modes": _infer_global_modes(scenario),
+            "global_modes": global_modes,
             "ambiguities": _dedupe_strings(ambiguities),
             "assumptions": assumptions,
             "acceptance_criteria": _clean_text_list(scenario.get("interlocks_or_limits", [])),
-            "confidence": max(0.0, min(1.0, confidence)),
+            "confidence": confidence,
             "warnings": warnings,
         }
     )
@@ -221,7 +264,7 @@ def build_legacy_execution_plan(
     architecture_plan: Dict[str, Any],
     subsystem_plan_map: Dict[str, Dict[str, Any]],
 ) -> Dict[str, Any]:
-    """Build a flattened execution_plan projection for legacy verifier logic."""
+    """Build a compat-only flattened execution_plan projection for legacy consumers."""
     if not isinstance(subsystem_plan_map, dict) or not subsystem_plan_map:
         return {
             "goal": "规划失败: Phase 3 未生成任何子系统计划",

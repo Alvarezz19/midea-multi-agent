@@ -32,25 +32,31 @@ class WorkflowState(TypedDict):
     """Shared workflow state."""
 
     user_query: str
+
+    # Phase 3 formal fields
     analysis_result: dict
     requirement_spec: dict
-    retrieval_context: dict
     retrieval_bundle: dict
     decomposition_result: dict
     architecture_plan: dict
     subsystem_plan_map: dict
-    execution_plan: dict
     assembled_graph_ir: dict
     compiled_artifact: dict
     verification_report: dict
+    final_output: dict
+
+    # Compat fields
+    retrieval_context: dict
+    execution_plan: dict
     generated_code: str
+
+    # Historical / reserved fields
     execution_result: dict
     validation_result: dict
     debug_history: list
     retry_count: int
     current_step: str
     next_step: str
-    final_output: dict
 
 
 PHASE3_NODE_ORDER = [
@@ -80,25 +86,28 @@ def build_initial_state(user_query: str) -> dict:
     """Create the canonical initial state shared by both entrypoints."""
     return {
         "user_query": user_query,
+        # Phase 3 formal fields
         "analysis_result": {},
         "requirement_spec": {},
-        "retrieval_context": {},
         "retrieval_bundle": {},
         "decomposition_result": {},
         "architecture_plan": {},
         "subsystem_plan_map": {},
-        "execution_plan": {},
         "assembled_graph_ir": {},
         "compiled_artifact": {},
         "verification_report": {},
+        "final_output": {},
+        # Compat fields
+        "retrieval_context": {},
+        "execution_plan": {},
         "generated_code": "",
+        # Historical / reserved fields
         "execution_result": {},
         "validation_result": {},
         "debug_history": [],
         "retry_count": 0,
         "current_step": "start",
         "next_step": "",
-        "final_output": {},
     }
 
 

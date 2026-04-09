@@ -1,6 +1,12 @@
 """
 验证智能体 (Validation Agent)
-职责：双重质检 - 形式化验证 + 语义验证
+
+状态:
+- 正式主链: 否。当前主链使用 VerifierAgent 负责结构验收。
+- 当前用途: 保留旧 execution_result / validation_result 契约下的占位实现，
+  主要用于历史设计参考。
+- 迁移计划: 待 Phase 4 Repair / Validation 边界明确后，再决定迁移到
+  legacy/ 目录还是按新契约重写。
 """
 from typing import Dict, List, Any, Tuple
 from langchain_openai import ChatOpenAI
@@ -10,7 +16,7 @@ import config
 
 
 class ValidationAgent:
-    """验证智能体"""
+    """旧契约占位验证器，不在当前正式主链中。"""
     
     def __init__(self):
         """初始化 LLM（用于语义验证）"""

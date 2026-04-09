@@ -21,6 +21,8 @@ from utils.graph_ir import (
 class VerifierAgent:
     """Perform deterministic structural validation on IR and compiled output."""
 
+    _REPAIR_SCOPE_PRIORITY = ("planning", "assembly", "compile")
+
     def _make_issue(
         self,
         issue_id: str,
@@ -41,37 +43,160 @@ class VerifierAgent:
             suggested_fix=suggested_fix,
         )
 
+    def _compat_planning_issues(self, assembled_graph_ir: Dict[str, Any]) -> List[VerificationIssue]:
+        issues: List[VerificationIssue] = []
+        source_execution_plan = assembled_graph_ir.get("source_execution_plan", {}) or {}
+        if not isinstance(source_execution_plan, dict) or not source_execution_plan:
+            return issues
+
+        source_goal = str(source_execution_plan.get("goal", "") or "").strip()
+        source_nodes = source_execution_plan.get("nodes", []) or []
+        if source_goal.startswith("规划失败:"):
+            issues.append(self._make_issue(
+                issue_id=f"IR-{len(issues) + 1:03d}",
+                scope="planning",
+                target_id="execution_plan.goal",
+                rule_id="plan.generation.must_succeed",
+                message=f"规划阶段失败：{source_goal}",
+                suggested_fix="修复 planning 失败原因后重新生成执行计划。",
+            ))
+        if isinstance(source_nodes, list) and len(source_nodes) == 0:
+            issues.append(self._make_issue(
+                issue_id=f"IR-{len(issues) + 1:03d}",
+                scope="planning",
+                target_id="execution_plan.nodes",
+                rule_id="plan.nodes.must_not_be_empty",
+                message="执行计划为空：至少需要 1 个节点。",
+                suggested_fix="确保 compat execution_plan 仅作为投影输出，真实规划结果由 architecture_plan/subsystem_plan_map 承载。",
+            ))
+        return issues
+
+    def _native_planning_issues(
+        self,
+        requirement_spec: Dict[str, Any],
+        architecture_plan: Dict[str, Any],
+        subsystem_plan_map: Dict[str, Any],
+        assembled_graph_ir: Dict[str, Any],
+    ) -> List[VerificationIssue]:
+        issues: List[VerificationIssue] = []
+        subsystem_slots = architecture_plan.get("subsystem_slots", []) or []
+        expected_subsystem_ids = [
+            str(item.get("subsystem_id", "")).strip()
+            for item in subsystem_slots
+            if isinstance(item, dict) and str(item.get("subsystem_id", "")).strip()
+        ]
+        if not expected_subsystem_ids:
+            expected_subsystem_ids = [
+                str(item.get("subsystem_id", "")).strip()
+                for item in requirement_spec.get("subsystems", []) or []
+                if isinstance(item, dict) and str(item.get("subsystem_id", "")).strip()
+            ]
+
+        if not expected_subsystem_ids and (assembled_graph_ir.get("source_execution_plan", {}) or {}):
+            return issues
+
+        if architecture_plan and not subsystem_slots and expected_subsystem_ids:
+            issues.append(self._make_issue(
+                issue_id=f"PL-{len(issues) + 1:03d}",
+                scope="planning",
+                target_id="architecture_plan.subsystem_slots",
+                rule_id="plan.subsystem_slots.must_not_be_empty",
+                message="architecture_plan 没有任何 subsystem_slots。",
+                suggested_fix="确保 ArchitecturePlanner 输出系统槽位，而不是只生成页面骨架。",
+            ))
+
+        if expected_subsystem_ids and (not isinstance(subsystem_plan_map, dict) or not subsystem_plan_map):
+            issues.append(self._make_issue(
+                issue_id=f"PL-{len(issues) + 1:03d}",
+                scope="planning",
+                target_id="subsystem_plan_map",
+                rule_id="plan.subsystem_plan_map.must_not_be_empty",
+                message="subsystem_plan_map 为空，无法完成 Phase 3 原生验收。",
+                suggested_fix="确保 SubsystemPlanner 为每个 subsystem_slot 产出局部 IR。",
+            ))
+            return issues
+
+        missing_subsystems = [
+            subsystem_id
+            for subsystem_id in expected_subsystem_ids
+            if subsystem_id not in (subsystem_plan_map or {})
+        ]
+        if missing_subsystems:
+            issues.append(self._make_issue(
+                issue_id=f"PL-{len(issues) + 1:03d}",
+                scope="planning",
+                target_id="subsystem_plan_map",
+                rule_id="plan.subsystem_plan_map.must_cover_architecture_slots",
+                message=f"缺少子系统计划: {', '.join(missing_subsystems)}",
+                suggested_fix="确保每个 architecture_plan.subsystem_slots 都在 subsystem_plan_map 中有对应条目。",
+            ))
+
+        empty_subsystem_ids = [
+            subsystem_id
+            for subsystem_id, subsystem_plan in (subsystem_plan_map or {}).items()
+            if isinstance(subsystem_plan, dict) and len(subsystem_plan.get("node_instances", []) or []) == 0
+        ]
+        if empty_subsystem_ids:
+            issues.append(self._make_issue(
+                issue_id=f"PL-{len(issues) + 1:03d}",
+                scope="planning",
+                target_id="subsystem_plan_map.node_instances",
+                rule_id="plan.subsystem.node_instances.must_not_be_empty",
+                message=f"以下子系统没有节点实例: {', '.join(sorted(empty_subsystem_ids))}",
+                suggested_fix="为缺失的子系统补齐模板复用或 atomic fallback 结果。",
+            ))
+
+        unresolved_items = assembled_graph_ir.get("unresolved_items", []) or []
+        unresolved_planning_errors = [
+            item
+            for item in unresolved_items
+            if isinstance(item, dict)
+            and str(item.get("severity", "warning")).strip().lower() == "error"
+            and str(item.get("scope", "assembly")).strip() == "planning"
+        ]
+        if unresolved_planning_errors and not (assembled_graph_ir.get("source_execution_plan") or {}):
+            issues.append(self._make_issue(
+                issue_id=f"PL-{len(issues) + 1:03d}",
+                scope="planning",
+                target_id="assembled_graph_ir.unresolved_items",
+                rule_id="plan.unresolved_items.must_be_resolved",
+                message=f"存在 {len(unresolved_planning_errors)} 个 planning 级未解决项。",
+                suggested_fix="优先修正共享信号归属、模板接口或子系统边界问题后再进入编译验收。",
+            ))
+
+        return issues
+
+    def _repair_scope_for_issues(self, issues: List[VerificationIssue]) -> str:
+        scopes = {issue.scope for issue in issues if issue.severity == "error"}
+        for scope_name in self._REPAIR_SCOPE_PRIORITY:
+            if scope_name in scopes:
+                return scope_name
+        return sorted(scopes)[0] if scopes else "none"
+
     def verify(
         self,
         assembled_graph_ir: Dict[str, Any],
         compiled_artifact: Dict[str, Any],
+        requirement_spec: Dict[str, Any] | None = None,
+        architecture_plan: Dict[str, Any] | None = None,
+        subsystem_plan_map: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
+        requirement_spec = requirement_spec or {}
+        architecture_plan = architecture_plan or {}
+        subsystem_plan_map = subsystem_plan_map or {}
         issues: List[VerificationIssue] = []
         warnings: List[str] = []
         metrics = VerificationMetrics()
 
-        source_execution_plan = assembled_graph_ir.get("source_execution_plan", {}) or {}
-        if isinstance(source_execution_plan, dict):
-            source_goal = str(source_execution_plan.get("goal", "") or "").strip()
-            source_nodes = source_execution_plan.get("nodes", []) or []
-            if source_goal.startswith("规划失败:"):
-                issues.append(self._make_issue(
-                    issue_id=f"IR-{len(issues) + 1:03d}",
-                    scope="planning",
-                    target_id="execution_plan.goal",
-                    rule_id="plan.generation.must_succeed",
-                    message=f"规划阶段失败：{source_goal}",
-                    suggested_fix="修复 planning 失败原因后重新生成执行计划。",
-                ))
-            if isinstance(source_nodes, list) and len(source_nodes) == 0:
-                issues.append(self._make_issue(
-                    issue_id=f"IR-{len(issues) + 1:03d}",
-                    scope="planning",
-                    target_id="execution_plan.nodes",
-                    rule_id="plan.nodes.must_not_be_empty",
-                    message="执行计划为空：至少需要 1 个节点。",
-                    suggested_fix="确保 PlanningAgent 产出包含节点的 execution_plan。",
-                ))
+        issues.extend(self._compat_planning_issues(assembled_graph_ir))
+        issues.extend(
+            self._native_planning_issues(
+                requirement_spec,
+                architecture_plan,
+                subsystem_plan_map,
+                assembled_graph_ir,
+            )
+        )
 
         pages = assembled_graph_ir.get("pages", []) or []
         page_ids = {page.get("page_id") for page in pages if page.get("page_id")}
@@ -386,8 +511,7 @@ class VerifierAgent:
 
         error_issues = [issue for issue in issues if issue.severity == "error"]
         if error_issues:
-            scopes = {issue.scope for issue in error_issues}
-            repair_scope = "assembly" if "assembly" in scopes else "compile"
+            repair_scope = self._repair_scope_for_issues(error_issues)
             status = "retryable_error"
             issue_summary = f"发现 {len(error_issues)} 个结构错误。"
         else:
@@ -415,7 +539,13 @@ class VerifierAgent:
     def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
         assembled_graph_ir = state.get("assembled_graph_ir", {})
         compiled_artifact = state.get("compiled_artifact", {})
-        report = self.verify(assembled_graph_ir, compiled_artifact)
+        report = self.verify(
+            assembled_graph_ir,
+            compiled_artifact,
+            requirement_spec=state.get("requirement_spec", {}) or {},
+            architecture_plan=state.get("architecture_plan", {}) or {},
+            subsystem_plan_map=state.get("subsystem_plan_map", {}) or {},
+        )
 
         state["verification_report"] = report
         state["current_step"] = "verification_completed"

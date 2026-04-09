@@ -2,87 +2,31 @@
 
 基于 LangGraph 的多智能体工作流，用于把自然语言需求转换为 KONG CUBE 可导入的组态 JSON。
 
-当前主链路已经接入 4 个节点：Analysis Agent、Retrieval Agent、Planning Agent、Coding Agent。Execution Tool、Validation Agent、Debugging Agent 仍保留代码骨架与状态字段，但尚未接入 workflow.py 的正式执行链路。
+> 最后核对时间：2026-04-09  
+> 当前真实主链、状态契约与测试事实以 [工作流总结文档](工作流总结文档.md) 为准；变更时间线见 [工作流演进记录](工作流演进记录.md)。
 
-## 当前状态
+## 当前结论
 
-| 组件 | 状态 | 当前职责 | 备注 |
-|:---|:---:|:---|:---|
-| Analysis Agent | ✅ | 解析用户需求，产出 retrieval_plan 和 scenario_analysis | 当前工作流入口节点 |
-| Retrieval Agent | ✅ | 消费 retrieval_plan 并执行 ChromaDB 检索 | 已从“检索+分析”收敛为纯检索执行器 |
-| Planning Agent | ✅ | 基于 analysis_result 和 retrieval_context 生成 execution_plan | 输出结构化 PlanIR |
-| Coding Agent | ✅ | 将 execution_plan 落地为最终组态 JSON 字符串 | generated_code 当前实际存的是 JSON 文本 |
-| Execution Tool | 🚧 | 代码执行沙箱 | 有实现，但未接入正式工作流 |
-| Validation Agent | 🚧 | 形式化验证 + 语义验证 | 仍以占位逻辑为主 |
-| Debugging Agent | 🚧 | 错误分析与修复 | 仍以占位逻辑为主 |
-
-## 当前工作流
-
-workflow.py 中当前启用的是线性四节点主链路：
+- 当前系统已经完成 `Phase 3` 首版分层规划主链接入，并完成前三阶段遗留问题整改的文档/环境口径收口。
+- 当前正式主链为：
 
 ```text
 user_query
-  -> Analysis Agent
-  -> Retrieval Agent
-  -> Planning Agent
-  -> Coding Agent
+  -> analysis
+  -> retrieval
+  -> architecture_planning
+  -> subsystem_planning
+  -> global_assembly
+  -> coding
+  -> verification
   -> END
 ```
 
-对应的共享状态字段为：
+- 当前真实主产物是 `compiled_artifact`；`generated_code` 只是兼容字段，等于 `compiled_artifact["json_text"]`。
+- 当前真实编译输入是 `assembled_graph_ir`；`execution_plan` 仅作为兼容投影保留。
+- 当前未接入：`RepairRouter / RepairAgent`、人工澄清 / 中断节点、`Send` 并行派发、reducer fan-in、完整 `internal_flow_objects` body 编译。
 
-- user_query：原始用户需求
-- analysis_result：分析结果，包含 retrieval_plan 和 scenario_analysis
-- retrieval_context：检索得到的完整模块上下文
-- execution_plan：规划阶段生成的 PlanIR
-- generated_code：最终生成的组态 JSON 字符串
-- execution_result、validation_result、debug_history、retry_count：已预留，暂未在主链路中使用
-
-## 项目结构
-
-```text
-midea/
-├── agents/
-│   ├── analysis_agent.py
-│   ├── retrieval_agent.py
-│   ├── planning_agent.py
-│   ├── coding_agent.py
-│   ├── validation_agent.py
-│   ├── debugging_agent.py
-│   └── retrieval_agent_old.py
-├── tools/
-│   └── execution_tool.py
-├── utils/
-│   ├── context_formatter.py
-│   ├── knowledge_base_manager.py
-│   └── model_manager.py
-├── schemas/                 # 模块 Schema 知识库
-├── chroma_db/               # ChromaDB 持久化目录
-├── generated_flow/          # 工作流生成的 JSON 输出
-├── docs/                    # 各节点设计与实现文档
-├── workflow.py              # 当前正式工作流入口
-├── workflow_trace.py        # 带 trace 的实验编排文件
-├── init_knowledge_base.py   # 首次初始化知识库
-├── update_knowledge_base.py # 交互式知识库维护工具
-├── auto_sync_schemas.py     # schemas 自动同步工具
-├── config.py                # 模型与运行配置
-└── README.md
-```
-
-## 核心能力
-
-- 语义分析前置：Analysis Agent 将用户需求拆成 retrieval_plan 和 scenario_analysis，提升模糊需求理解能力。
-- 纯检索执行：Retrieval Agent 只负责标准化检索计划、执行向量检索、返回完整模块定义。
-- 受约束规划：Planning Agent 只能使用 retrieval_context 中的 module_type 白名单，避免虚构模块。
-- 确定性落地：Coding Agent 基于 template_json、参数和连线关系生成最终平台 JSON，而不是自由生成代码。
-- 知识库维护：支持初始化、增量更新、批量更新、重建和目录监听同步。
-- 多模型支持：LLM 支持 DeepSeek、OpenAI、通义千问、智谱 GLM、Kimi；Embedding 支持 BGE、OpenAI、Sentence Transformers、Jina 等。
-
-## 快速开始
-
-### 1. 配置环境
-
-推荐先激活本地 Conda 环境：
+## 环境准备
 
 ```powershell
 conda activate midea
@@ -90,168 +34,203 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-然后根据需要在 .env 中配置：
+然后根据需要在 `.env` 中配置：
 
-- LLM_PROVIDER 及对应 API Key
-- EMBEDDING_PROVIDER 及对应模型配置
-- ANALYSIS_LLM_PROVIDER、PLANNING_LLM_PROVIDER 等可选覆盖项
+- `LLM_PROVIDER` 及对应 API Key
+- `EMBEDDING_PROVIDER` 及对应模型配置
+- `ANALYSIS_LLM_PROVIDER`、`PLANNING_LLM_PROVIDER` 等可选覆盖项
 
-默认配置下：
+## 正式入口
 
-- LLM_PROVIDER 为 deepseek
-- EMBEDDING_PROVIDER 为 bge
-- Analysis Agent 温度为 0.2
-- Planning Agent 温度为 0.7
+### Python
 
-### 2. 初始化知识库
-
-首次运行前，需要将 schemas 目录中的模块定义加载到 ChromaDB：
-
-```powershell
-conda activate midea
-python init_knowledge_base.py
+```python
+from workflow import run_workflow
+result = run_workflow("为 AHU 生成送风机与电加热联动控制")
 ```
 
-该脚本会：
+```python
+from workflow_trace import run_workflow
+result = run_workflow("为 AHU 生成送风机与电加热联动控制")
+```
 
-- 初始化 RetrievalAgent
-- 扫描 schemas 目录
-- 生成语义文本块与元数据
-- 写入 chroma_db 持久化目录
-
-### 3. 运行当前工作流
+### 命令行
 
 ```powershell
 conda activate midea
 python workflow.py
 ```
 
-当前脚本会：
-
-- 调用 run_workflow(user_query)
-- 依次输出 analysis、retrieval、planning、coding 的摘要
-- 将最终生成的 JSON 保存到 generated_flow 目录
-
-### 4. 在代码中调用
-
-运行完整工作流：
-
-```python
-from workflow import run_workflow
-
-result = run_workflow("生成一个程序，接收一个输入，输入5v的时候，输出1，输入3v的时候输出2，输入10v的时候输出0")
-
-print(result["current_step"])
-print(result["execution_plan"])
-print(result["generated_code"][:300])
+```powershell
+conda activate midea
+python workflow_trace.py
 ```
 
-单独调用检索智能体：
+`workflow_trace.py` 与 `workflow.py` 使用同一套 Phase 3 拓扑，只额外落盘 trace 文件，并在 `final_output.workflow_trace` 回写产物路径。
 
-```python
-from agents.analysis_agent import AnalysisAgent
-from agents.retrieval_agent import RetrievalAgent
+## 关键状态字段
 
-query = "我需要比较两个温度值"
+### 正式字段
 
-analysis_agent = AnalysisAgent()
-analysis_result = analysis_agent.analyze(query)
+- `analysis_result`
+- `requirement_spec`
+- `retrieval_bundle`
+- `decomposition_result`
+- `architecture_plan`
+- `subsystem_plan_map`
+- `assembled_graph_ir`
+- `compiled_artifact`
+- `verification_report`
+- `final_output`
 
-retrieval_agent = RetrievalAgent()
-result = retrieval_agent.retrieve(query, analysis_result=analysis_result)
+### 兼容字段
 
-for node in result["relevant_nodes"]:
-    print(f"{node['name']}: {node['similarity_score']:.3f}")
-```
+- `retrieval_context`
+- `execution_plan`
+- `generated_code`
 
-## 各节点输入输出契约
+### 历史预留字段
 
-### Analysis Agent
+- `execution_result`
+- `validation_result`
+- `debug_history`
+- `retry_count`
+- `current_step`
+- `next_step`
 
-- 输入：user_query
-- 输出：analysis_result
-- 关键字段：retrieval_plan、scenario_analysis、metadata
+## 各节点职责
 
-### Retrieval Agent
+| 节点 | 当前职责 | 关键输出 |
+|:---|:---|:---|
+| `analysis` | 结构化需求理解 | `analysis_result`、`requirement_spec` |
+| `retrieval` | 检索原子模块与 Phase 2 AHU 资产 | `retrieval_bundle`、兼容 `retrieval_context` |
+| `architecture_planning` | 生成系统骨架、页签和共享信号约束 | `decomposition_result`、`architecture_plan` |
+| `subsystem_planning` | 逐个子系统生成局部 IR | `subsystem_plan_map` |
+| `global_assembly` | 组装全局 Graph IR，并回填 compat `execution_plan` | `assembled_graph_ir`、`execution_plan` |
+| `coding` | 确定性编译平台 JSON | `compiled_artifact`、`generated_code` |
+| `verification` | 结构验收 | `verification_report`、`final_output` |
 
-- 输入：user_query、analysis_result
-- 输出：retrieval_context
-- 关键字段：relevant_nodes、metadata、similar_cases
+## Phase 2 资产链与知识库
 
-说明：similar_cases 当前保持兼容字段，默认返回空列表。
+当前检索链已经分成两层资产：
 
-### Planning Agent
+1. `schemas/*.json`：原子模块定义，写入 `kong_modules_v1`
+2. `AHU程序/flows_*.json`：AHU 子流程模板与 system pattern 源数据，经构建后写入：
+   - `ahu_subflow_templates_v1`
+   - `ahu_system_patterns_v1`
 
-- 输入：user_query、retrieval_context、analysis_result
-- 输出：execution_plan
-- 关键结构：goal、nodes、connections
+默认配置见 [config.py](config.py)：
 
-### Coding Agent
+- `CHROMA_PERSIST_DIR = ./outputs/chroma_db`
+- `AHU_PATTERN_LIBRARY_DIR = AHU程序/pattern_library`
+- `PHASE2_CHROMA_COLLECTION_OWNER = phase2_ahu_assets`
 
-- 输入：execution_plan、retrieval_context
-- 输出：generated_code
-- 当前输出格式：平台可导入的 JSON 字符串
+### 构建命令
 
-## 知识库维护
-
-### 交互式更新
+只生成规范化产物：
 
 ```powershell
 conda activate midea
-python update_knowledge_base.py
+python scripts/build_phase2_retrieval_indexes.py --output-dir AHU程序/pattern_library
 ```
 
-支持：
-
-- 更新单个模块
-- 批量更新多个模块
-- 删除指定模块
-- 重建整个知识库
-- 查看模块信息
-- 重新加载所有模块
-- 查看统计信息
-
-### 自动监听同步
+生成规范化产物并写入正式 Chroma collections：
 
 ```powershell
 conda activate midea
-python auto_sync_schemas.py --mode watch --interval 5
+python scripts/build_phase2_retrieval_indexes.py --output-dir AHU程序/pattern_library --write-chroma --persist-dir outputs/chroma_db
 ```
 
-### 一次性同步
+### 当前口径
+
+- `pattern_library` 是可重建缓存，不是唯一事实源。
+- 当前正式检索主输出是 `retrieval_bundle`；`retrieval_context` 只是兼容视图。
+- `manifest.json` 会记录 `build_command`、`persist_dir`、`collection_names`、`collection_owner` 和源 `flows_*.json` 的摘要。
+- 回滚采用“重建式”策略：保留 manifest / build_command，切换或重建目标 `persist_dir`，不要手工改 collections 内容。
+
+## 遗留模块状态
+
+| 模块 | 当前状态 | 说明 |
+|:---|:---|:---|
+| `agents/planning_agent.py` | 旧主链 compat planner | 仍有 Phase 2 回归测试覆盖，但不在 Phase 3 正式主链中 |
+| `agents/assembly_agent.py` | 旧装配节点 + 基础能力复用 | 不作为正式节点运行，但 `GlobalAssembler` 仍复用其基础装配工具 |
+| `agents/validation_agent.py` | 旧契约占位实现 | 未接入主链，仍读取历史 `execution_result` 语义 |
+| `agents/debugging_agent.py` | 旧修复闭环占位实现 | 未接入主链，等待后续 Repair 方案明确 |
+| `agents/retrieval_agent_old.py` | 历史保留实现 | 当前正式入口是 `agents/retrieval_agent.py` |
+
+这些模块后续可以继续收敛到 `legacy/` 目录，但前提是 compat 路径和基础复用能力已经完全清退。
+
+## 已验证环境基线
+
+当前仓库在 `midea` Conda 环境下完成验证，版本基线如下：
+
+| 组件 | 已验证版本 |
+|:---|:---|
+| Python | `3.12.12` |
+| `langgraph` | `1.0.6` |
+| `langchain` | `1.2.6` |
+| `chromadb` | `1.4.1` |
+| `langchain-openai` | `1.1.7` |
+| `openai` | `2.15.0` |
+| `pydantic` | `2.12.4` |
+| `sentence-transformers` | `5.2.0` |
+| `torch` | `2.10.0` |
+| `transformers` | `4.57.6` |
+| `python-dotenv` | `1.2.1` |
+| `langsmith` | `0.6.0` |
+| `colorama` | `0.4.6` |
+
+`requirements.txt` 已按这组基线收紧下界，不再保留 `langgraph>=0.0.40` 这类失真的旧声明。
+
+### 后续阶段说明
+
+- 若后续进入 HITL / `interrupt` / persistence，需要按目标 API 重新验证 LangGraph 版本，并补 checkpointer 相关依赖。
+- 若后续进入 `Send` / `Command` 路由升级，应从当前已验证版本出发，不再按旧下界假设兼容。
+- 当前 `1.0.6` 只代表本仓库现有 Phase 1/2/3 主链的验证基线，不代表未来所有 LangGraph 新能力都已验过。
+
+## 验收与回归命令
+
+基础回归：
 
 ```powershell
 conda activate midea
-python auto_sync_schemas.py --mode sync --dir ./schemas
+python -m unittest discover -s tests -p "test_phase3*.py"
+python -m unittest discover -s tests -p "test_phase2*.py"
+python -m unittest discover -s tests -p "test_phase1_workflow.py"
+```
+
+环境与依赖一致性：
+
+```powershell
+conda activate midea
+python -m unittest tests.test_runtime_versions
+python -m pip check
+```
+
+Phase 2 正式落库烟测：
+
+```powershell
+conda activate midea
+python scripts/build_phase2_retrieval_indexes.py --output-dir outputs/test_tmp/pattern_library_phase123_rectify
+python scripts/build_phase2_retrieval_indexes.py --output-dir outputs/test_tmp/pattern_library_phase123_rectify_write --write-chroma --persist-dir outputs/test_tmp/chroma_phase123_rectify
 ```
 
 ## 文档索引
 
-docs 目录当前包含的节点与协作文档如下：
-
-- docs/analysis_agent_integration_plan.md：Analysis Agent 接入方案与设计背景
-- docs/analysis_agent_summary.md：Analysis Agent 当前职责、输出契约与流程总结
-- docs/new_retrieval_agent_summary.md：Retrieval Agent 当前工作流位置、输入输出与检索策略总结
-- docs/planning_agent_summary.md：Planning Agent 的 PlanIR 契约、重试与上下文压缩逻辑总结
-- docs/coding_agent_summary.md：Coding Agent 的模板落地、布局和连线生成逻辑总结
-- docs/optimization_plan_retrieval_planning.md：Retrieval -> Planning 协作优化方案
-- docs/knowledge_base_update_guide.md：知识库增量更新、重建与同步指南
-
+- [工作流总结文档](工作流总结文档.md)：当前系统真实画像、状态字段、测试事实
+- [工作流演进记录](工作流演进记录.md)：改动时间线、决策与验收记录
+- [AHU程序/LangGraph工作流V2架构设计.md](AHU程序/LangGraph工作流V2架构设计.md)：V2 架构设计稿
+- [docs/analysis_agent_summary.md](docs/analysis_agent_summary.md)：Analysis Agent 当前边界
+- [docs/new_retrieval_agent_summary.md](docs/new_retrieval_agent_summary.md)：Retrieval Agent 当前正式契约与兼容接口
+- [docs/planning_agent_summary.md](docs/planning_agent_summary.md)：旧 `PlanningAgent` compat 说明
+- [docs/coding_agent_summary.md](docs/coding_agent_summary.md)：CodingAgent 编译边界
+- [docs/knowledge_base_architecture.md](docs/knowledge_base_architecture.md)：知识库与 Phase 2 资产链说明
 
 ## 当前限制
 
-- workflow.py 只接入了 analysis、retrieval、planning、coding 四个节点，尚未实现执行-验证-调试闭环。
-- Validation Agent 和 Debugging Agent 仍包含较多 TODO 与示例逻辑，不能视为正式完成。
-- generated_code 这一字段名保留了历史命名，但当前实际内容是 JSON，不是 Python 代码。
-- 部分实验输出和 generated_flow 示例文件用于验证生成效果，不代表统一的最终接口规范。
-
-## 下一步方向
-
-- 将 Execution Tool、Validation Agent、Debugging Agent 接入正式工作流
-- 完善验证与错误修复闭环
-- 继续收敛 Planning Agent 的参数推理与模块选择稳定性
-- 增强 Coding Agent 对动态端口和复杂模板的适配能力
-- 引入更完整的测试覆盖和评估样本集
+- 结构验收已稳定，但系统级 AHU 规划质量仍需继续迭代。
+- 真实在线 LLM 质量、真实项目上的召回质量与 Repair 闭环仍未完成验收。
+- 若 `AHU程序/flows_*.json` 未纳入版本管理，则“干净克隆即可复现正式资产链”不成立。
 
 ## 许可证
 

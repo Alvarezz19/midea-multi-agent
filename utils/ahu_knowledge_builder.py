@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from datetime import datetime
 import hashlib
 import json
 import re
@@ -14,6 +15,7 @@ import config
 DEFAULT_FLOW_DIR = Path("AHU\u7a0b\u5e8f")
 DEFAULT_PATTERN_LIBRARY_DIR = Path(config.AHU_PATTERN_LIBRARY_DIR)
 DEFAULT_SYSTEM_TYPE = "AHU"
+DEFAULT_BUILD_TOOL = "scripts/build_phase2_retrieval_indexes.py"
 _NON_FUNCTIONAL_TYPES = {"tab", "comment", "quote"}
 _TOPOLOGY_IGNORED_KEYS = {
     "id",
@@ -147,8 +149,63 @@ def _load_flow_document(path: Path) -> Dict[str, Any]:
 
 def load_ahu_flow_documents(flows_dir: Path | str = DEFAULT_FLOW_DIR) -> List[Dict[str, Any]]:
     base_dir = Path(flows_dir)
+    if not base_dir.exists():
+        raise FileNotFoundError(f"AHU flows 目录不存在: {base_dir}")
     flow_files = sorted(base_dir.glob("flows_*.json"))
-    return [_load_flow_document(path) for path in flow_files]
+    if not flow_files:
+        raise FileNotFoundError(f"在 {base_dir} 下未找到任何 flows_*.json 资产文件。")
+    documents = [_load_flow_document(path) for path in flow_files]
+    if not any(document.get("objects") for document in documents):
+        raise ValueError(f"{base_dir} 中的 flows_*.json 均未解析出有效流程对象。")
+    return documents
+
+
+def _file_sha1(path: Path) -> str:
+    digest = hashlib.sha1()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _embedding_manifest() -> Dict[str, str]:
+    provider = str(getattr(config, "EMBEDDING_PROVIDER", "") or "").strip()
+    provider_to_model = {
+        "bge": getattr(config, "BGE_MODEL_NAME", ""),
+        "openai": getattr(config, "OPENAI_EMBEDDING_MODEL", ""),
+        "sentence-transformers": getattr(config, "SENTENCE_TRANSFORMER_MODEL", ""),
+        "jina": getattr(config, "JINA_MODEL", ""),
+        "siliconflow": getattr(config, "SILICONFLOW_EMBEDDING_MODEL", ""),
+    }
+    return {
+        "provider": provider,
+        "model": str(provider_to_model.get(provider, "") or "").strip(),
+    }
+
+
+def _default_collection_names() -> Dict[str, str]:
+    return {
+        "subflow_templates": config.CHROMA_COLLECTION_SUBFLOW_TEMPLATES,
+        "system_patterns": config.CHROMA_COLLECTION_SYSTEM_PATTERNS,
+    }
+
+
+def _source_flow_manifest(flow_documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    entries: List[Dict[str, Any]] = []
+    for document in flow_documents:
+        source_path = Path(document.get("source_path", ""))
+        stat = source_path.stat()
+        entries.append(
+            {
+                "file_name": source_path.name,
+                "path": str(source_path),
+                "sha1": _file_sha1(source_path),
+                "modified_at": datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds"),
+                "size_bytes": stat.st_size,
+                "object_count": len(document.get("objects", []) or []),
+            }
+        )
+    return entries
 
 
 def _infer_template_role(template_name: str) -> str:
@@ -543,6 +600,7 @@ def build_ahu_knowledge_assets(
     flow_documents = load_ahu_flow_documents(flows_dir)
     subflow_templates = collect_subflow_templates(flow_documents, system_type=system_type)
     system_patterns = collect_system_patterns(flow_documents, system_type=system_type)
+    source_flows = _source_flow_manifest(flow_documents)
 
     assets = {
         "system_type": system_type,
@@ -551,10 +609,24 @@ def build_ahu_knowledge_assets(
         "subflow_templates": subflow_templates,
         "system_patterns": system_patterns,
         "manifest": {
+            "build_generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "build_tool": {
+                "script": DEFAULT_BUILD_TOOL,
+                "version": "phase123-rectify-v1",
+            },
+            "asset_chain_role": "rebuildable_cache",
+            "system_type": system_type,
             "flows_dir": str(Path(flows_dir)),
             "pattern_library_dir": str(Path(output_dir)) if output_dir is not None else "",
+            "source_flows": source_flows,
+            "source_flow_count": len(source_flows),
             "subflow_template_count": len(subflow_templates),
             "system_pattern_count": len(system_patterns),
+            "persist_dir": "",
+            "collection_names": _default_collection_names(),
+            "embedding": _embedding_manifest(),
+            "collection_owner": getattr(config, "PHASE2_CHROMA_COLLECTION_OWNER", "phase2_ahu_assets"),
+            "stale_cleanup_policy": "exclusive_collections_only",
         },
     }
 
@@ -654,24 +726,50 @@ def write_assets_to_chroma(
 
     from utils.model_manager import EmbeddingManager
 
-    client = chromadb.PersistentClient(path=str(persist_dir or config.CHROMA_PERSIST_DIR))
+    resolved_persist_dir = Path(persist_dir or config.CHROMA_PERSIST_DIR)
+    client = chromadb.PersistentClient(path=str(resolved_persist_dir))
     try:
         embedding_function = EmbeddingManager.get_embedding()
     except Exception:
         embedding_function = DefaultEmbeddingFunction()
 
-    collection_names = collection_names or {
-        "subflow_templates": config.CHROMA_COLLECTION_SUBFLOW_TEMPLATES,
-        "system_patterns": config.CHROMA_COLLECTION_SYSTEM_PATTERNS,
-    }
+    collection_names = collection_names or _default_collection_names()
+    collection_owner = getattr(config, "PHASE2_CHROMA_COLLECTION_OWNER", "phase2_ahu_assets")
+    manifest = assets.setdefault("manifest", {})
+    manifest.update(
+        {
+            "persist_dir": str(resolved_persist_dir),
+            "collection_names": dict(collection_names),
+            "embedding": _embedding_manifest(),
+            "collection_owner": collection_owner,
+            "asset_chain_role": "rebuildable_cache",
+            "stale_cleanup_policy": "exclusive_collections_only",
+        }
+    )
 
     counts = {"subflow_templates": 0, "system_patterns": 0}
     for asset_key, collection_name in collection_names.items():
         collection = client.get_or_create_collection(
             name=collection_name,
             embedding_function=embedding_function,
-            metadata={"description": f"Phase 2 {asset_key}"},
+            metadata={
+                "description": f"Phase 2 {asset_key}",
+                "collection_owner": collection_owner,
+                "asset_key": asset_key,
+                "system_type": str(assets.get("system_type", "") or ""),
+            },
         )
+        existing_metadata = getattr(collection, "metadata", {}) or {}
+        existing_owner = str(existing_metadata.get("collection_owner", "") or "").strip()
+        existing_asset_key = str(existing_metadata.get("asset_key", "") or "").strip()
+        if existing_owner and existing_owner != collection_owner:
+            raise ValueError(
+                f"Collection {collection_name} 的 owner={existing_owner}，不是当前 Phase 2 资产独占集合。"
+            )
+        if existing_asset_key and existing_asset_key != asset_key:
+            raise ValueError(
+                f"Collection {collection_name} 已绑定 asset_key={existing_asset_key}，不能混写 {asset_key}。"
+            )
         items = assets.get(asset_key, []) or []
         documents: List[str] = []
         metadatas: List[Dict[str, Any]] = []
@@ -707,6 +805,12 @@ def write_assets_to_chroma(
         if documents:
             collection.upsert(documents=documents, metadatas=metadatas, ids=ids)
             counts[asset_key] = len(documents)
+
+    manifest["written_counts"] = dict(counts)
+    manifest["last_chroma_write_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+    pattern_library_dir = str(manifest.get("pattern_library_dir", "") or "").strip()
+    if pattern_library_dir:
+        write_pattern_library(pattern_library_dir, assets)
 
     return counts
 

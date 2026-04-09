@@ -69,6 +69,36 @@ def make_requirement_spec() -> dict:
     }
 
 
+def make_competing_pattern_bundle() -> dict:
+    return {
+        "atomic_modules": [],
+        "subflow_templates": [],
+        "system_patterns": [
+            {
+                "pattern_id": "ahu_basic_pattern",
+                "system_type": "AHU",
+                "required_pages": [
+                    {"page_key": "control", "label": "控制", "kind": "control"},
+                    {"page_key": "io_comm", "label": "IO/通讯", "kind": "io"},
+                ],
+                "optional_pages": [{"page_key": "timing", "label": "定时", "kind": "timing"}],
+            },
+            {
+                "pattern_id": "ahu_dx_pattern",
+                "system_type": "AHU",
+                "required_pages": [
+                    {"page_key": "control", "label": "控制", "kind": "control"},
+                    {"page_key": "io_comm", "label": "IO/通讯", "kind": "io"},
+                    {"page_key": "dx_status", "label": "直膨机状态", "kind": "status"},
+                ],
+                "optional_pages": [{"page_key": "dx_fault", "label": "直膨机故障", "kind": "fault"}],
+            },
+        ],
+        "style_guides": [],
+        "metadata": {"selected_case_pattern_id": "ahu_basic_pattern"},
+    }
+
+
 class Phase3ArchitecturePlannerTests(unittest.TestCase):
     def test_architecture_planner_binds_real_ahu_system_pattern(self):
         bundle = make_real_bundle()
@@ -88,6 +118,15 @@ class Phase3ArchitecturePlannerTests(unittest.TestCase):
         self.assertIn("page_dx_status", page_ids)
         self.assertIn("page_dx_fault", page_ids)
         self.assertEqual(decomposition_result["planning_order"], ["supply_fan_ctrl", "dx_ctrl"])
+        shared_signal_map = {
+            item["signal_key"]: item
+            for item in architecture_plan["shared_signal_registry"]
+        }
+        self.assertIn("schedule_enable", shared_signal_map)
+        self.assertTrue(shared_signal_map["schedule_enable"]["allowed_external"])
+        self.assertEqual(shared_signal_map["schedule_enable"]["required_exporter_count"], 0)
+        self.assertIn("dx_run_flag", shared_signal_map)
+        self.assertEqual(shared_signal_map["dx_run_flag"]["owner_subsystem_id"], "dx_ctrl")
 
     def test_architecture_planner_emits_slots_and_template_preferences(self):
         bundle = make_real_bundle()
@@ -111,6 +150,17 @@ class Phase3ArchitecturePlannerTests(unittest.TestCase):
         )
         descriptor_map = {item["subsystem_id"]: item for item in decomposition_result["subsystem_descriptors"]}
         self.assertEqual(descriptor_map["dx_ctrl"]["page_id"], slot_map["dx_ctrl"]["page_id"])
+
+    def test_architecture_planner_scores_patterns_instead_of_blindly_trusting_selected_case_pattern(self):
+        bundle = make_competing_pattern_bundle()
+
+        with patch.object(config, "DEBUG", False):
+            planner = ArchitecturePlanner()
+            _, architecture_plan = planner.plan(make_requirement_spec(), bundle)
+
+        self.assertEqual(architecture_plan["pattern_bindings"][0]["pattern_id"], "ahu_dx_pattern")
+        self.assertGreater(architecture_plan["pattern_bindings"][0]["score"], 0)
+        self.assertTrue(architecture_plan["pattern_bindings"][0]["score_reasons"])
 
 
 if __name__ == "__main__":

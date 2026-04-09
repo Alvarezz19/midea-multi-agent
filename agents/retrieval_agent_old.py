@@ -1,6 +1,10 @@
 """
-检索智能体 (Retrieval Agent)
-职责：基于用户需求，从向量数据库中提取相关的领域知识
+检索智能体 (Retrieval Agent) 历史实现
+
+状态:
+- 正式主链: 否。当前正式入口使用 agents/retrieval_agent.py。
+- 当前用途: 历史保留实现，便于回看旧检索链路。
+- 迁移计划: 后续可迁移到 legacy/ 目录；当前不建议继续扩展。
 """
 from typing import Dict, List, Any, Optional
 import json
@@ -18,7 +22,7 @@ from utils.query_processor import QueryProcessor
 
 
 class RetrievalAgent:
-    """检索智能体"""
+    """历史保留的 RetrievalAgent，不在当前正式主链中。"""
     
     def __init__(
         self,

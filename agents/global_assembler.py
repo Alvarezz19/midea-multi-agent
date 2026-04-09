@@ -121,6 +121,18 @@ class GlobalAssembler(AssemblyAgent):
             if (normalized := normalize_signal_name(value))
         }
 
+    @staticmethod
+    def _shared_signal_policy_map(architecture_plan: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        registry = architecture_plan.get("shared_signal_registry", []) or []
+        policy_map: Dict[str, Dict[str, Any]] = {}
+        for item in registry:
+            if not isinstance(item, dict):
+                continue
+            signal_key = normalize_signal_name(item.get("signal_name") or item.get("signal_key"))
+            if signal_key:
+                policy_map[signal_key] = dict(item)
+        return policy_map
+
     def assemble(
         self,
         architecture_plan: Dict[str, Any],
@@ -131,6 +143,7 @@ class GlobalAssembler(AssemblyAgent):
         requirement_spec = requirement_spec or {}
         doc_map = self._build_doc_map(bundle_or_context)
         external_signal_keys = self._external_signal_keys(requirement_spec)
+        shared_signal_policy_map = self._shared_signal_policy_map(architecture_plan)
         pages = [
             PageIR(
                 page_id=str(page.get("page_id", "")).strip(),
@@ -165,6 +178,7 @@ class GlobalAssembler(AssemblyAgent):
                     {
                         "type": "missing_page",
                         "severity": "error",
+                        "scope": "assembly",
                         "subsystem_id": subsystem_id,
                         "message": f"Subsystem references unknown page_id={page_id}, falling back to {self.DEFAULT_PAGE_ID}.",
                         "suggested_fix": "确保 architecture_plan.pages 中存在该 page_id，或修正 subsystem_plan_map 的 page_id。",
@@ -192,8 +206,8 @@ class GlobalAssembler(AssemblyAgent):
                 template_id = str(node.get("template_id", "")).strip() or None
                 if subflow_definition:
                     template_id = subflow_definition.definition_id
-                    input_count = subflow_definition.inputs
-                    output_count = subflow_definition.outputs
+                    input_count = int(node.get("input_count", subflow_definition.inputs) or 0)
+                    output_count = int(node.get("output_count", subflow_definition.outputs) or 0)
 
                 node_instances.append(
                     NodeInstanceIR(
@@ -221,6 +235,7 @@ class GlobalAssembler(AssemblyAgent):
                         {
                             "type": "missing_local_edge_endpoint",
                             "severity": "error",
+                            "scope": "assembly",
                             "subsystem_id": subsystem_id,
                             "message": f"Local edge references missing nodes: {from_logic} -> {to_logic}.",
                             "suggested_fix": "修正 subsystem_plan_map 中的局部边定义，确保 from_node/to_node 都能映射到真实节点。",
@@ -287,15 +302,43 @@ class GlobalAssembler(AssemblyAgent):
                 continue
 
             signal_key = normalize_signal_name(signal_name)
+            signal_policy = shared_signal_policy_map.get(signal_key, {})
+            owner_subsystem_id = str(signal_policy.get("owner_subsystem_id", "")).strip()
+            allowed_external = bool(signal_policy.get("allowed_external", False)) or signal_key in external_signal_keys
+            required_exporter_count = int(signal_policy.get("required_exporter_count", 0) or 0)
+
             export_candidates = [
                 item for item in exports_by_signal.get(signal_key, [])
                 if item.get("instance_id") and item.get("subsystem_id") != binding.get("subsystem_id")
             ]
-            if len(export_candidates) > 1:
+            if owner_subsystem_id:
+                owner_candidates = [
+                    item
+                    for item in export_candidates
+                    if str(item.get("subsystem_id", "")).strip() == owner_subsystem_id
+                ]
+                if len(owner_candidates) == 1:
+                    export_candidates = owner_candidates
+                elif export_candidates and not owner_candidates:
+                    unresolved_items.append(
+                        {
+                            "type": "shared_signal_owner_mismatch",
+                            "severity": "error",
+                            "scope": "planning",
+                            "signal_name": signal_name,
+                            "message": f"Shared signal {signal_name} expects exporter {owner_subsystem_id}, but current subsystem plans export {', '.join(sorted(item['subsystem_id'] for item in export_candidates))}.",
+                            "suggested_fix": "让 ArchitecturePlanner/SubSystemPlanner 对齐共享信号 owner_subsystem_id 与 exported_signals。",
+                        }
+                    )
+                elif len(owner_candidates) > 1:
+                    export_candidates = owner_candidates
+
+            if len(export_candidates) > 1 and required_exporter_count <= 1:
                 unresolved_items.append(
                     {
                         "type": "ambiguous_shared_signal",
                         "severity": "error",
+                        "scope": "planning",
                         "signal_name": signal_name,
                         "message": f"Multiple exporters found for shared signal {signal_name}.",
                         "suggested_fix": "在 ArchitecturePlanner/SubsystemPlanner 中收敛共享信号归属，确保一个共享信号只有唯一导出方。",
@@ -333,6 +376,7 @@ class GlobalAssembler(AssemblyAgent):
                     {
                         "type": "missing_placeholder_source",
                         "severity": "error",
+                        "scope": "planning",
                         "signal_name": signal_name,
                         "message": f"No placeholder source module available for shared signal {signal_name}.",
                         "suggested_fix": "补齐可作为占位输入源的零输入原子模块，或让该信号由真实子系统导出。",
@@ -340,7 +384,6 @@ class GlobalAssembler(AssemblyAgent):
                 )
                 continue
 
-            is_declared_external = signal_key in external_signal_keys
             placeholder_counter += 1
             module_type = str(placeholder_source_doc.get("module_type", "")).strip()
             placeholder_logic_id = f"placeholder_{placeholder_counter}"
@@ -365,11 +408,12 @@ class GlobalAssembler(AssemblyAgent):
                     reasoning="Synthetic placeholder source injected by GlobalAssembler.",
                 )
             )
-            if not is_declared_external:
+            if not allowed_external:
                 unresolved_items.append(
                     {
                         "type": "synthetic_shared_signal_source",
                         "severity": "error",
+                        "scope": "planning",
                         "signal_name": signal_name,
                         "message": f"Shared signal {signal_name} has no real exporter; GlobalAssembler injected a synthetic placeholder source.",
                         "suggested_fix": "让真实子系统通过 exported_signals 导出该信号，或在 requirement_spec 中明确它是外部输入/全局模式。",

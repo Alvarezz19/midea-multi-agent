@@ -1,8 +1,12 @@
 """
 Assembly agent for phase 1 workflow refactor.
 
-It upgrades the weak execution plan produced by the current planner into a
-strongly-typed graph IR that can be compiled and verified deterministically.
+Status:
+- Formal main-chain node: no. Phase 3 main chain uses GlobalAssembler instead.
+- Current role: retained as the legacy execution_plan -> Graph IR assembler, and
+  its base helpers are still reused by GlobalAssembler.
+- Migration note: do not move or delete until GlobalAssembler no longer depends
+  on these shared assembly utilities.
 """
 from __future__ import annotations
 
@@ -28,7 +32,7 @@ from utils.retrieval_bundle_utils import build_compilable_doc_map
 
 
 class AssemblyAgent:
-    """Assemble phase-1 Graph IR from the current execution plan."""
+    """Legacy assembly node whose shared helpers are still reused in Phase 3."""
 
     DEFAULT_PAGE_ID = "page_control"
     DEFAULT_PAGE_LABEL = "自动生成流程"

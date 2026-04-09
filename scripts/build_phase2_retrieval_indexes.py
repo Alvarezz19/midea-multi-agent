@@ -14,6 +14,7 @@ if __package__ in (None, ""):
 import config
 from utils.ahu_knowledge_builder import (
     build_ahu_knowledge_assets,
+    write_pattern_library,
     write_assets_to_chroma,
 )
 
@@ -52,11 +53,19 @@ def main(argv: list[str] | None = None) -> Dict[str, Any]:
     parser = _build_arg_parser()
     args = parser.parse_args(argv)
 
+    build_command = "python scripts/build_phase2_retrieval_indexes.py"
+    build_command += f" --flows-dir \"{args.flows_dir}\""
+    build_command += f" --output-dir \"{args.output_dir}\""
+    build_command += f" --system-type \"{args.system_type}\""
+    if args.write_chroma:
+        build_command += f" --write-chroma --persist-dir \"{args.persist_dir}\""
+
     assets = build_ahu_knowledge_assets(
         flows_dir=args.flows_dir,
         output_dir=args.output_dir,
         system_type=args.system_type,
     )
+    assets.setdefault("manifest", {})["build_command"] = build_command
 
     print(json.dumps(assets.get("manifest", {}), ensure_ascii=False, indent=2))
     print(f"subflow_templates: {len(assets.get('subflow_templates', []))}")
@@ -65,7 +74,9 @@ def main(argv: list[str] | None = None) -> Dict[str, Any]:
 
     if args.write_chroma:
         written = write_assets_to_chroma(assets, persist_dir=args.persist_dir)
+        write_pattern_library(args.output_dir, assets)
         print(json.dumps(written, ensure_ascii=False, indent=2))
+        print(f"persist_dir: {args.persist_dir}")
 
     return assets
 

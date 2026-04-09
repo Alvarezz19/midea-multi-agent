@@ -270,7 +270,7 @@ doc_id = f"{category.replace('/', '_')}_{module_type}"
 
 向量数据库保存在：
 ```
-./chroma_db/
+./outputs/chroma_db/
 ```
 
 此目录应该加入版本控制或定期备份。
