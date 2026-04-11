@@ -75,7 +75,8 @@ Phase 3 引入了 `ArchitecturePlanner`、`SubsystemPlanner`、`GlobalAssembler`
 
 - `execution_plan` 不再是 `CodingAgent` 的正式输入
 - `assembled_graph_ir` 仍然是 `CodingAgent` 的唯一真实编译输入
-- `GlobalAssembler` 会回填兼容 `execution_plan`，主要是为了让当前 `VerifierAgent` 继续沿用旧验收语义
+- `GlobalAssembler` 会回填兼容 `execution_plan`，供旧接口、历史观察与 compat 路径继续使用
+- `VerifierAgent` 已可直接消费 `Phase 3` 原生产物，不再把 `execution_plan` 当作验收硬依赖
 
 ## 6. 当前结论
 

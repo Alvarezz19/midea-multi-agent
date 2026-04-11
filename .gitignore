@@ -10,3 +10,4 @@ build/
 CLAUDE.md
 .github
 outputs/chroma_db/
+chroma_db/
