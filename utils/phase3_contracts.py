@@ -1,4 +1,4 @@
-"""Phase 3 contract types and empty payload factories."""
+"""Phase 3/4 contract types and empty payload factories."""
 from __future__ import annotations
 
 from typing import Any, Dict, List, TypedDict
@@ -141,6 +141,53 @@ class SubsystemPlan(TypedDict, total=False):
     reasoning: str
 
 
+DEFAULT_RETRY_BUDGET: Dict[str, int] = {
+    "planning": 2,
+    "assembly": 2,
+    "compile": 2,
+}
+VALID_REPAIR_SCOPES = tuple(DEFAULT_RETRY_BUDGET.keys())
+VALID_ROUTE_DECISIONS = (
+    "accept",
+    "planning_repair",
+    "assembly_repair",
+    "compile_repair",
+    "reject",
+)
+
+
+class RepairContext(TypedDict, total=False):
+    repair_round: int
+    repair_scope: str
+    issue_ids: List[str]
+    target_ids: List[str]
+    target_state_keys: List[str]
+    repair_strategy: str
+    patch_instructions: List[str]
+    resume_node: str
+
+
+class RepairHistoryEntry(TypedDict, total=False):
+    round: int
+    scope: str
+    issue_ids: List[str]
+    target_state_keys: List[str]
+    actions: List[str]
+    result: str
+    next_node: str
+
+
+class RouteDecision(TypedDict, total=False):
+    decision: str
+    repair_scope: str
+    next_node: str
+    reason: str
+    issue_ids: List[str]
+    retry_exhausted: bool
+    retry_count_for_scope: int
+    retry_budget_for_scope: int
+
+
 def empty_requirement_spec() -> RequirementSpec:
     return {
         "schema_version": "3.0",
@@ -202,3 +249,11 @@ def empty_subsystem_plan(subsystem_id: str = "", page_id: str = "") -> Subsystem
         "unresolved_items": [],
         "reasoning": "",
     }
+
+
+def default_retry_budget() -> Dict[str, int]:
+    return dict(DEFAULT_RETRY_BUDGET)
+
+
+def default_retry_counts_by_scope() -> Dict[str, int]:
+    return {scope: 0 for scope in VALID_REPAIR_SCOPES}

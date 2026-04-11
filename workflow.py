@@ -7,7 +7,7 @@ layer into:
 analysis -> retrieval -> architecture_planning -> subsystem_planning
 -> global_assembly -> coding -> verification -> END
 """
-from typing import TypedDict
+from typing import Any, TypedDict
 import os
 
 from langgraph.graph import END, StateGraph
@@ -17,8 +17,18 @@ from agents.analysis_agent import AnalysisAgent
 from agents.architecture_planner import ArchitecturePlanner
 from agents.coding_agent import CodingAgent
 from agents.global_assembler import GlobalAssembler
+from agents.repair_agent import RepairAgent
+from agents.repair_router import RepairRouter
 from agents.subsystem_planner import SubsystemPlanner
 from agents.verifier_agent import VerifierAgent
+from utils.phase3_contracts import (
+    DEFAULT_RETRY_BUDGET,
+    RepairContext,
+    RepairHistoryEntry,
+    RouteDecision,
+    default_retry_budget,
+    default_retry_counts_by_scope,
+)
 
 try:
     from agents.retrieval_agent import RetrievalAgent
@@ -54,7 +64,12 @@ class WorkflowState(TypedDict):
     execution_result: dict
     validation_result: dict
     debug_history: list
+    repair_context: RepairContext
+    repair_history: list[RepairHistoryEntry]
+    route_decision: RouteDecision
     retry_count: int
+    retry_budget: dict[str, int]
+    retry_counts_by_scope: dict[str, int]
     current_step: str
     next_step: str
 
@@ -68,22 +83,125 @@ PHASE3_NODE_ORDER = [
     "coding",
     "verification",
 ]
+REPAIR_ROUTER_NODE = "repair_router"
+REPAIR_AGENT_NODE = "repair_agent"
+PHASE4_RECURSION_LIMIT = 40
+PHASE4_REPAIR_DECISION_TO_NEXT: dict[str, str] = {
+    "accept": END,
+    "planning_repair": REPAIR_AGENT_NODE,
+    "assembly_repair": REPAIR_AGENT_NODE,
+    "compile_repair": REPAIR_AGENT_NODE,
+    "reject": END,
+}
+PHASE4_RESUME_NODE_TO_NEXT: dict[str, str] = {
+    "subsystem_planning": "subsystem_planning",
+    "global_assembly": "global_assembly",
+    "coding": "coding",
+}
+PHASE4_REPAIR_AGENT_DECISION_TO_NEXT: dict[str, str] = {
+    "subsystem_planning": "subsystem_planning",
+    "global_assembly": "global_assembly",
+    "coding": "coding",
+    "END": END,
+}
+
+
+def _coerce_non_negative_int(value: Any, default: int = 0) -> int:
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return default
+
+
+def normalize_retry_budget(retry_budget: dict[str, Any] | None) -> dict[str, int]:
+    normalized = default_retry_budget()
+    for scope in DEFAULT_RETRY_BUDGET:
+        if retry_budget is None:
+            continue
+        normalized[scope] = _coerce_non_negative_int(retry_budget.get(scope), normalized[scope])
+    return normalized
+
+
+def normalize_retry_counts_by_scope(retry_counts_by_scope: dict[str, Any] | None) -> dict[str, int]:
+    normalized = default_retry_counts_by_scope()
+    for scope in normalized:
+        if retry_counts_by_scope is None:
+            continue
+        normalized[scope] = _coerce_non_negative_int(retry_counts_by_scope.get(scope), 0)
+    return normalized
+
+
+def aggregate_retry_count(retry_counts_by_scope: dict[str, Any] | None) -> int:
+    return sum(normalize_retry_counts_by_scope(retry_counts_by_scope).values())
+
+
+def get_repair_router_branch(state: dict[str, Any]) -> str:
+    decision = str(((state or {}).get("route_decision", {}) or {}).get("decision", "")).strip()
+    return decision if decision in PHASE4_REPAIR_DECISION_TO_NEXT else "reject"
+
+
+def get_repair_resume_branch(state: dict[str, Any]) -> str:
+    resume_node = str(((state or {}).get("repair_context", {}) or {}).get("resume_node", "")).strip()
+    if resume_node not in PHASE4_RESUME_NODE_TO_NEXT:
+        raise ValueError(f"Unsupported repair resume node: {resume_node or '<empty>'}")
+    return resume_node
+
+
+def get_repair_agent_branch(state: dict[str, Any]) -> str:
+    decision = str(((state or {}).get("route_decision", {}) or {}).get("decision", "")).strip()
+    if decision == "reject":
+        return "END"
+    return get_repair_resume_branch(state)
 
 
 def populate_phase3_workflow(workflow: StateGraph, nodes: dict[str, object]) -> StateGraph:
     """Register the shared Phase 3 linear topology."""
+    return populate_phase4_workflow(workflow, nodes, enable_repair_loop=False)
+
+
+def populate_phase4_workflow(
+    workflow: StateGraph,
+    nodes: dict[str, object],
+    *,
+    enable_repair_loop: bool = False,
+) -> StateGraph:
+    """Register the shared Phase 4-capable topology."""
     for node_name in PHASE3_NODE_ORDER:
         workflow.add_node(node_name, nodes[node_name])
+
+    if enable_repair_loop:
+        missing_nodes = {REPAIR_ROUTER_NODE, REPAIR_AGENT_NODE} - set(nodes)
+        if missing_nodes:
+            missing = ", ".join(sorted(missing_nodes))
+            raise ValueError(f"Phase 4 repair loop requires nodes: {missing}")
+        workflow.add_node(REPAIR_ROUTER_NODE, nodes[REPAIR_ROUTER_NODE])
+        workflow.add_node(REPAIR_AGENT_NODE, nodes[REPAIR_AGENT_NODE])
 
     workflow.set_entry_point(PHASE3_NODE_ORDER[0])
     for source, target in zip(PHASE3_NODE_ORDER, PHASE3_NODE_ORDER[1:]):
         workflow.add_edge(source, target)
-    workflow.add_edge(PHASE3_NODE_ORDER[-1], END)
+
+    if enable_repair_loop:
+        workflow.add_edge(PHASE3_NODE_ORDER[-1], REPAIR_ROUTER_NODE)
+        workflow.add_conditional_edges(
+            REPAIR_ROUTER_NODE,
+            get_repair_router_branch,
+            PHASE4_REPAIR_DECISION_TO_NEXT,
+        )
+        workflow.add_conditional_edges(
+            REPAIR_AGENT_NODE,
+            get_repair_agent_branch,
+            PHASE4_REPAIR_AGENT_DECISION_TO_NEXT,
+        )
+    else:
+        workflow.add_edge(PHASE3_NODE_ORDER[-1], END)
     return workflow
 
 
 def build_initial_state(user_query: str) -> dict:
     """Create the canonical initial state shared by both entrypoints."""
+    retry_budget = default_retry_budget()
+    retry_counts_by_scope = default_retry_counts_by_scope()
     return {
         "user_query": user_query,
         # Phase 3 formal fields
@@ -105,7 +223,12 @@ def build_initial_state(user_query: str) -> dict:
         "execution_result": {},
         "validation_result": {},
         "debug_history": [],
-        "retry_count": 0,
+        "repair_context": {},
+        "repair_history": [],
+        "route_decision": {},
+        "retry_budget": retry_budget,
+        "retry_counts_by_scope": retry_counts_by_scope,
+        "retry_count": aggregate_retry_count(retry_counts_by_scope),
         "current_step": "start",
         "next_step": "",
     }
@@ -113,7 +236,7 @@ def build_initial_state(user_query: str) -> dict:
 
 @traceable(name="create_workflow", tags=["workflow", "langgraph"])
 def create_workflow() -> StateGraph:
-    """Create the Phase 3 workflow graph."""
+    """Create the Phase 4 workflow graph."""
     if RetrievalAgent is None:
         raise ImportError("RetrievalAgent 依赖未安装，无法创建正式工作流。")
 
@@ -124,9 +247,11 @@ def create_workflow() -> StateGraph:
     global_assembler = GlobalAssembler()
     coding_agent = CodingAgent()
     verifier_agent = VerifierAgent()
+    repair_router = RepairRouter()
+    repair_agent = RepairAgent()
 
     workflow = StateGraph(WorkflowState)
-    return populate_phase3_workflow(
+    return populate_phase4_workflow(
         workflow,
         {
             "analysis": analysis_agent,
@@ -136,7 +261,10 @@ def create_workflow() -> StateGraph:
             "global_assembly": global_assembler,
             "coding": coding_agent,
             "verification": verifier_agent,
+            "repair_router": repair_router,
+            "repair_agent": repair_agent,
         },
+        enable_repair_loop=True,
     )
 
 
@@ -152,6 +280,7 @@ def run_workflow(user_query: str) -> dict:
         "run_name": "MideaWorkflow",
         "tags": ["workflow", "langgraph", "phase3-layered-planning"],
         "metadata": {"user_query": user_query},
+        "recursion_limit": PHASE4_RECURSION_LIMIT,
     }
 
     return app.invoke(initial_state, config=invoke_config)

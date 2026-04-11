@@ -7,7 +7,7 @@ timing, and changed top-level state fields.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Callable, TypedDict
+from typing import Any, Callable
 import copy
 import json
 import os
@@ -20,9 +20,16 @@ from agents.analysis_agent import AnalysisAgent
 from agents.architecture_planner import ArchitecturePlanner
 from agents.coding_agent import CodingAgent
 from agents.global_assembler import GlobalAssembler
+from agents.repair_agent import RepairAgent
+from agents.repair_router import RepairRouter
 from agents.subsystem_planner import SubsystemPlanner
 from agents.verifier_agent import VerifierAgent
-from workflow import build_initial_state, populate_phase3_workflow
+from workflow import (
+    PHASE4_RECURSION_LIMIT,
+    WorkflowState,
+    build_initial_state,
+    populate_phase4_workflow,
+)
 
 try:
     from agents.retrieval_agent import RetrievalAgent
@@ -30,35 +37,6 @@ except ModuleNotFoundError:
     RetrievalAgent = None
 
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
-
-
-class WorkflowState(TypedDict):
-    user_query: str
-
-    # Phase 3 formal fields
-    analysis_result: dict
-    requirement_spec: dict
-    retrieval_bundle: dict
-    decomposition_result: dict
-    architecture_plan: dict
-    subsystem_plan_map: dict
-    assembled_graph_ir: dict
-    compiled_artifact: dict
-    verification_report: dict
-    final_output: dict
-
-    # Compat fields
-    retrieval_context: dict
-    execution_plan: dict
-    generated_code: str
-
-    # Historical / reserved fields
-    execution_result: dict
-    validation_result: dict
-    debug_history: list
-    retry_count: int
-    current_step: str
-    next_step: str
 
 
 def _make_serializable(obj: Any) -> Any:
@@ -112,6 +90,31 @@ def _count_subsystem_modes(subsystem_plan_map: dict[str, Any]) -> dict[str, int]
     return counts
 
 
+def _normalize_retry_counts_by_scope(retry_counts_by_scope: dict[str, Any] | None) -> dict[str, int]:
+    normalized = {
+        "planning": 0,
+        "assembly": 0,
+        "compile": 0,
+    }
+    if retry_counts_by_scope is None:
+        return normalized
+    for scope in normalized:
+        normalized[scope] = _to_int(retry_counts_by_scope.get(scope, 0))
+    return normalized
+
+
+def _ordered_unique_scopes(scopes: list[Any]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for scope in scopes:
+        normalized = str(scope or "").strip()
+        if not normalized or normalized == "none" or normalized in seen:
+            continue
+        ordered.append(normalized)
+        seen.add(normalized)
+    return ordered
+
+
 def _build_trace_summary(
     user_query: str,
     node_io_records: list[dict],
@@ -123,6 +126,9 @@ def _build_trace_summary(
     assembled_graph_ir = (final_state or {}).get("assembled_graph_ir", {}) or {}
     compiled_artifact = (final_state or {}).get("compiled_artifact", {}) or {}
     verification_report = (final_state or {}).get("verification_report", {}) or {}
+    repair_history = list((final_state or {}).get("repair_history", []) or [])
+    route_decision = (final_state or {}).get("route_decision", {}) or {}
+    retry_counts_by_scope = _normalize_retry_counts_by_scope((final_state or {}).get("retry_counts_by_scope"))
 
     unresolved_items = list(assembled_graph_ir.get("unresolved_items", []) or [])
     unresolved_error_count = sum(
@@ -162,6 +168,18 @@ def _build_trace_summary(
     verification_metrics = verification_report.get("metrics", {}) or {}
     compile_report = compiled_artifact.get("compile_report", {}) or {}
     subsystem_mode_counts = _count_subsystem_modes(subsystem_plan_map)
+    last_repair_entry = repair_history[-1] if repair_history else {}
+    repair_scopes_seen = _ordered_unique_scopes([
+        entry.get("scope", "")
+        for entry in repair_history
+    ])
+    if not repair_scopes_seen:
+        repair_scopes_seen = _ordered_unique_scopes([route_decision.get("repair_scope", "")])
+    final_route_decision = str(route_decision.get("decision", "")).strip()
+    retry_exhausted = bool(route_decision.get("retry_exhausted", False))
+    last_repair_issue_ids = list(last_repair_entry.get("issue_ids", []) or route_decision.get("issue_ids", []) or [])
+    last_repair_actions = list(last_repair_entry.get("actions", []) or [])
+    reject_reason = str(route_decision.get("reason", "")).strip() if final_route_decision == "reject" else ""
 
     acceptance_summary = (
         f"status={verification_status or workflow_status}; "
@@ -202,6 +220,14 @@ def _build_trace_summary(
             "isolated_nodes": _to_int(verification_metrics.get("isolated_nodes", 0)),
             "invalid_port_refs": _to_int(verification_metrics.get("invalid_port_refs", 0)),
         },
+        "repair_round_count": len(repair_history),
+        "repair_scopes_seen": repair_scopes_seen,
+        "final_route_decision": final_route_decision,
+        "retry_exhausted": retry_exhausted,
+        "retry_counts_by_scope": retry_counts_by_scope,
+        "last_repair_issue_ids": last_repair_issue_ids,
+        "last_repair_actions": last_repair_actions,
+        "reject_reason": reject_reason,
         "compile_report_summary": {
             "page_count": _to_int(compile_report.get("page_count", 0)),
             "subflow_count": _to_int(compile_report.get("subflow_count", 0)),
@@ -299,6 +325,17 @@ def _save_workflow_trace(user_query: str, node_io_records: list[dict], final_sta
             f"errors={summary['verification_error_count']} / "
             f"warnings={summary['verification_warning_count']}\n"
         ),
+        (
+            f"**Repair 摘要**: rounds={summary['repair_round_count']} / "
+            f"scopes={', '.join(summary['repair_scopes_seen']) if summary['repair_scopes_seen'] else 'none'} / "
+            f"final_route={summary['final_route_decision'] or 'N/A'} / "
+            f"retry_exhausted={summary['retry_exhausted']}\n"
+        ),
+        (
+            f"**Scope 重试计数**: planning={summary['retry_counts_by_scope']['planning']} / "
+            f"assembly={summary['retry_counts_by_scope']['assembly']} / "
+            f"compile={summary['retry_counts_by_scope']['compile']}\n"
+        ),
         f"**验收结论**: {summary['verification_issue_summary'] or summary['acceptance_summary']}\n",
         (
             f"**关键指标**: missing_required_inputs={summary['verification_metrics']['missing_required_inputs']} / "
@@ -317,6 +354,15 @@ def _save_workflow_trace(user_query: str, node_io_records: list[dict], final_sta
             f"**错误类型**: {summary['error_type'] or 'N/A'}\n",
             f"**错误信息**: {summary['error_message'] or 'N/A'}\n",
         ])
+
+    if summary["last_repair_issue_ids"]:
+        markdown_lines.append(f"**最近修复问题**: {', '.join(summary['last_repair_issue_ids'])}\n")
+
+    if summary["last_repair_actions"]:
+        markdown_lines.append(f"**最近修复动作**: {'；'.join(summary['last_repair_actions'])}\n")
+
+    if summary["reject_reason"]:
+        markdown_lines.append(f"**Reject 原因**: {summary['reject_reason']}\n")
 
     markdown_lines.extend([
         f"**运行目录**: {os.path.abspath(trace_dir)}\n",
@@ -370,12 +416,14 @@ def create_workflow(node_io_records: list[dict] | None = None) -> StateGraph:
     global_assembler = GlobalAssembler()
     coding_agent = CodingAgent()
     verifier_agent = VerifierAgent()
+    repair_router = RepairRouter()
+    repair_agent = RepairAgent()
 
     if node_io_records is None:
         node_io_records = []
 
     workflow = StateGraph(WorkflowState)
-    return populate_phase3_workflow(
+    return populate_phase4_workflow(
         workflow,
         {
             "analysis": _wrap_node("analysis", analysis_agent, node_io_records),
@@ -385,7 +433,10 @@ def create_workflow(node_io_records: list[dict] | None = None) -> StateGraph:
             "global_assembly": _wrap_node("global_assembly", global_assembler, node_io_records),
             "coding": _wrap_node("coding", coding_agent, node_io_records),
             "verification": _wrap_node("verification", verifier_agent, node_io_records),
+            "repair_router": _wrap_node("repair_router", repair_router, node_io_records),
+            "repair_agent": _wrap_node("repair_agent", repair_agent, node_io_records),
         },
+        enable_repair_loop=True,
     )
 
 
@@ -403,6 +454,7 @@ def run_workflow(user_query: str) -> dict:
         "run_name": "MideaWorkflowTrace",
         "tags": ["workflow", "langgraph", "phase3-layered-planning", "trace"],
         "metadata": {"user_query": user_query},
+        "recursion_limit": PHASE4_RECURSION_LIMIT,
     }
 
     result = None
