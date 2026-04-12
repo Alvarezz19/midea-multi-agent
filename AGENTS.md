@@ -1,39 +1,24 @@
 # AGENTS.md
 
-This file defines repository-specific instructions for Codex.
-
-## Documentation Encoding
-
-- All project documentation is written in Chinese. When reading documentation files, use UTF-8 encoding.
-
-## Context Limits
-
-- If context limitations or conversation compression cause important information to be lost and would likely lead to hallucination, proactively warn the user and ask them to start a new chat/session before proceeding.
-
-## Response Quality
-
-- Do not simply follow the user's proposed line of thinking by default.
-- For each question, use your own knowledge and judgment to provide the most appropriate and higher-quality answer when a better approach exists.
-
-## LangGraph Questions
-
-- If a question involves LangGraph, consult the official LangGraph documentation before answering:
-- https://docs.langchain.com/oss/python/langgraph
-- Base the answer on the relevant official documentation first, then add explanation or recommendations as needed.
-
-## New Technologies And Tools
-
-- If a question involves a new technology, a new tool, or information that may have changed recently, perform a web search before answering.
-- Prioritize up-to-date and authoritative sources so the answer is current and accurate.
-
-## Windows Command Line
-
-- The user's computer runs Windows.
-- When providing command-line instructions, provide commands that are suitable for Windows.
-- In a new terminal session, activate the Conda environment before the first project command:
+Codex 的仓库级说明。
+## 文档编码
+- 本项目文档统一使用中文；读取文档时请使用 UTF-8 编码。
+## 上下文限制
+- 如果上下文限制或对话压缩导致关键信息缺失，并可能引发误判或幻觉时，请主动提醒用户开新会话后再继续。
+## 回复质量
+- 对于用户提出的问题，不必顺着用户给出的思路；应结合你的知识和判断，给出更合适、更高质量的答案。
+## LangGraph 问题
+- 涉及 LangGraph 时，先查阅官方文档：https://docs.langchain.com/oss/python/langgraph
+- 回答应优先依据官方文档，再补充解释或建议。
+## 新技术与工具
+- 涉及新技术、新工具，或可能已变化的信息时，先进行网页搜索再回答。
+- 优先使用最新且权威的来源，确保答案准确、及时。
+## Windows 命令行
+- 用户电脑运行的是 Windows。
+- 提供命令行说明时，请使用适合 Windows 的命令。
+- 在新的终端会话中，执行第一个项目命令前先激活 Conda 环境：
 
 ```powershell
 conda activate midea
 ```
-
-- If multiple commands are needed in a fresh terminal, assume the environment activation step comes first.
+- 如需执行多个命令，默认先完成环境激活步骤。
