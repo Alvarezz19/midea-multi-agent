@@ -89,6 +89,71 @@ class StubArchitecturePlanning:
         return state
 
 
+class StubArchitecturePlanningExternal:
+    def __call__(self, state):
+        state["decomposition_result"] = {
+            "pages": [],
+            "subsystem_descriptors": [
+                {
+                    "subsystem_id": "supply_fan_ctrl",
+                    "imports": ["送风机运行状态"],
+                    "exports": ["送风机运行标志"],
+                    "interface_bindings": [
+                        {
+                            "signal_name": "送风机运行状态",
+                            "signal_key": "送风机运行状态",
+                            "canonical_signal_key": "supply_fan_run_state",
+                            "direction": "input",
+                            "binding_kind": "shared_signal",
+                            "allowed_external": False,
+                            "owner_subsystem_id": "",
+                            "port_index": 0,
+                        }
+                    ],
+                }
+            ],
+            "shared_signal_registry": [
+                {
+                    "signal_name": "送风机运行状态",
+                    "signal_key": "supply_fan_run_state",
+                    "canonical_signal_key": "supply_fan_run_state",
+                    "owner_subsystem_id": "",
+                    "allowed_external": False,
+                    "required_exporter_count": 1,
+                    "consumers": ["supply_fan_ctrl"],
+                    "source_reason": "projected without owner",
+                }
+            ],
+            "template_needs": [],
+            "planning_order": ["supply_fan_ctrl"],
+            "warnings": [],
+        }
+        state["architecture_plan"] = {
+            "goal": "fan standard",
+            "pages": [],
+            "subsystem_slots": [],
+            "shared_signal_registry": [
+                {
+                    "signal_name": "送风机运行状态",
+                    "signal_key": "supply_fan_run_state",
+                    "canonical_signal_key": "supply_fan_run_state",
+                    "owner_subsystem_id": "",
+                    "allowed_external": False,
+                    "required_exporter_count": 1,
+                    "consumers": ["supply_fan_ctrl"],
+                    "source_reason": "projected without owner",
+                }
+            ],
+            "global_constraints": [],
+            "naming_strategy": {},
+            "layout_strategy": {},
+            "pattern_bindings": [],
+            "warnings": [],
+        }
+        state["current_step"] = "architecture_planned"
+        return state
+
+
 class StubSubsystemPlanning:
     def __call__(self, state):
         owner = _shared_signal_owner(state)
@@ -106,9 +171,73 @@ class StubSubsystemPlanning:
         return state
 
 
+class StubSubsystemPlanningExternal:
+    def __call__(self, state):
+        binding = (
+            (state.get("decomposition_result", {}) or {})
+            .get("subsystem_descriptors", [{}])[0]
+            .get("interface_bindings", [{}])[0]
+        )
+        if binding.get("binding_kind") == "external_input" and binding.get("allowed_external"):
+            state["subsystem_plan_map"] = {
+                "supply_fan_ctrl": {
+                    "imported_signals": [
+                        {
+                            "signal_name": "送风机运行状态",
+                            "signal_key": "送风机运行状态",
+                            "canonical_signal_key": "supply_fan_run_state",
+                            "binding_kind": "external_input",
+                            "allowed_external": True,
+                        }
+                    ],
+                    "exported_signals": [{"signal_name": "送风机运行标志"}],
+                }
+            }
+        else:
+            state["subsystem_plan_map"] = {
+                "supply_fan_ctrl": {
+                    "imported_signals": [
+                        {
+                            "signal_name": "送风机运行状态",
+                            "signal_key": "送风机运行状态",
+                            "canonical_signal_key": "supply_fan_run_state",
+                            "binding_kind": "shared_signal",
+                            "allowed_external": False,
+                        }
+                    ],
+                    "exported_signals": [{"signal_name": "送风机运行标志"}],
+                }
+            }
+        state["current_step"] = "subsystem_planned"
+        return state
+
+
 class StubGlobalAssembly:
     def __call__(self, state):
         state["assembled_graph_ir"] = {"unresolved_items": []}
+        state["execution_plan"] = {"goal": "compat"}
+        state["current_step"] = "global_assembly_completed"
+        return state
+
+
+class StubGlobalAssemblyExternal:
+    def __call__(self, state):
+        imported_signal = (state.get("subsystem_plan_map", {}) or {}).get("supply_fan_ctrl", {}).get("imported_signals", [{}])[0]
+        if imported_signal.get("binding_kind") == "external_input" and imported_signal.get("allowed_external"):
+            state["assembled_graph_ir"] = {"unresolved_items": []}
+        else:
+            state["assembled_graph_ir"] = {
+                "unresolved_items": [
+                    {
+                        "type": "synthetic_shared_signal_source",
+                        "severity": "error",
+                        "scope": "planning",
+                        "signal_name": "送风机运行状态",
+                        "message": "Shared signal 送风机运行状态 has no real exporter.",
+                        "suggested_fix": "Declare it as external input.",
+                    }
+                ]
+            }
         state["execution_plan"] = {"goal": "compat"}
         state["current_step"] = "global_assembly_completed"
         return state
@@ -181,6 +310,49 @@ class StubVerifierReject:
         return state
 
 
+class StubVerifierExternalAfterRepair:
+    def __call__(self, state):
+        imported_signal = (state.get("subsystem_plan_map", {}) or {}).get("supply_fan_ctrl", {}).get("imported_signals", [{}])[0]
+        if imported_signal.get("binding_kind") == "external_input" and imported_signal.get("allowed_external"):
+            report = {
+                "status": "passed",
+                "repair_scope": "none",
+                "issue_summary": "结构校验通过。",
+                "issues": [],
+                "warnings": [],
+                "metrics": {},
+            }
+        else:
+            report = {
+                "status": "retryable_error",
+                "repair_scope": "planning",
+                "issue_summary": "发现 1 个结构错误。",
+                "issues": [
+                    {
+                        "issue_id": "IR-EXT-001",
+                        "scope": "planning",
+                        "target_id": "送风机运行状态",
+                        "rule_id": "ir.unresolved.synthetic_shared_signal_source",
+                        "message": "Shared signal 送风机运行状态 has no real exporter.",
+                        "repair_payload": {
+                            "signal_name": "送风机运行状态",
+                            "canonical_signal_key": "supply_fan_run_state",
+                            "binding_kind": "external_input",
+                            "allowed_external": True,
+                            "candidate_exporters": [],
+                            "consumer_subsystem_ids": ["supply_fan_ctrl"],
+                        },
+                    }
+                ],
+                "warnings": [],
+                "metrics": {},
+            }
+        state["verification_report"] = report
+        state["final_output"] = {"verification_report": report}
+        state["current_step"] = "verification_completed"
+        return state
+
+
 class Phase4WorkflowRepairLoopTests(unittest.TestCase):
     def test_workflow_repairs_planning_issue_and_reaches_passed(self):
         with patch.object(workflow, "AnalysisAgent", StubAnalysis), \
@@ -215,6 +387,24 @@ class Phase4WorkflowRepairLoopTests(unittest.TestCase):
         self.assertEqual(result["repair_history"][0]["result"], "rejected")
         self.assertEqual(result["retry_counts_by_scope"]["planning"], 1)
         self.assertEqual(result["current_step"], "repair_rejected")
+
+    def test_workflow_reclassifies_external_planning_issue_and_reaches_passed(self):
+        with patch.object(workflow, "AnalysisAgent", StubAnalysis), \
+             patch.object(workflow, "RetrievalAgent", StubRetrieval), \
+             patch.object(workflow, "ArchitecturePlanner", StubArchitecturePlanningExternal), \
+             patch.object(workflow, "SubsystemPlanner", StubSubsystemPlanningExternal), \
+             patch.object(workflow, "GlobalAssembler", StubGlobalAssemblyExternal), \
+             patch.object(workflow, "CodingAgent", StubCoding), \
+             patch.object(workflow, "VerifierAgent", StubVerifierExternalAfterRepair):
+            result = workflow.run_workflow("fan external")
+
+        self.assertEqual(result["verification_report"]["status"], "passed")
+        self.assertEqual(result["route_decision"]["decision"], "accept")
+        self.assertEqual(result["retry_counts_by_scope"]["planning"], 1)
+        self.assertIn("external_input", result["repair_history"][0]["actions"][0])
+        binding = result["decomposition_result"]["subsystem_descriptors"][0]["interface_bindings"][0]
+        self.assertEqual(binding["binding_kind"], "external_input")
+        self.assertTrue(binding["allowed_external"])
 
     def test_workflow_trace_records_repair_router_and_repair_agent(self):
         captured_records: dict[str, list[dict]] = {}

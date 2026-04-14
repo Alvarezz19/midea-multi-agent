@@ -94,23 +94,45 @@ def make_decomposition_and_architecture(prefer_template: bool = True) -> tuple[d
                 "page_id": "page_control",
                 "goal": "送风机控制",
                 "implementation_preference": "reuse_template" if prefer_template else "atomic_assembly",
+                "interface_bindings": [
+                    {
+                        "signal_name": "schedule_enable",
+                        "signal_key": "schedule_enable",
+                        "canonical_signal_key": "schedule_enable",
+                        "direction": "input",
+                        "binding_kind": "external_input",
+                        "allowed_external": True,
+                        "owner_subsystem_id": "",
+                        "port_index": 0,
+                    },
+                    {
+                        "signal_name": "fan_fault_reset",
+                        "signal_key": "fan_fault_reset",
+                        "canonical_signal_key": "fan_fault_reset",
+                        "direction": "input",
+                        "binding_kind": "external_command",
+                        "allowed_external": True,
+                        "owner_subsystem_id": "",
+                        "port_index": 1,
+                    },
+                    {
+                        "signal_name": "supply_fan_available_flag",
+                        "signal_key": "supply_fan_available_flag",
+                        "canonical_signal_key": "supply_fan_available_flag",
+                        "direction": "output",
+                        "binding_kind": "shared_signal",
+                        "allowed_external": False,
+                        "owner_subsystem_id": "supply_fan_ctrl",
+                        "port_index": 0,
+                    },
+                ],
                 "imports": ["schedule_enable", "fan_fault_reset"],
                 "exports": ["supply_fan_available_flag"],
                 "priority": 1,
                 "reasoning": "phase3 test",
             }
         ],
-        "shared_signal_registry": [
-            {
-                "signal_name": "schedule_enable",
-                "signal_key": "schedule_enable",
-                "owner_subsystem_id": "",
-                "allowed_external": True,
-                "required_exporter_count": 0,
-                "consumers": ["supply_fan_ctrl"],
-                "source_reason": "global mode",
-            }
-        ],
+        "shared_signal_registry": [],
         "template_needs": [],
         "planning_order": ["supply_fan_ctrl"],
         "warnings": [],
@@ -149,6 +171,38 @@ def make_multi_subsystem_inputs() -> tuple[dict, dict]:
                 "page_id": "page_control",
                 "goal": "送风机控制",
                 "implementation_preference": "reuse_template",
+                "interface_bindings": [
+                    {
+                        "signal_name": "schedule_enable",
+                        "signal_key": "schedule_enable",
+                        "canonical_signal_key": "schedule_enable",
+                        "direction": "input",
+                        "binding_kind": "external_input",
+                        "allowed_external": True,
+                        "owner_subsystem_id": "",
+                        "port_index": 0,
+                    },
+                    {
+                        "signal_name": "fan_fault_reset",
+                        "signal_key": "fan_fault_reset",
+                        "canonical_signal_key": "fan_fault_reset",
+                        "direction": "input",
+                        "binding_kind": "external_command",
+                        "allowed_external": True,
+                        "owner_subsystem_id": "",
+                        "port_index": 1,
+                    },
+                    {
+                        "signal_name": "supply_fan_available_flag",
+                        "signal_key": "supply_fan_available_flag",
+                        "canonical_signal_key": "supply_fan_available_flag",
+                        "direction": "output",
+                        "binding_kind": "shared_signal",
+                        "allowed_external": False,
+                        "owner_subsystem_id": "supply_fan_ctrl",
+                        "port_index": 0,
+                    },
+                ],
                 "imports": ["schedule_enable", "fan_fault_reset"],
                 "exports": ["supply_fan_available_flag"],
                 "priority": 1,
@@ -160,7 +214,39 @@ def make_multi_subsystem_inputs() -> tuple[dict, dict]:
                 "page_id": "page_control",
                 "goal": "电加热控制",
                 "implementation_preference": "atomic_assembly",
-                "imports": [],
+                "interface_bindings": [
+                    {
+                        "signal_name": "schedule_enable",
+                        "signal_key": "schedule_enable",
+                        "canonical_signal_key": "schedule_enable",
+                        "direction": "input",
+                        "binding_kind": "external_input",
+                        "allowed_external": True,
+                        "owner_subsystem_id": "",
+                        "port_index": 0,
+                    },
+                    {
+                        "signal_name": "supply_fan_available_flag",
+                        "signal_key": "supply_fan_available_flag",
+                        "canonical_signal_key": "supply_fan_available_flag",
+                        "direction": "input",
+                        "binding_kind": "shared_signal",
+                        "allowed_external": False,
+                        "owner_subsystem_id": "supply_fan_ctrl",
+                        "port_index": 1,
+                    },
+                    {
+                        "signal_name": "heater_enable",
+                        "signal_key": "heater_enable",
+                        "canonical_signal_key": "heater_enable",
+                        "direction": "output",
+                        "binding_kind": "subsystem_output",
+                        "allowed_external": False,
+                        "owner_subsystem_id": "",
+                        "port_index": 0,
+                    },
+                ],
+                "imports": ["schedule_enable", "supply_fan_available_flag"],
                 "exports": ["heater_enable"],
                 "priority": 2,
                 "reasoning": "heater",
@@ -168,17 +254,9 @@ def make_multi_subsystem_inputs() -> tuple[dict, dict]:
         ],
         "shared_signal_registry": [
             {
-                "signal_name": "schedule_enable",
-                "signal_key": "schedule_enable",
-                "owner_subsystem_id": "",
-                "allowed_external": True,
-                "required_exporter_count": 0,
-                "consumers": ["supply_fan_ctrl", "heater_ctrl"],
-                "source_reason": "global mode",
-            },
-            {
                 "signal_name": "supply_fan_available_flag",
                 "signal_key": "supply_fan_available_flag",
+                "canonical_signal_key": "supply_fan_available_flag",
                 "owner_subsystem_id": "supply_fan_ctrl",
                 "allowed_external": False,
                 "required_exporter_count": 1,
@@ -236,7 +314,12 @@ class Phase3SubsystemPlannerTests(unittest.TestCase):
         self.assertEqual(plan["template_binding"]["template_id"], "fan_template")
         self.assertEqual(plan["node_instances"][0]["template_id"], "fan_template")
         self.assertEqual(len(plan["imported_signals"]), 2)
+        self.assertEqual(plan["imported_signals"][0]["binding_kind"], "external_input")
+        self.assertTrue(plan["imported_signals"][0]["allowed_external"])
+        self.assertEqual(plan["imported_signals"][1]["binding_kind"], "external_command")
         self.assertEqual(plan["exported_signals"][0]["signal_name"], "supply_fan_available_flag")
+        self.assertEqual(plan["exported_signals"][0]["binding_kind"], "shared_signal")
+        self.assertTrue(plan["template_interface_bindings"])
 
     def test_subsystem_planner_falls_back_to_atomic_assembly(self):
         decomposition_result, architecture_plan = make_decomposition_and_architecture(prefer_template=False)
@@ -251,6 +334,7 @@ class Phase3SubsystemPlannerTests(unittest.TestCase):
         self.assertGreaterEqual(len(plan["edges"]), 1)
         self.assertEqual(plan["node_instances"][0]["module_type"], "add")
         self.assertEqual(plan["imported_signals"][0]["signal_name"], "schedule_enable")
+        self.assertEqual(plan["imported_signals"][0]["binding_kind"], "external_input")
         self.assertEqual(plan["exported_signals"][0]["signal_name"], "supply_fan_available_flag")
         self.assertTrue(plan["template_binding"]["degraded"])
 
@@ -270,6 +354,9 @@ class Phase3SubsystemPlannerTests(unittest.TestCase):
         imported_names = [item["signal_name"] for item in heater_plan["imported_signals"]]
         self.assertIn("schedule_enable", imported_names)
         self.assertIn("supply_fan_available_flag", imported_names)
+        binding_kind_map = {item["signal_name"]: item["binding_kind"] for item in heater_plan["imported_signals"]}
+        self.assertEqual(binding_kind_map["schedule_enable"], "external_input")
+        self.assertEqual(binding_kind_map["supply_fan_available_flag"], "shared_signal")
         self.assertEqual(heater_plan["implementation_mode"], "atomic_assembly")
 
 

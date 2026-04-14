@@ -238,9 +238,81 @@ class Phase3VerifierNativeContractTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "retryable_error")
         self.assertEqual(report["repair_scope"], "planning")
-        self.assertTrue(
-            any(issue["rule_id"] == "ir.unresolved.synthetic_shared_signal_source" for issue in report["issues"])
+        issue = next(
+            issue for issue in report["issues"]
+            if issue["rule_id"] == "ir.unresolved.synthetic_shared_signal_source"
         )
+        self.assertEqual(issue["repair_payload"]["signal_name"], "schedule_enable")
+        self.assertEqual(issue["repair_payload"]["binding_kind"], "external_input")
+        self.assertTrue(issue["repair_payload"]["allowed_external"])
+
+    def test_verifier_emits_structured_payload_for_compile_port_range_issue(self):
+        graph_ir = {
+            "graph_ir_version": "2.0",
+            "goal": "compile repair payload",
+            "pages": [{"page_id": "page_control", "label": "控制", "kind": "control", "order": 0}],
+            "subflow_definitions": [],
+            "node_instances": [
+                {
+                    "instance_id": "node::src",
+                    "logic_id": "src",
+                    "module_type": "constInput",
+                    "page_id": "page_control",
+                    "subflow_id": None,
+                    "template_id": None,
+                    "parameters": {"name": "src", "fixedValue": 1},
+                    "position": {"x": 0, "y": 0},
+                    "input_count": 0,
+                    "output_count": 1,
+                    "reasoning": "src",
+                },
+                {
+                    "instance_id": "node::dst",
+                    "logic_id": "dst",
+                    "module_type": "constInput",
+                    "page_id": "page_control",
+                    "subflow_id": None,
+                    "template_id": None,
+                    "parameters": {"name": "dst", "fixedValue": 0},
+                    "position": {"x": 120, "y": 0},
+                    "input_count": 1,
+                    "output_count": 1,
+                    "reasoning": "dst",
+                },
+            ],
+            "edges": [],
+            "signal_registry": [],
+            "layout_hints": {},
+            "unresolved_items": [],
+        }
+        artifact = {
+            "json_text": "[]",
+            "flow_objects": [
+                {"id": "src1", "type": "constInput", "wires": [[{"id": "dst1", "port": 2}]], "inputs": 0, "outputs": 1},
+                {"id": "dst1", "type": "constInput", "wires": [[]], "inputs": 1, "outputs": 1},
+            ],
+            "id_map": {"node::src": "src1", "node::dst": "dst1"},
+            "layout_map": {},
+            "compile_report": {"node_count": 2, "subflow_count": 0, "page_count": 1, "warnings": []},
+        }
+
+        with patch.object(config, "DEBUG", False):
+            report = VerifierAgent().verify(
+                graph_ir,
+                artifact,
+                requirement_spec=make_requirement_spec(),
+                architecture_plan=make_architecture_plan(),
+                subsystem_plan_map=make_subsystem_plan_map(),
+            )
+
+        issue = next(
+            issue for issue in report["issues"]
+            if issue["rule_id"] == "compile.wire.port.range"
+        )
+        self.assertEqual(issue["repair_payload"]["source_real_id"], "src1")
+        self.assertEqual(issue["repair_payload"]["target_real_id"], "dst1")
+        self.assertEqual(issue["repair_payload"]["invalid_target_port"], 2)
+        self.assertEqual(issue["repair_payload"]["target_input_count"], 1)
 
 
 if __name__ == "__main__":

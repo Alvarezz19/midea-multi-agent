@@ -8,6 +8,7 @@ from utils.console_utils import safe_print as print
 from utils.phase3_adapters import normalize_signal_name
 from utils.phase3_contracts import empty_subsystem_plan
 from utils.retrieval_bundle_utils import get_atomic_modules, build_compilable_doc_map
+from utils.signal_semantics import canonicalize_signal_name
 from .coding_utils import resolve_input_count, resolve_output_count
 
 
@@ -132,27 +133,30 @@ class SubsystemPlanner:
 
     @staticmethod
     def _build_signal_bindings(
-        signal_names: List[str],
+        interface_bindings: List[Dict[str, Any]],
         node_logic_id: str,
         page_id: str,
-        count: int,
         semantic_role: str,
     ) -> List[Dict[str, Any]]:
         bindings: List[Dict[str, Any]] = []
-        if count <= 0:
-            return bindings
-        limit = min(count, len(signal_names))
-        for port_index in range(limit):
-            signal_name = signal_names[port_index]
+        for fallback_index, binding in enumerate(interface_bindings):
+            signal_name = str(binding.get("signal_name", "")).strip()
+            if not signal_name:
+                continue
             bindings.append(
                 {
                     "signal_name": signal_name,
+                    "signal_key": str(binding.get("signal_key", "")).strip() or normalize_signal_name(signal_name),
+                    "canonical_signal_key": str(binding.get("canonical_signal_key", "")).strip() or normalize_signal_name(signal_name),
                     "node_logic_id": node_logic_id,
-                    "port_index": port_index,
+                    "port_index": int(binding.get("port_index", fallback_index) or fallback_index),
                     "page_id": page_id,
+                    "binding_kind": str(binding.get("binding_kind", "")).strip(),
+                    "allowed_external": bool(binding.get("allowed_external", False)),
+                    "owner_subsystem_id": str(binding.get("owner_subsystem_id", "")).strip(),
                     "semantic_role": semantic_role,
                     "required": True,
-                    "reasoning": "Projected from subsystem interface.",
+                    "reasoning": "Projected from subsystem interface_bindings.",
                 }
             )
         return bindings
@@ -171,24 +175,13 @@ class SubsystemPlanner:
         for item in registry_items:
             if not isinstance(item, dict):
                 continue
-            signal_key = normalize_signal_name(item.get("signal_name") or item.get("signal_key"))
+            signal_key = normalize_signal_name(
+                item.get("canonical_signal_key")
+                or item.get("signal_key")
+                or item.get("signal_name")
+            )
             if signal_key:
                 registry[signal_key] = dict(item)
-
-        for mode in requirement_spec.get("global_modes", []) or []:
-            signal_name = str(mode).strip()
-            signal_key = normalize_signal_name(signal_name)
-            if not signal_key or signal_key in registry:
-                continue
-            registry[signal_key] = {
-                "signal_name": signal_name,
-                "signal_key": signal_key,
-                "owner_subsystem_id": "",
-                "allowed_external": True,
-                "required_exporter_count": 0,
-                "consumers": [],
-                "source_reason": "Synthesized from requirement_spec.global_modes.",
-            }
         return registry
 
     @staticmethod
@@ -204,35 +197,111 @@ class SubsystemPlanner:
             ordered.append(signal_name)
         return ordered
 
-    def _compose_interface_signal_names(
+    def _descriptor_interface_bindings(
         self,
         descriptor: Dict[str, Any],
         shared_signal_registry: Dict[str, Dict[str, Any]],
-        default_imports: List[str],
-        default_exports: List[str],
-    ) -> tuple[List[str], List[str]]:
-        subsystem_id = str(descriptor.get("subsystem_id", "")).strip()
-        import_names = list(default_imports)
-        export_names = list(default_exports)
-        default_import_keys = {normalize_signal_name(item) for item in default_imports if normalize_signal_name(item)}
-
-        for entry in shared_signal_registry.values():
-            signal_name = str(entry.get("signal_name", "")).strip()
-            if not signal_name:
-                continue
-            consumers = [str(item).strip() for item in entry.get("consumers", []) or [] if str(item).strip()]
-            owner_subsystem_id = str(entry.get("owner_subsystem_id", "")).strip()
-            signal_key = normalize_signal_name(signal_name)
-
-            if subsystem_id == owner_subsystem_id and int(entry.get("required_exporter_count", 0) or 0) > 0:
-                export_names.append(signal_name)
-            if subsystem_id in consumers and owner_subsystem_id != subsystem_id:
-                should_inject = bool(owner_subsystem_id) or not default_imports or signal_key in default_import_keys
-                if not should_inject:
+    ) -> List[Dict[str, Any]]:
+        bindings = descriptor.get("interface_bindings", [])
+        normalized_bindings: List[Dict[str, Any]] = []
+        if isinstance(bindings, list):
+            for binding in bindings:
+                if not isinstance(binding, dict):
                     continue
-                import_names.append(signal_name)
+                signal_name = str(binding.get("signal_name", "")).strip()
+                direction = str(binding.get("direction", "")).strip()
+                if not signal_name or direction not in {"input", "output"}:
+                    continue
+                canonical_signal_key = str(binding.get("canonical_signal_key", "")).strip() or canonicalize_signal_name(signal_name)
+                signal_key = str(binding.get("signal_key", "")).strip() or normalize_signal_name(signal_name)
+                registry_entry = shared_signal_registry.get(canonical_signal_key, {})
+                normalized_bindings.append(
+                    {
+                        "signal_name": signal_name,
+                        "signal_key": signal_key,
+                        "canonical_signal_key": canonical_signal_key,
+                        "direction": direction,
+                        "binding_kind": str(binding.get("binding_kind", "")).strip()
+                        or ("shared_signal" if canonical_signal_key in shared_signal_registry else ("external_input" if direction == "input" else "subsystem_output")),
+                        "allowed_external": bool(
+                            binding.get("allowed_external", False)
+                            if "allowed_external" in binding
+                            else (direction == "input" and canonical_signal_key not in shared_signal_registry)
+                        ),
+                        "owner_subsystem_id": str(binding.get("owner_subsystem_id", "")).strip()
+                        or str(registry_entry.get("owner_subsystem_id", "")).strip(),
+                        "port_index": int(binding.get("port_index", len(normalized_bindings)) or len(normalized_bindings)),
+                        "evidence": list(binding.get("evidence", []) or []),
+                        "confidence": float(binding.get("confidence", 0.0) or 0.0),
+                    }
+                )
+        if normalized_bindings:
+            return sorted(
+                normalized_bindings,
+                key=lambda item: (0 if item.get("direction") == "input" else 1, int(item.get("port_index", 0) or 0)),
+            )
 
-        return self._dedupe_signal_names(import_names), self._dedupe_signal_names(export_names)
+        fallback_bindings: List[Dict[str, Any]] = []
+        for direction, signal_names, default_kind in (
+            ("input", list(descriptor.get("imports", []) or []), "external_input"),
+            ("output", list(descriptor.get("exports", []) or []), "subsystem_output"),
+        ):
+            for port_index, signal_name in enumerate(self._dedupe_signal_names(signal_names)):
+                canonical_signal_key = canonicalize_signal_name(signal_name)
+                registry_entry = shared_signal_registry.get(canonical_signal_key, {})
+                binding_kind = "shared_signal" if registry_entry else default_kind
+                fallback_bindings.append(
+                    {
+                        "signal_name": signal_name,
+                        "signal_key": normalize_signal_name(signal_name),
+                        "canonical_signal_key": canonical_signal_key,
+                        "direction": direction,
+                        "binding_kind": binding_kind,
+                        "allowed_external": bool(registry_entry.get("allowed_external", direction == "input" and binding_kind != "shared_signal")),
+                        "owner_subsystem_id": str(registry_entry.get("owner_subsystem_id", "")).strip(),
+                        "port_index": port_index,
+                        "evidence": ["Synthesized from compat imports/exports."],
+                        "confidence": 0.5,
+                    }
+                )
+        return fallback_bindings
+
+    @staticmethod
+    def _bindings_for_direction(interface_bindings: List[Dict[str, Any]], direction: str) -> List[Dict[str, Any]]:
+        return [
+            binding
+            for binding in sorted(interface_bindings, key=lambda item: int(item.get("port_index", 0) or 0))
+            if str(binding.get("direction", "")).strip() == direction
+        ]
+
+    @staticmethod
+    def _ensure_binding_count(
+        interface_bindings: List[Dict[str, Any]],
+        direction: str,
+        default_prefix: str,
+        count: int,
+    ) -> List[Dict[str, Any]]:
+        if count <= 0:
+            return []
+        ordered = list(interface_bindings[:count])
+        for index in range(len(ordered), count):
+            signal_name = f"{default_prefix}_{index + 1}"
+            signal_key = normalize_signal_name(signal_name)
+            ordered.append(
+                {
+                    "signal_name": signal_name,
+                    "signal_key": signal_key,
+                    "canonical_signal_key": signal_key,
+                    "direction": direction,
+                    "binding_kind": "external_input" if direction == "input" else "subsystem_output",
+                    "allowed_external": direction == "input",
+                    "owner_subsystem_id": "",
+                    "port_index": index,
+                    "evidence": ["Synthesized to satisfy fallback port count."],
+                    "confidence": 0.4,
+                }
+            )
+        return ordered
 
     def _plan_template_reuse(
         self,
@@ -246,39 +315,36 @@ class SubsystemPlanner:
         template_id = str(template_doc.get("template_id") or template_doc.get("module_type") or "").strip()
         main_logic_id = f"{subsystem_id}_main"
         input_count, output_count = self._resolve_counts(template_doc, {})
-        import_names, export_names = self._compose_interface_signal_names(
-            descriptor,
-            shared_signal_registry,
-            self._signal_names(descriptor.get("imports", []), f"{subsystem_id}_input", input_count),
-            self._signal_names(descriptor.get("exports", []), f"{subsystem_id}_output", output_count),
-        )
+        interface_bindings = self._descriptor_interface_bindings(descriptor, shared_signal_registry)
+        input_bindings = self._bindings_for_direction(interface_bindings, "input")
+        output_bindings = self._bindings_for_direction(interface_bindings, "output")
         unresolved_items: List[Dict[str, Any]] = []
-        if len(import_names) > input_count:
+        if len(input_bindings) > input_count:
             unresolved_items.append(
                 {
                     "type": "template_input_interface_mismatch",
                     "severity": "error",
                     "scope": "planning",
                     "subsystem_id": subsystem_id,
-                    "message": f"Template {template_id} only exposes {input_count} inputs but planner projected {len(import_names)} imported signals.",
+                    "message": f"Template {template_id} only exposes {input_count} inputs but planner projected {len(input_bindings)} imported signals.",
                     "suggested_fix": "更换更匹配的子流程模板，或在架构层减少该子系统的共享输入约束。",
                 }
             )
-            import_names = import_names[:input_count]
-        if len(export_names) > output_count:
+        if len(output_bindings) > output_count:
             unresolved_items.append(
                 {
                     "type": "template_output_interface_mismatch",
                     "severity": "error",
                     "scope": "planning",
                     "subsystem_id": subsystem_id,
-                    "message": f"Template {template_id} only exposes {output_count} outputs but planner projected {len(export_names)} exported signals.",
+                    "message": f"Template {template_id} only exposes {output_count} outputs but planner projected {len(output_bindings)} exported signals.",
                     "suggested_fix": "更换更匹配的子流程模板，或在架构层修正该子系统的导出信号归属。",
                 }
             )
-            export_names = export_names[:output_count]
-        active_input_count = len(import_names)
-        active_output_count = len(export_names)
+        active_input_bindings = input_bindings[:input_count]
+        active_output_bindings = output_bindings[:output_count]
+        active_input_count = len(active_input_bindings)
+        active_output_count = len(active_output_bindings)
 
         subsystem_plan = empty_subsystem_plan(subsystem_id=subsystem_id, page_id=page_id)
         subsystem_plan.update(
@@ -302,8 +368,9 @@ class SubsystemPlanner:
                     }
                 ],
                 "edges": [],
-                "imported_signals": self._build_signal_bindings(import_names, main_logic_id, page_id, active_input_count, "import"),
-                "exported_signals": self._build_signal_bindings(export_names, main_logic_id, page_id, active_output_count, "export"),
+                "template_interface_bindings": interface_bindings,
+                "imported_signals": self._build_signal_bindings(active_input_bindings, main_logic_id, page_id, "import"),
+                "exported_signals": self._build_signal_bindings(active_output_bindings, main_logic_id, page_id, "export"),
                 "constraints": [
                     {
                         "constraint_id": f"{subsystem_id}::implementation",
@@ -332,6 +399,7 @@ class SubsystemPlanner:
             subsystem_plan.update(
                 {
                     "implementation_mode": "atomic_assembly",
+                    "template_interface_bindings": self._descriptor_interface_bindings(descriptor, shared_signal_registry),
                     "reasoning": "No atomic module candidates available.",
                     "unresolved_items": [
                         {
@@ -346,18 +414,22 @@ class SubsystemPlanner:
             )
             return subsystem_plan
 
-        import_seed, export_seed = self._compose_interface_signal_names(
-            descriptor,
-            shared_signal_registry,
-            list(descriptor.get("imports", []) or []),
-            list(descriptor.get("exports", []) or []),
-        )
-        desired_inputs = len(import_seed) or 1
+        interface_bindings = self._descriptor_interface_bindings(descriptor, shared_signal_registry)
+        input_bindings = self._bindings_for_direction(interface_bindings, "input")
+        output_bindings = self._bindings_for_direction(interface_bindings, "output")
+        desired_inputs = len(input_bindings) or 1
         primary_logic_id = f"{subsystem_id}_main"
         primary_parameters = self._default_parameters(primary_doc, str(descriptor.get("goal") or subsystem_id), desired_inputs)
         primary_input_count, primary_output_count = self._resolve_counts(primary_doc, primary_parameters)
-        import_names = self._signal_names(import_seed, f"{subsystem_id}_input", primary_input_count)
-        export_names = self._signal_names(export_seed, f"{subsystem_id}_output", max(1, primary_output_count))
+        active_input_bindings = self._ensure_binding_count(input_bindings, "input", f"{subsystem_id}_input", primary_input_count)
+        active_output_bindings = self._ensure_binding_count(
+            output_bindings,
+            "output",
+            f"{subsystem_id}_output",
+            max(1, primary_output_count),
+        )
+        import_names = [binding["signal_name"] for binding in active_input_bindings]
+        export_names = [binding["signal_name"] for binding in active_output_bindings]
 
         node_instances: List[Dict[str, Any]] = [
             {
@@ -427,8 +499,9 @@ class SubsystemPlanner:
                 },
                 "node_instances": node_instances,
                 "edges": edges,
-                "imported_signals": self._build_signal_bindings(import_names, primary_logic_id, page_id, primary_input_count, "import"),
-                "exported_signals": self._build_signal_bindings(export_names, primary_logic_id, page_id, max(1, primary_output_count), "export"),
+                "template_interface_bindings": interface_bindings,
+                "imported_signals": self._build_signal_bindings(active_input_bindings, primary_logic_id, page_id, "import"),
+                "exported_signals": self._build_signal_bindings(active_output_bindings, primary_logic_id, page_id, "export"),
                 "constraints": [
                     {
                         "constraint_id": f"{subsystem_id}::implementation",

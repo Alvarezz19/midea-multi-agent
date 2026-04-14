@@ -99,6 +99,107 @@ def make_competing_pattern_bundle() -> dict:
     }
 
 
+def make_interface_semantics_bundle() -> dict:
+    return {
+        "atomic_modules": [],
+        "subflow_templates": [
+            {
+                "module_type": "fan_template",
+                "asset_type": "subflow_template",
+                "template_id": "fan_template",
+                "definition_id": "fan_template",
+                "template_name": "送风机标准控制",
+                "template_role": "supply_fan_control",
+                "name": "送风机标准控制",
+                "category": "AHU/subflow_templates/fan_control",
+                "description": "Reusable fan control subflow.",
+                "parameters_schema": {},
+                "ports_definition": {
+                    "inputs": [
+                        {"index": 0, "label": "送风机运行状态"},
+                        {"index": 1, "label": "送风机启停手动控制命令"},
+                    ],
+                    "outputs": [{"index": 0, "label": "送风机可用标志"}],
+                },
+                "template_json": {"type": "subflow", "id": "fan_template", "name": "送风机标准控制", "inputs": 2, "outputs": 1},
+                "compile_hints": {"input_count": 2, "output_count": 1},
+            },
+            {
+                "module_type": "heater_template",
+                "asset_type": "subflow_template",
+                "template_id": "heater_template",
+                "definition_id": "heater_template",
+                "template_name": "电加热标准控制",
+                "template_role": "heater_control",
+                "name": "电加热标准控制",
+                "category": "AHU/subflow_templates/heater_control",
+                "description": "Reusable heater control subflow.",
+                "parameters_schema": {},
+                "ports_definition": {
+                    "inputs": [
+                        {"index": 0, "label": "控制使能"},
+                        {"index": 1, "label": "温度设定值"},
+                    ],
+                    "outputs": [{"index": 0, "label": "电加热控制值"}],
+                },
+                "template_json": {"type": "subflow", "id": "heater_template", "name": "电加热标准控制", "inputs": 2, "outputs": 1},
+                "compile_hints": {"input_count": 2, "output_count": 1},
+            },
+        ],
+        "system_patterns": [
+            {
+                "pattern_id": "ahu_semantics_pattern",
+                "system_type": "AHU",
+                "required_pages": [
+                    {"page_key": "control", "label": "控制", "kind": "control"},
+                    {"page_key": "io_comm", "label": "IO/通讯", "kind": "io"},
+                ],
+                "optional_pages": [],
+            }
+        ],
+        "style_guides": [],
+        "metadata": {"selected_case_pattern_id": "ahu_semantics_pattern"},
+    }
+
+
+def make_interface_semantics_requirement_spec() -> dict:
+    return {
+        "schema_version": "3.0",
+        "system_type": "AHU",
+        "scenario_summary": "AHU 送风机与电加热联动控制",
+        "subsystems": [
+            {
+                "subsystem_id": "supply_fan_ctrl",
+                "subsystem_type": "supply_fan_control",
+                "goal": "送风机控制",
+                "page_hint": "控制",
+                "priority": 1,
+                "preferred_templates": [],
+                "imports": [],
+                "exports": ["supply_fan_available_flag"],
+            },
+            {
+                "subsystem_id": "heater_ctrl",
+                "subsystem_type": "heater_control",
+                "goal": "电加热控制",
+                "page_hint": "控制",
+                "priority": 2,
+                "preferred_templates": [],
+                "imports": ["supply_fan_available_flag"],
+                "exports": ["heater_enable"],
+            },
+        ],
+        "signals": {"inputs": ["温度设定值"], "outputs": [], "software_points": [], "alarm_points": []},
+        "required_pages": ["IO/通讯", "控制"],
+        "global_modes": [],
+        "ambiguities": [],
+        "assumptions": [],
+        "acceptance_criteria": [],
+        "confidence": 0.9,
+        "warnings": [],
+    }
+
+
 class Phase3ArchitecturePlannerTests(unittest.TestCase):
     def test_architecture_planner_binds_real_ahu_system_pattern(self):
         bundle = make_real_bundle()
@@ -122,11 +223,19 @@ class Phase3ArchitecturePlannerTests(unittest.TestCase):
             item["signal_key"]: item
             for item in architecture_plan["shared_signal_registry"]
         }
-        self.assertIn("schedule_enable", shared_signal_map)
-        self.assertTrue(shared_signal_map["schedule_enable"]["allowed_external"])
-        self.assertEqual(shared_signal_map["schedule_enable"]["required_exporter_count"], 0)
-        self.assertIn("dx_run_flag", shared_signal_map)
-        self.assertEqual(shared_signal_map["dx_run_flag"]["owner_subsystem_id"], "dx_ctrl")
+        self.assertNotIn("schedule_enable", shared_signal_map)
+        self.assertIn("supply_fan_available", shared_signal_map)
+        self.assertEqual(shared_signal_map["supply_fan_available"]["owner_subsystem_id"], "supply_fan_ctrl")
+        descriptor_map = {item["subsystem_id"]: item for item in decomposition_result["subsystem_descriptors"]}
+        supply_bindings = descriptor_map["supply_fan_ctrl"]["interface_bindings"]
+        self.assertTrue(
+            any(
+                binding["direction"] == "input"
+                and binding["binding_kind"] in {"external_input", "external_command", "external_parameter"}
+                and binding["allowed_external"]
+                for binding in supply_bindings
+            )
+        )
 
     def test_architecture_planner_emits_slots_and_template_preferences(self):
         bundle = make_real_bundle()
@@ -161,6 +270,29 @@ class Phase3ArchitecturePlannerTests(unittest.TestCase):
         self.assertEqual(architecture_plan["pattern_bindings"][0]["pattern_id"], "ahu_dx_pattern")
         self.assertGreater(architecture_plan["pattern_bindings"][0]["score"], 0)
         self.assertTrue(architecture_plan["pattern_bindings"][0]["score_reasons"])
+
+    def test_architecture_planner_keeps_external_template_inputs_out_of_shared_signal_registry(self):
+        bundle = make_interface_semantics_bundle()
+
+        with patch.object(config, "DEBUG", False):
+            planner = ArchitecturePlanner()
+            decomposition_result, architecture_plan = planner.plan(make_interface_semantics_requirement_spec(), bundle)
+
+        descriptor_map = {item["subsystem_id"]: item for item in decomposition_result["subsystem_descriptors"]}
+        heater_bindings = {
+            binding["signal_name"]: binding
+            for binding in descriptor_map["heater_ctrl"]["interface_bindings"]
+        }
+        self.assertEqual(heater_bindings["控制使能"]["binding_kind"], "shared_signal")
+        self.assertEqual(heater_bindings["控制使能"]["canonical_signal_key"], "supply_fan_available")
+        self.assertEqual(heater_bindings["温度设定值"]["binding_kind"], "external_input")
+        self.assertTrue(heater_bindings["温度设定值"]["allowed_external"])
+
+        shared_signal_keys = {
+            item["signal_key"]
+            for item in architecture_plan["shared_signal_registry"]
+        }
+        self.assertEqual(shared_signal_keys, {"supply_fan_available"})
 
 
 if __name__ == "__main__":

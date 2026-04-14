@@ -119,17 +119,9 @@ def make_architecture_plan() -> dict:
         ],
         "shared_signal_registry": [
             {
-                "signal_name": "schedule_enable",
-                "signal_key": "schedule_enable",
-                "owner_subsystem_id": "",
-                "allowed_external": True,
-                "required_exporter_count": 0,
-                "consumers": ["supply_fan_ctrl"],
-                "source_reason": "global mode",
-            },
-            {
                 "signal_name": "supply_fan_available_flag",
                 "signal_key": "supply_fan_available_flag",
+                "canonical_signal_key": "supply_fan_available_flag",
                 "owner_subsystem_id": "supply_fan_ctrl",
                 "allowed_external": False,
                 "required_exporter_count": 1,
@@ -170,9 +162,13 @@ def make_subsystem_plan_map() -> dict:
             "exported_signals": [
                 {
                     "signal_name": "supply_fan_available_flag",
+                    "signal_key": "supply_fan_available_flag",
+                    "canonical_signal_key": "supply_fan_available_flag",
                     "node_logic_id": "fan_main",
                     "port_index": 0,
                     "page_id": "page_control",
+                    "binding_kind": "shared_signal",
+                    "allowed_external": False,
                 }
             ],
             "constraints": [],
@@ -201,17 +197,25 @@ def make_subsystem_plan_map() -> dict:
             "imported_signals": [
                 {
                     "signal_name": "supply_fan_available_flag",
+                    "signal_key": "supply_fan_available_flag",
+                    "canonical_signal_key": "supply_fan_available_flag",
                     "node_logic_id": "heater_main",
                     "port_index": 0,
                     "page_id": "page_control",
+                    "binding_kind": "shared_signal",
+                    "allowed_external": False,
                 }
             ],
             "exported_signals": [
                 {
                     "signal_name": "heater_enable",
+                    "signal_key": "heater_enable",
+                    "canonical_signal_key": "heater_enable",
                     "node_logic_id": "heater_main",
                     "port_index": 0,
                     "page_id": "page_control",
+                    "binding_kind": "subsystem_output",
+                    "allowed_external": False,
                 }
             ],
             "constraints": [],
@@ -273,9 +277,13 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
         subsystem_plan_map["supply_fan_ctrl"]["imported_signals"] = [
             {
                 "signal_name": "schedule_enable",
+                "signal_key": "schedule_enable",
+                "canonical_signal_key": "schedule_enable",
                 "node_logic_id": "fan_main",
                 "port_index": 0,
                 "page_id": "page_control",
+                "binding_kind": "external_input",
+                "allowed_external": True,
             }
         ]
         subsystem_plan_map["supply_fan_ctrl"]["node_instances"][0]["input_count"] = 1
@@ -299,7 +307,7 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
     def test_global_assembler_records_unresolved_item_for_ambiguous_shared_signal(self):
         subsystem_plan_map = make_subsystem_plan_map()
         architecture_plan = make_architecture_plan()
-        architecture_plan["shared_signal_registry"][1]["owner_subsystem_id"] = ""
+        architecture_plan["shared_signal_registry"][0]["owner_subsystem_id"] = ""
         subsystem_plan_map["backup_fan_ctrl"] = {
             "subsystem_id": "backup_fan_ctrl",
             "page_id": "page_control",
@@ -323,9 +331,13 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
             "exported_signals": [
                 {
                     "signal_name": "supply_fan_available_flag",
+                    "signal_key": "supply_fan_available_flag",
+                    "canonical_signal_key": "supply_fan_available_flag",
                     "node_logic_id": "backup_fan_main",
                     "port_index": 0,
                     "page_id": "page_control",
+                    "binding_kind": "shared_signal",
+                    "allowed_external": False,
                 }
             ],
             "constraints": [],
@@ -378,9 +390,13 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
             "exported_signals": [
                 {
                     "signal_name": "supply_fan_available_flag",
+                    "signal_key": "supply_fan_available_flag",
+                    "canonical_signal_key": "supply_fan_available_flag",
                     "node_logic_id": "backup_fan_main",
                     "port_index": 0,
                     "page_id": "page_control",
+                    "binding_kind": "shared_signal",
+                    "allowed_external": False,
                 }
             ],
             "constraints": [],

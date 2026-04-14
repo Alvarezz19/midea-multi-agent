@@ -52,6 +52,7 @@ class SubsystemDescriptor(TypedDict, total=False):
     page_id: str
     goal: str
     implementation_preference: str
+    interface_bindings: List["InterfaceBindingSpec"]
     imports: List[str]
     exports: List[str]
     priority: int
@@ -97,11 +98,29 @@ class ArchitecturePlan(TypedDict, total=False):
     warnings: List[str]
 
 
+class InterfaceBindingSpec(TypedDict, total=False):
+    signal_name: str
+    signal_key: str
+    canonical_signal_key: str
+    direction: str
+    binding_kind: str
+    allowed_external: bool
+    owner_subsystem_id: str
+    port_index: int
+    evidence: List[str]
+    confidence: float
+
+
 class SubsystemSignalBinding(TypedDict, total=False):
     signal_name: str
+    signal_key: str
+    canonical_signal_key: str
     node_logic_id: str
     port_index: int
     page_id: str
+    binding_kind: str
+    allowed_external: bool
+    owner_subsystem_id: str
     semantic_role: str
     required: bool
     reasoning: str
@@ -132,6 +151,7 @@ class SubsystemPlan(TypedDict, total=False):
     page_id: str
     implementation_mode: str
     template_binding: Dict[str, Any]
+    template_interface_bindings: List[InterfaceBindingSpec]
     node_instances: List[SubsystemPlanNode]
     edges: List[SubsystemPlanEdge]
     imported_signals: List[SubsystemSignalBinding]
@@ -241,6 +261,7 @@ def empty_subsystem_plan(subsystem_id: str = "", page_id: str = "") -> Subsystem
         "page_id": page_id,
         "implementation_mode": "",
         "template_binding": {},
+        "template_interface_bindings": [],
         "node_instances": [],
         "edges": [],
         "imported_signals": [],

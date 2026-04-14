@@ -122,6 +122,7 @@ class VerificationIssue(BaseModel):
     rule_id: str
     message: str
     suggested_fix: str = ""
+    repair_payload: Dict[str, Any] = Field(default_factory=dict)
 
 
 class VerificationMetrics(BaseModel):

@@ -8,6 +8,12 @@ from utils.console_utils import safe_print as print
 from utils.phase3_adapters import make_page_id, make_page_key, normalize_signal_name
 from utils.phase3_contracts import empty_architecture_plan, empty_decomposition_result
 from utils.retrieval_bundle_utils import get_style_guides, get_subflow_templates, get_system_patterns
+from utils.signal_semantics import (
+    KNOWN_SHARED_SIGNAL_KEYS,
+    canonicalize_signal_name,
+    classify_template_input,
+    classify_template_output,
+)
 
 
 _SUBSYSTEM_PAGE_KEYWORDS = {
@@ -203,16 +209,123 @@ class ArchitecturePlanner:
 
     @staticmethod
     def _extract_template_signals(template_doc: Dict[str, Any], direction: str) -> List[str]:
+        return [item.get("label", "") for item in ArchitecturePlanner._extract_template_ports(template_doc, direction)]
+
+    @staticmethod
+    def _extract_template_ports(template_doc: Dict[str, Any], direction: str) -> List[Dict[str, Any]]:
         ports_definition = template_doc.get("ports_definition", {}) if isinstance(template_doc, dict) else {}
         if not isinstance(ports_definition, dict):
             return []
         port_items = ports_definition.get(direction, [])
-        signals: List[str] = []
-        for item in port_items if isinstance(port_items, list) else []:
+        ports: List[Dict[str, Any]] = []
+        for index, item in enumerate(port_items if isinstance(port_items, list) else []):
             label = str(item.get("label") or item.get("name") or "").strip()
             if label:
-                signals.append(label)
-        return signals
+                ports.append(
+                    {
+                        "label": label,
+                        "index": int(item.get("index", index) or index),
+                    }
+                )
+        return ports
+
+    @staticmethod
+    def _merge_interface_ports(template_ports: List[Dict[str, Any]], explicit_signals: List[str]) -> List[Dict[str, Any]]:
+        merged: List[Dict[str, Any]] = []
+        seen = set()
+
+        for port in template_ports:
+            label = str(port.get("label", "")).strip()
+            canonical_key = canonicalize_signal_name(label)
+            dedupe_key = canonical_key or normalize_signal_name(label)
+            if not label or not dedupe_key or dedupe_key in seen:
+                continue
+            merged.append({"label": label, "index": int(port.get("index", len(merged)) or len(merged))})
+            seen.add(dedupe_key)
+
+        for signal_name in explicit_signals:
+            label = str(signal_name).strip()
+            canonical_key = canonicalize_signal_name(label)
+            dedupe_key = canonical_key or normalize_signal_name(label)
+            if not label or not dedupe_key or dedupe_key in seen:
+                continue
+            merged.append({"label": label, "index": len(merged)})
+            seen.add(dedupe_key)
+
+        return merged
+
+    def _build_interface_bindings(
+        self,
+        requirement_spec: Dict[str, Any],
+        subsystem: Dict[str, Any],
+        template_doc: Dict[str, Any],
+        projected_shared_signal_keys: set[str],
+        consumer_signal_keys: set[str],
+    ) -> List[Dict[str, Any]]:
+        explicit_imports = self._dedupe_signal_names(list(subsystem.get("imports", []) or []))
+        explicit_exports = self._dedupe_signal_names(list(subsystem.get("exports", []) or []))
+        template_input_ports = self._extract_template_ports(template_doc, "inputs")
+        template_output_ports = self._extract_template_ports(template_doc, "outputs")
+        input_ports = (
+            list(template_input_ports)
+            if template_input_ports
+            else [{"label": signal_name, "index": index} for index, signal_name in enumerate(explicit_imports)]
+        )
+        output_ports = (
+            list(template_output_ports)
+            if template_output_ports
+            else [{"label": signal_name, "index": index} for index, signal_name in enumerate(explicit_exports)]
+        )
+
+        bindings: List[Dict[str, Any]] = []
+        for port in input_ports:
+            signal_name = str(port.get("label", "")).strip()
+            if not signal_name:
+                continue
+            classification = classify_template_input(
+                signal_name,
+                requirement_spec=requirement_spec,
+                shared_signal_keys=projected_shared_signal_keys,
+            )
+            bindings.append(
+                {
+                    "signal_name": signal_name,
+                    "signal_key": classification["signal_key"],
+                    "canonical_signal_key": classification["canonical_signal_key"],
+                    "direction": "input",
+                    "binding_kind": classification["binding_kind"],
+                    "allowed_external": bool(classification["allowed_external"]),
+                    "owner_subsystem_id": "",
+                    "port_index": int(port.get("index", len(bindings)) or 0),
+                    "evidence": list(classification.get("evidence", []) or []),
+                    "confidence": float(classification.get("confidence", 0.0) or 0.0),
+                }
+            )
+
+        for port in output_ports:
+            signal_name = str(port.get("label", "")).strip()
+            if not signal_name:
+                continue
+            classification = classify_template_output(
+                signal_name,
+                consumer_signal_keys=consumer_signal_keys,
+                shared_signal_keys=projected_shared_signal_keys,
+            )
+            bindings.append(
+                {
+                    "signal_name": signal_name,
+                    "signal_key": classification["signal_key"],
+                    "canonical_signal_key": classification["canonical_signal_key"],
+                    "direction": "output",
+                    "binding_kind": classification["binding_kind"],
+                    "allowed_external": bool(classification["allowed_external"]),
+                    "owner_subsystem_id": "",
+                    "port_index": int(port.get("index", len(bindings)) or 0),
+                    "evidence": list(classification.get("evidence", []) or []),
+                    "confidence": float(classification.get("confidence", 0.0) or 0.0),
+                }
+            )
+        return bindings
 
     def _match_template_ids(
         self,
@@ -268,19 +381,18 @@ class ArchitecturePlanner:
         planning_order: List[str],
     ) -> tuple[List[Dict[str, Any]], List[str]]:
         external_signal_keys = {
-            normalize_signal_name(value)
+            canonicalize_signal_name(value)
             for value in (
                 list((requirement_spec.get("signals", {}) or {}).get("inputs", []) or [])
                 + list((requirement_spec.get("signals", {}) or {}).get("software_points", []) or [])
                 + list(requirement_spec.get("global_modes", []) or [])
             )
-            if normalize_signal_name(value)
+            if canonicalize_signal_name(value)
         }
         registry_by_key: Dict[str, Dict[str, Any]] = {}
         warnings: List[str] = []
 
-        def ensure_entry(signal_name: str, semantic_role: str) -> Dict[str, Any]:
-            signal_key = normalize_signal_name(signal_name)
+        def ensure_entry(signal_name: str, signal_key: str, semantic_role: str) -> Dict[str, Any]:
             if not signal_key:
                 return {}
             entry = registry_by_key.setdefault(
@@ -288,6 +400,7 @@ class ArchitecturePlanner:
                 {
                     "signal_name": str(signal_name).strip() or signal_key,
                     "signal_key": signal_key,
+                    "canonical_signal_key": signal_key,
                     "semantic_role": semantic_role,
                     "owner_subsystem_id": "",
                     "allowed_external": signal_key in external_signal_keys,
@@ -301,31 +414,35 @@ class ArchitecturePlanner:
                 entry["semantic_role"] = "global_mode"
             return entry
 
-        for mode in requirement_spec.get("global_modes", []) or []:
-            entry = ensure_entry(str(mode), "global_mode")
-            if not entry:
-                continue
-            entry["allowed_external"] = True
-            entry["required_exporter_count"] = 0
-            entry["consumers"] = list(planning_order)
-            entry["source_reason"] = "Derived from requirement_spec.global_modes."
-
         for descriptor in subsystem_descriptors:
             subsystem_id = str(descriptor.get("subsystem_id", "")).strip()
             if not subsystem_id:
                 continue
-            for signal_name in descriptor.get("imports", []) or []:
-                entry = ensure_entry(str(signal_name), "shared_input")
+            for binding in descriptor.get("interface_bindings", []) or []:
+                if not isinstance(binding, dict):
+                    continue
+                if str(binding.get("binding_kind", "")).strip() != "shared_signal":
+                    continue
+                signal_name = str(binding.get("signal_name", "")).strip()
+                signal_key = canonicalize_signal_name(
+                    binding.get("canonical_signal_key")
+                    or binding.get("signal_key")
+                    or signal_name
+                )
+                if not signal_name or not signal_key:
+                    continue
+                direction = str(binding.get("direction", "")).strip()
+                semantic_role = "shared_input" if direction == "input" else "shared_output"
+                entry = ensure_entry(signal_name, signal_key, semantic_role)
                 if not entry:
                     continue
-                if subsystem_id not in entry["consumers"]:
-                    entry["consumers"].append(subsystem_id)
-            for signal_name in descriptor.get("exports", []) or []:
-                entry = ensure_entry(str(signal_name), "shared_output")
-                if not entry:
-                    continue
-                if subsystem_id not in entry["exporter_candidates"]:
-                    entry["exporter_candidates"].append(subsystem_id)
+                if direction == "input":
+                    if subsystem_id not in entry["consumers"]:
+                        entry["consumers"].append(subsystem_id)
+                elif direction == "output":
+                    entry["signal_name"] = signal_name or entry["signal_name"]
+                    if subsystem_id not in entry["exporter_candidates"]:
+                        entry["exporter_candidates"].append(subsystem_id)
 
         registry: List[Dict[str, Any]] = []
         for signal_key in sorted(registry_by_key):
@@ -464,12 +581,29 @@ class ArchitecturePlanner:
         subsystem_slots: List[Dict[str, Any]] = []
         template_needs: List[Dict[str, Any]] = []
         planning_order: List[str] = []
+        explicit_import_keys: set[str] = set()
+        explicit_export_keys: set[str] = set()
 
         raw_subsystems = requirement_spec.get("subsystems", []) or []
         if not raw_subsystems:
             raw_subsystems = self._fallback_subsystems(requirement_spec)
             architecture_plan["warnings"].append("requirement_spec.subsystems 为空，已退化为单一 generic_control 子系统。")
             decomposition_result["warnings"].append("requirement_spec.subsystems 为空，已退化为单一 generic_control 子系统。")
+
+        for subsystem in raw_subsystems:
+            if not isinstance(subsystem, dict):
+                continue
+            explicit_import_keys.update(
+                canonicalize_signal_name(signal_name)
+                for signal_name in subsystem.get("imports", []) or []
+                if canonicalize_signal_name(signal_name)
+            )
+            explicit_export_keys.update(
+                canonicalize_signal_name(signal_name)
+                for signal_name in subsystem.get("exports", []) or []
+                if canonicalize_signal_name(signal_name)
+            )
+        projected_shared_signal_keys = (explicit_import_keys & explicit_export_keys) | set(KNOWN_SHARED_SIGNAL_KEYS)
 
         for index, subsystem in enumerate(raw_subsystems, start=1):
             if not isinstance(subsystem, dict):
@@ -485,14 +619,23 @@ class ArchitecturePlanner:
                 (item for item in subflow_templates if item.get("template_id") == preferred_template_ids[0]),
                 {},
             ) if preferred_template_ids else {}
-            imports = self._dedupe_signal_names(
-                list(subsystem.get("imports", []) or [])
-                or self._extract_template_signals(template_doc, "inputs")
+            interface_bindings = self._build_interface_bindings(
+                requirement_spec,
+                subsystem,
+                template_doc,
+                projected_shared_signal_keys,
+                explicit_import_keys,
             )
-            exports = self._dedupe_signal_names(
-                list(subsystem.get("exports", []) or [])
-                or self._extract_template_signals(template_doc, "outputs")
-            )
+            imports = [
+                str(binding.get("signal_name", "")).strip()
+                for binding in interface_bindings
+                if str(binding.get("direction", "")).strip() == "input" and str(binding.get("signal_name", "")).strip()
+            ]
+            exports = [
+                str(binding.get("signal_name", "")).strip()
+                for binding in interface_bindings
+                if str(binding.get("direction", "")).strip() == "output" and str(binding.get("signal_name", "")).strip()
+            ]
 
             subsystem_descriptors.append(
                 {
@@ -501,6 +644,7 @@ class ArchitecturePlanner:
                     "page_id": page_id,
                     "goal": str(subsystem.get("goal", "")).strip(),
                     "implementation_preference": implementation_preference,
+                    "interface_bindings": interface_bindings,
                     "imports": imports,
                     "exports": exports,
                     "priority": int(subsystem.get("priority", index) or index),

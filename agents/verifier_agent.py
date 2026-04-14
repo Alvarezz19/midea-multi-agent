@@ -16,6 +16,7 @@ from utils.graph_ir import (
     VerificationMetrics,
     VerificationReport,
 )
+from utils.signal_semantics import canonicalize_signal_name, classify_template_input
 
 
 class VerifierAgent:
@@ -32,6 +33,7 @@ class VerifierAgent:
         message: str,
         suggested_fix: str = "",
         severity: str = "error",
+        repair_payload: Dict[str, Any] | None = None,
     ) -> VerificationIssue:
         return VerificationIssue(
             issue_id=issue_id,
@@ -41,7 +43,136 @@ class VerifierAgent:
             rule_id=rule_id,
             message=message,
             suggested_fix=suggested_fix,
+            repair_payload=repair_payload or {},
         )
+
+    @staticmethod
+    def _collect_external_signal_keys(requirement_spec: Dict[str, Any]) -> set[str]:
+        signals = requirement_spec.get("signals", {}) if isinstance(requirement_spec.get("signals"), dict) else {}
+        values: List[Any] = []
+        for key in ("inputs", "software_points"):
+            values.extend(list(signals.get(key, []) or []))
+        values.extend(list(requirement_spec.get("global_modes", []) or []))
+        return {
+            canonical_key
+            for value in values
+            if (canonical_key := canonicalize_signal_name(value))
+        }
+
+    @staticmethod
+    def _registry_by_canonical_key(architecture_plan: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        registry: Dict[str, Dict[str, Any]] = {}
+        for entry in architecture_plan.get("shared_signal_registry", []) or []:
+            if not isinstance(entry, dict):
+                continue
+            canonical_key = canonicalize_signal_name(
+                entry.get("canonical_signal_key")
+                or entry.get("signal_key")
+                or entry.get("signal_name")
+            )
+            if canonical_key:
+                registry[canonical_key] = dict(entry)
+        return registry
+
+    @staticmethod
+    def _matching_signal_bindings(
+        subsystem_plan_map: Dict[str, Any],
+        canonical_signal_key: str,
+        field_name: str,
+    ) -> List[Dict[str, Any]]:
+        matches: List[Dict[str, Any]] = []
+        for subsystem_id, subsystem_plan in (subsystem_plan_map or {}).items():
+            for binding in subsystem_plan.get(field_name, []) or []:
+                if not isinstance(binding, dict):
+                    continue
+                binding_key = canonicalize_signal_name(
+                    binding.get("canonical_signal_key")
+                    or binding.get("signal_key")
+                    or binding.get("signal_name")
+                )
+                if binding_key != canonical_signal_key:
+                    continue
+                matches.append(
+                    {
+                        "subsystem_id": subsystem_id,
+                        "binding": dict(binding),
+                    }
+                )
+        return matches
+
+    def _planning_repair_payload(
+        self,
+        unresolved: Dict[str, Any],
+        requirement_spec: Dict[str, Any],
+        architecture_plan: Dict[str, Any],
+        subsystem_plan_map: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        signal_name = str(
+            unresolved.get("signal_name")
+            or unresolved.get("target_id")
+            or unresolved.get("subsystem_id")
+            or ""
+        ).strip()
+        canonical_signal_key = canonicalize_signal_name(signal_name)
+        if not signal_name or not canonical_signal_key:
+            return {}
+
+        registry_entry = self._registry_by_canonical_key(architecture_plan).get(canonical_signal_key, {})
+        import_matches = self._matching_signal_bindings(subsystem_plan_map, canonical_signal_key, "imported_signals")
+        export_matches = self._matching_signal_bindings(subsystem_plan_map, canonical_signal_key, "exported_signals")
+        external_signal_keys = self._collect_external_signal_keys(requirement_spec)
+        inferred_binding = classify_template_input(
+            signal_name,
+            requirement_spec=requirement_spec,
+            shared_signal_keys=self._registry_by_canonical_key(architecture_plan).keys(),
+        )
+
+        binding_kind = str(unresolved.get("binding_kind", "")).strip()
+        allowed_external = bool(unresolved.get("allowed_external", False))
+        if import_matches:
+            first_binding = import_matches[0]["binding"]
+            binding_kind = binding_kind or str(first_binding.get("binding_kind", "")).strip()
+            allowed_external = allowed_external or bool(first_binding.get("allowed_external", False))
+        if registry_entry:
+            allowed_external = allowed_external or bool(registry_entry.get("allowed_external", False))
+
+        candidate_exporters = sorted(
+            {
+                str(item.get("subsystem_id", "")).strip()
+                for item in export_matches
+                if str(item.get("subsystem_id", "")).strip()
+            }
+        )
+        consumer_subsystem_ids = sorted(
+            {
+                str(item.get("subsystem_id", "")).strip()
+                for item in import_matches
+                if str(item.get("subsystem_id", "")).strip()
+            }
+            | {
+                str(item).strip()
+                for item in registry_entry.get("consumers", []) or []
+                if str(item).strip()
+            }
+        )
+
+        if not binding_kind or binding_kind == "shared_signal":
+            binding_kind = str(inferred_binding.get("binding_kind", "")).strip() or binding_kind or "shared_signal"
+        allowed_external = (
+            allowed_external
+            or canonical_signal_key in external_signal_keys
+            or bool(inferred_binding.get("allowed_external", False))
+        )
+
+        return {
+            "signal_name": signal_name,
+            "canonical_signal_key": canonical_signal_key,
+            "binding_kind": binding_kind or "shared_signal",
+            "allowed_external": allowed_external,
+            "candidate_exporters": candidate_exporters,
+            "consumer_subsystem_ids": consumer_subsystem_ids,
+            "owner_subsystem_id": str(registry_entry.get("owner_subsystem_id", "")).strip(),
+        }
 
     def _compat_planning_issues(self, assembled_graph_ir: Dict[str, Any]) -> List[VerificationIssue]:
         issues: List[VerificationIssue] = []
@@ -363,6 +494,16 @@ class VerifierAgent:
                     rule_id=f"ir.unresolved.{unresolved_type}",
                     message=message,
                     suggested_fix=str(unresolved.get("suggested_fix", "") or "修复未解决项后重新执行 assembly/compile。"),
+                    repair_payload=(
+                        self._planning_repair_payload(
+                            unresolved,
+                            requirement_spec,
+                            architecture_plan,
+                            subsystem_plan_map,
+                        )
+                        if str(unresolved.get("scope", "") or "assembly") == "planning"
+                        else {}
+                    ),
                 ))
             else:
                 warnings.append(message)
@@ -480,6 +621,12 @@ class VerifierAgent:
                             target_id=obj_id or obj_type,
                             rule_id="compile.wire.port.range",
                             message=f"wire 引用了越界端口: {target_id}[{target_port}] / inputs={target_inputs}",
+                            repair_payload={
+                                "source_real_id": str(obj_id or obj_type),
+                                "target_real_id": str(target_id or ""),
+                                "invalid_target_port": target_port,
+                                "target_input_count": target_inputs,
+                            },
                         ))
 
         compile_report = compiled_artifact.get("compile_report", {}) or {}

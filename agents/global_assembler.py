@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Tuple
 import config
 from utils.graph_ir import AssembledGraphIR, EdgeIR, NodeInstanceIR, PageIR, SignalIR
 from utils.phase3_adapters import build_legacy_execution_plan, normalize_signal_name
+from utils.signal_semantics import canonicalize_signal_name
 from .assembly_agent import AssemblyAgent
 from .coding_utils import resolve_input_count, resolve_output_count
 
@@ -118,7 +119,7 @@ class GlobalAssembler(AssemblyAgent):
         return {
             normalized
             for value in candidates
-            if (normalized := normalize_signal_name(value))
+            if (normalized := canonicalize_signal_name(value))
         }
 
     @staticmethod
@@ -128,10 +129,34 @@ class GlobalAssembler(AssemblyAgent):
         for item in registry:
             if not isinstance(item, dict):
                 continue
-            signal_key = normalize_signal_name(item.get("signal_name") or item.get("signal_key"))
+            signal_key = normalize_signal_name(
+                item.get("canonical_signal_key")
+                or item.get("signal_key")
+                or item.get("signal_name")
+            )
             if signal_key:
                 policy_map[signal_key] = dict(item)
         return policy_map
+
+    @staticmethod
+    def _binding_lookup_keys(binding: Dict[str, Any]) -> List[str]:
+        keys: List[str] = []
+        for raw_value in (
+            binding.get("canonical_signal_key"),
+            binding.get("signal_key"),
+            binding.get("signal_name"),
+        ):
+            signal_key = normalize_signal_name(raw_value)
+            if signal_key and signal_key not in keys:
+                keys.append(signal_key)
+        return keys
+
+    @classmethod
+    def _first_policy_match(cls, policy_map: Dict[str, Dict[str, Any]], binding: Dict[str, Any]) -> Dict[str, Any]:
+        for signal_key in cls._binding_lookup_keys(binding):
+            if signal_key in policy_map:
+                return dict(policy_map[signal_key])
+        return {}
 
     def assemble(
         self,
@@ -267,17 +292,19 @@ class GlobalAssembler(AssemblyAgent):
         for subsystem_id in ordered_subsystems:
             subsystem_plan = subsystem_plan_map.get(subsystem_id, {}) or {}
             for binding in subsystem_plan.get("exported_signals", []) or []:
-                signal_key = normalize_signal_name(binding.get("signal_name", ""))
-                if not signal_key:
+                lookup_keys = self._binding_lookup_keys(binding)
+                if not lookup_keys:
                     continue
-                exports_by_signal.setdefault(signal_key, []).append(
-                    {
-                        "subsystem_id": subsystem_id,
-                        "instance_id": logic_to_instance.get((subsystem_id, str(binding.get("node_logic_id", "")).strip()), ""),
-                        "port_index": int(binding.get("port_index", 0) or 0),
-                        "signal_name": str(binding.get("signal_name", "")).strip() or signal_key,
-                    }
-                )
+                export_record = {
+                    "subsystem_id": subsystem_id,
+                    "instance_id": logic_to_instance.get((subsystem_id, str(binding.get("node_logic_id", "")).strip()), ""),
+                    "port_index": int(binding.get("port_index", 0) or 0),
+                    "signal_name": str(binding.get("signal_name", "")).strip() or lookup_keys[0],
+                    "signal_key": str(binding.get("signal_key", "")).strip(),
+                    "canonical_signal_key": str(binding.get("canonical_signal_key", "")).strip(),
+                }
+                for signal_key in lookup_keys:
+                    exports_by_signal.setdefault(signal_key, []).append(dict(export_record))
             for binding in subsystem_plan.get("imported_signals", []) or []:
                 imports.append(
                     {
@@ -285,6 +312,10 @@ class GlobalAssembler(AssemblyAgent):
                         "instance_id": logic_to_instance.get((subsystem_id, str(binding.get("node_logic_id", "")).strip()), ""),
                         "port_index": int(binding.get("port_index", 0) or 0),
                         "signal_name": str(binding.get("signal_name", "")).strip(),
+                        "signal_key": str(binding.get("signal_key", "")).strip(),
+                        "canonical_signal_key": str(binding.get("canonical_signal_key", "")).strip(),
+                        "binding_kind": str(binding.get("binding_kind", "")).strip(),
+                        "allowed_external": bool(binding.get("allowed_external", False)),
                         "page_id": str(binding.get("page_id", "")).strip() or subsystem_plan.get("page_id", self.DEFAULT_PAGE_ID),
                     }
                 )
@@ -301,75 +332,87 @@ class GlobalAssembler(AssemblyAgent):
             if target_port in occupied_inputs.setdefault(target_instance, set()):
                 continue
 
-            signal_key = normalize_signal_name(signal_name)
-            signal_policy = shared_signal_policy_map.get(signal_key, {})
+            lookup_keys = self._binding_lookup_keys(binding)
+            signal_key = lookup_keys[0] if lookup_keys else normalize_signal_name(signal_name)
+            binding_kind = str(binding.get("binding_kind", "")).strip() or "shared_signal"
+            signal_policy = self._first_policy_match(shared_signal_policy_map, binding)
             owner_subsystem_id = str(signal_policy.get("owner_subsystem_id", "")).strip()
-            allowed_external = bool(signal_policy.get("allowed_external", False)) or signal_key in external_signal_keys
+            allowed_external = bool(binding.get("allowed_external", False)) or bool(signal_policy.get("allowed_external", False)) or signal_key in external_signal_keys or binding_kind != "shared_signal"
             required_exporter_count = int(signal_policy.get("required_exporter_count", 0) or 0)
 
-            export_candidates = [
-                item for item in exports_by_signal.get(signal_key, [])
-                if item.get("instance_id") and item.get("subsystem_id") != binding.get("subsystem_id")
-            ]
-            if owner_subsystem_id:
-                owner_candidates = [
-                    item
-                    for item in export_candidates
-                    if str(item.get("subsystem_id", "")).strip() == owner_subsystem_id
-                ]
-                if len(owner_candidates) == 1:
-                    export_candidates = owner_candidates
-                elif export_candidates and not owner_candidates:
+            if binding_kind == "shared_signal":
+                export_candidates: List[Dict[str, Any]] = []
+                seen_candidates = set()
+                for lookup_key in lookup_keys:
+                    for item in exports_by_signal.get(lookup_key, []):
+                        candidate_id = (
+                            str(item.get("subsystem_id", "")).strip(),
+                            str(item.get("instance_id", "")).strip(),
+                            int(item.get("port_index", 0) or 0),
+                        )
+                        if not item.get("instance_id") or item.get("subsystem_id") == binding.get("subsystem_id") or candidate_id in seen_candidates:
+                            continue
+                        seen_candidates.add(candidate_id)
+                        export_candidates.append(item)
+                if owner_subsystem_id:
+                    owner_candidates = [
+                        item
+                        for item in export_candidates
+                        if str(item.get("subsystem_id", "")).strip() == owner_subsystem_id
+                    ]
+                    if len(owner_candidates) == 1:
+                        export_candidates = owner_candidates
+                    elif export_candidates and not owner_candidates:
+                        unresolved_items.append(
+                            {
+                                "type": "shared_signal_owner_mismatch",
+                                "severity": "error",
+                                "scope": "planning",
+                                "signal_name": signal_name,
+                                "message": f"Shared signal {signal_name} expects exporter {owner_subsystem_id}, but current subsystem plans export {', '.join(sorted(item['subsystem_id'] for item in export_candidates))}.",
+                                "suggested_fix": "让 ArchitecturePlanner/SubSystemPlanner 对齐共享信号 owner_subsystem_id 与 exported_signals。",
+                            }
+                        )
+                    elif len(owner_candidates) > 1:
+                        export_candidates = owner_candidates
+
+                if len(export_candidates) > 1 and required_exporter_count <= 1:
                     unresolved_items.append(
                         {
-                            "type": "shared_signal_owner_mismatch",
+                            "type": "ambiguous_shared_signal",
                             "severity": "error",
                             "scope": "planning",
                             "signal_name": signal_name,
-                            "message": f"Shared signal {signal_name} expects exporter {owner_subsystem_id}, but current subsystem plans export {', '.join(sorted(item['subsystem_id'] for item in export_candidates))}.",
-                            "suggested_fix": "让 ArchitecturePlanner/SubSystemPlanner 对齐共享信号 owner_subsystem_id 与 exported_signals。",
+                            "message": f"Multiple exporters found for shared signal {signal_name}.",
+                            "suggested_fix": "在 ArchitecturePlanner/SubsystemPlanner 中收敛共享信号归属，确保一个共享信号只有唯一导出方。",
                         }
                     )
-                elif len(owner_candidates) > 1:
-                    export_candidates = owner_candidates
-
-            if len(export_candidates) > 1 and required_exporter_count <= 1:
-                unresolved_items.append(
-                    {
-                        "type": "ambiguous_shared_signal",
-                        "severity": "error",
-                        "scope": "planning",
-                        "signal_name": signal_name,
-                        "message": f"Multiple exporters found for shared signal {signal_name}.",
-                        "suggested_fix": "在 ArchitecturePlanner/SubsystemPlanner 中收敛共享信号归属，确保一个共享信号只有唯一导出方。",
-                    }
-                )
-            if export_candidates:
-                export_candidate = export_candidates[0]
-                edge_counter += 1
-                signal_id = f"signal::shared::{signal_key or edge_counter}::{target_port}"
-                edges.append(
-                    EdgeIR(
-                        edge_id=f"edge::{edge_counter}",
-                        from_instance=export_candidate["instance_id"],
-                        from_port=int(export_candidate.get("port_index", 0) or 0),
-                        to_instance=target_instance,
-                        to_port=target_port,
-                        signal_id=signal_id,
+                if export_candidates:
+                    export_candidate = export_candidates[0]
+                    edge_counter += 1
+                    signal_id = f"signal::shared::{signal_key or edge_counter}::{target_port}"
+                    edges.append(
+                        EdgeIR(
+                            edge_id=f"edge::{edge_counter}",
+                            from_instance=export_candidate["instance_id"],
+                            from_port=int(export_candidate.get("port_index", 0) or 0),
+                            to_instance=target_instance,
+                            to_port=target_port,
+                            signal_id=signal_id,
+                        )
                     )
-                )
-                signals.append(
-                    self._make_signal(
-                        signal_id,
-                        export_candidate.get("signal_name", signal_name) or signal_name,
-                        export_candidate["instance_id"],
-                        int(export_candidate.get("port_index", 0) or 0),
-                        target_instance,
-                        target_port,
+                    signals.append(
+                        self._make_signal(
+                            signal_id,
+                            export_candidate.get("signal_name", signal_name) or signal_name,
+                            export_candidate["instance_id"],
+                            int(export_candidate.get("port_index", 0) or 0),
+                            target_instance,
+                            target_port,
+                        )
                     )
-                )
-                occupied_inputs[target_instance].add(target_port)
-                continue
+                    occupied_inputs[target_instance].add(target_port)
+                    continue
 
             if not placeholder_source_doc:
                 unresolved_items.append(
@@ -405,10 +448,14 @@ class GlobalAssembler(AssemblyAgent):
                     position=position,
                     input_count=input_count,
                     output_count=max(1, output_count),
-                    reasoning="Synthetic placeholder source injected by GlobalAssembler.",
+                    reasoning=(
+                        "Synthetic external placeholder injected by GlobalAssembler."
+                        if binding_kind != "shared_signal"
+                        else "Synthetic placeholder source injected by GlobalAssembler."
+                    ),
                 )
             )
-            if not allowed_external:
+            if binding_kind == "shared_signal" and not allowed_external:
                 unresolved_items.append(
                     {
                         "type": "synthetic_shared_signal_source",

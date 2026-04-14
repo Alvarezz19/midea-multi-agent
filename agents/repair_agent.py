@@ -6,12 +6,12 @@ from typing import Any, Dict, Iterable, List
 
 from utils.phase3_adapters import normalize_signal_name
 from utils.phase3_contracts import default_retry_budget, default_retry_counts_by_scope
+from utils.signal_semantics import canonicalize_signal_name
 
 
 SUPPORTED_RULE_IDS_BY_SCOPE = {
     "planning": {
         "ir.unresolved.synthetic_shared_signal_source",
-        "ir.unresolved.ambiguous_shared_signal",
         "ir.unresolved.shared_signal_owner_mismatch",
     },
     "assembly": {
@@ -85,7 +85,7 @@ def _collect_external_signal_keys(requirement_spec: Dict[str, Any]) -> set[str]:
     return {
         normalized
         for value in values
-        if (normalized := normalize_signal_name(value))
+        if (normalized := canonicalize_signal_name(value))
     }
 
 
@@ -101,17 +101,19 @@ def _iter_shared_signal_registries(state: Dict[str, Any]) -> Iterable[tuple[str,
 
 
 def _upsert_shared_signal_entry(registry: List[Dict[str, Any]], signal_name: str) -> Dict[str, Any]:
-    signal_key = normalize_signal_name(signal_name)
+    signal_key = canonicalize_signal_name(signal_name)
     for entry in registry:
-        if normalize_signal_name(entry.get("signal_name") or entry.get("signal_key")) == signal_key:
+        if canonicalize_signal_name(entry.get("canonical_signal_key") or entry.get("signal_key") or entry.get("signal_name")) == signal_key:
             if not entry.get("signal_name"):
                 entry["signal_name"] = signal_name
             if not entry.get("signal_key"):
                 entry["signal_key"] = signal_key
+            entry.setdefault("canonical_signal_key", signal_key)
             return entry
     entry = {
         "signal_name": signal_name,
         "signal_key": signal_key,
+        "canonical_signal_key": signal_key,
         "owner_subsystem_id": "",
         "allowed_external": False,
         "required_exporter_count": 1,
@@ -128,8 +130,20 @@ def _collect_descriptor_exporters(decomposition_result: Dict[str, Any], signal_k
         subsystem_id = str(descriptor.get("subsystem_id", "")).strip()
         if not subsystem_id:
             continue
+        for binding in descriptor.get("interface_bindings", []) or []:
+            if not isinstance(binding, dict):
+                continue
+            if str(binding.get("direction", "")).strip() != "output":
+                continue
+            binding_key = canonicalize_signal_name(
+                binding.get("canonical_signal_key")
+                or binding.get("signal_key")
+                or binding.get("signal_name")
+            )
+            if binding_key == signal_key and subsystem_id not in exporters:
+                exporters.append(subsystem_id)
         for signal_name in descriptor.get("exports", []) or []:
-            if normalize_signal_name(signal_name) == signal_key and subsystem_id not in exporters:
+            if canonicalize_signal_name(signal_name) == signal_key and subsystem_id not in exporters:
                 exporters.append(subsystem_id)
     return exporters
 
@@ -138,7 +152,12 @@ def _collect_plan_exporters(subsystem_plan_map: Dict[str, Dict[str, Any]], signa
     exporters: List[str] = []
     for subsystem_id, subsystem_plan in (subsystem_plan_map or {}).items():
         for binding in subsystem_plan.get("exported_signals", []) or []:
-            if normalize_signal_name(binding.get("signal_name")) == signal_key and subsystem_id not in exporters:
+            binding_key = canonicalize_signal_name(
+                binding.get("canonical_signal_key")
+                or binding.get("signal_key")
+                or binding.get("signal_name")
+            )
+            if binding_key == signal_key and subsystem_id not in exporters:
                 exporters.append(subsystem_id)
     return exporters
 
@@ -147,7 +166,7 @@ def _collect_current_owner_candidates(state: Dict[str, Any], signal_key: str) ->
     candidates: List[str] = []
     for _, registry in _iter_shared_signal_registries(state):
         for entry in registry:
-            if normalize_signal_name(entry.get("signal_name") or entry.get("signal_key")) != signal_key:
+            if canonicalize_signal_name(entry.get("canonical_signal_key") or entry.get("signal_key") or entry.get("signal_name")) != signal_key:
                 continue
             owner_subsystem_id = str(entry.get("owner_subsystem_id", "")).strip()
             if owner_subsystem_id and owner_subsystem_id not in candidates:
@@ -156,7 +175,7 @@ def _collect_current_owner_candidates(state: Dict[str, Any], signal_key: str) ->
 
 
 def _infer_unique_owner(state: Dict[str, Any], signal_name: str) -> str:
-    signal_key = normalize_signal_name(signal_name)
+    signal_key = canonicalize_signal_name(signal_name)
     if not signal_key:
         return ""
 
@@ -175,22 +194,63 @@ def _infer_unique_owner(state: Dict[str, Any], signal_name: str) -> str:
 
 def _upsert_shared_signal_constraint(architecture_plan: Dict[str, Any], signal_name: str, owner_subsystem_id: str) -> None:
     constraints = architecture_plan.get("global_constraints", []) or []
-    signal_key = normalize_signal_name(signal_name)
-    constraint_id = f"shared_signal_owner::{signal_key}"
+    signal_key = canonicalize_signal_name(signal_name)
+    constraint_ids = {f"shared_signal_owner::{signal_key}", f"shared_signal::{signal_key}"}
     for constraint in constraints:
-        if str(constraint.get("constraint_id", "")).strip() == constraint_id:
+        if str(constraint.get("constraint_id", "")).strip() in constraint_ids:
             constraint["value"] = owner_subsystem_id
             constraint["source"] = "repair_agent"
             architecture_plan["global_constraints"] = constraints
             return
     constraints.append(
         {
-            "constraint_id": constraint_id,
+            "constraint_id": f"shared_signal_owner::{signal_key}",
             "value": owner_subsystem_id,
             "source": "repair_agent",
         }
     )
     architecture_plan["global_constraints"] = constraints
+
+
+def _reclassify_signal_bindings_as_external(
+    decomposition_result: Dict[str, Any],
+    signal_name: str,
+    canonical_signal_key: str,
+    binding_kind: str,
+) -> List[str]:
+    patched_subsystems: List[str] = []
+    for descriptor in decomposition_result.get("subsystem_descriptors", []) or []:
+        if not isinstance(descriptor, dict):
+            continue
+        subsystem_id = str(descriptor.get("subsystem_id", "")).strip()
+        patched_here = False
+        bindings = descriptor.get("interface_bindings", [])
+        if isinstance(bindings, list):
+            for binding in bindings:
+                if not isinstance(binding, dict):
+                    continue
+                binding_key = canonicalize_signal_name(
+                    binding.get("canonical_signal_key")
+                    or binding.get("signal_key")
+                    or binding.get("signal_name")
+                )
+                if str(binding.get("direction", "")).strip() != "input" or binding_key != canonical_signal_key:
+                    continue
+                binding["binding_kind"] = binding_kind
+                binding["allowed_external"] = True
+                binding["owner_subsystem_id"] = ""
+                binding["canonical_signal_key"] = canonical_signal_key
+                binding.setdefault("evidence", []).append("Reclassified as external by RepairAgent.")
+                patched_here = True
+        if patched_here:
+            if subsystem_id and subsystem_id not in patched_subsystems:
+                patched_subsystems.append(subsystem_id)
+            continue
+        for signal_list_key in ("imports",):
+            for item in descriptor.get(signal_list_key, []) or []:
+                if canonicalize_signal_name(item) == canonical_signal_key and subsystem_id and subsystem_id not in patched_subsystems:
+                    patched_subsystems.append(subsystem_id)
+    return patched_subsystems
 
 
 def _build_instance_lookup(assembled_graph_ir: Dict[str, Any], id_map: Dict[str, str]) -> Dict[str, str]:
@@ -291,18 +351,48 @@ class RepairAgent:
     def _apply_planning_repair(self, state: Dict[str, Any], issues: List[Dict[str, Any]]) -> tuple[List[str], List[str]]:
         requirement_spec = state.get("requirement_spec", {}) or {}
         architecture_plan = state.get("architecture_plan", {}) or {}
+        decomposition_result = state.get("decomposition_result", {}) or {}
         external_signal_keys = _collect_external_signal_keys(requirement_spec)
 
         actions: List[str] = []
         target_ids: List[str] = []
 
         for issue in issues:
-            signal_name = str(issue.get("target_id", "")).strip()
-            signal_key = normalize_signal_name(signal_name)
+            repair_payload = issue.get("repair_payload", {}) if isinstance(issue.get("repair_payload"), dict) else {}
+            signal_name = str(repair_payload.get("signal_name") or issue.get("target_id", "")).strip()
+            signal_key = str(repair_payload.get("canonical_signal_key") or canonicalize_signal_name(signal_name)).strip()
             if not signal_key:
                 raise ValueError("Planning repair issue is missing a signal target.")
 
-            inferred_owner = _infer_unique_owner(state, signal_name)
+            suggested_binding_kind = str(repair_payload.get("binding_kind", "")).strip() or "external_input"
+            allowed_external = bool(repair_payload.get("allowed_external", False)) or signal_key in external_signal_keys
+            if allowed_external and suggested_binding_kind != "shared_signal":
+                for _, registry in _iter_shared_signal_registries(state):
+                    entry = _upsert_shared_signal_entry(registry, signal_name)
+                    entry["owner_subsystem_id"] = ""
+                    entry["allowed_external"] = True
+                    entry["required_exporter_count"] = 0
+                    entry["source_reason"] = "Marked as an allowed external signal by RepairAgent."
+                _upsert_shared_signal_constraint(architecture_plan, signal_name, "")
+                patched_subsystems = _reclassify_signal_bindings_as_external(
+                    decomposition_result,
+                    signal_name,
+                    signal_key,
+                    suggested_binding_kind,
+                )
+                action = f"将共享信号 {signal_name} 重分类为 {suggested_binding_kind}。"
+                if patched_subsystems:
+                    action += f" 影响子系统: {', '.join(sorted(patched_subsystems))}。"
+                actions.append(action)
+                target_ids.append(signal_name)
+                continue
+
+            candidate_exporters = [
+                str(item).strip()
+                for item in repair_payload.get("candidate_exporters", []) or []
+                if str(item).strip()
+            ]
+            inferred_owner = candidate_exporters[0] if len(candidate_exporters) == 1 else _infer_unique_owner(state, signal_name)
             if inferred_owner:
                 for _, registry in _iter_shared_signal_registries(state):
                     entry = _upsert_shared_signal_entry(registry, signal_name)
@@ -315,14 +405,24 @@ class RepairAgent:
                 target_ids.append(signal_name)
                 continue
 
-            if signal_key in external_signal_keys:
+            if allowed_external:
                 for _, registry in _iter_shared_signal_registries(state):
                     entry = _upsert_shared_signal_entry(registry, signal_name)
                     entry["owner_subsystem_id"] = ""
                     entry["allowed_external"] = True
                     entry["required_exporter_count"] = 0
                     entry["source_reason"] = "Marked as an allowed external signal by RepairAgent."
-                actions.append(f"将共享信号 {signal_name} 标记为允许 external。")
+                _upsert_shared_signal_constraint(architecture_plan, signal_name, "")
+                patched_subsystems = _reclassify_signal_bindings_as_external(
+                    decomposition_result,
+                    signal_name,
+                    signal_key,
+                    suggested_binding_kind,
+                )
+                action = f"将共享信号 {signal_name} 重分类为 {suggested_binding_kind}。"
+                if patched_subsystems:
+                    action += f" 影响子系统: {', '.join(sorted(patched_subsystems))}。"
+                actions.append(action)
                 target_ids.append(signal_name)
                 continue
 
@@ -384,20 +484,28 @@ class RepairAgent:
         target_ids: List[str] = []
 
         for issue in issues:
-            source_real_id = str(issue.get("target_id", "")).strip()
+            repair_payload = issue.get("repair_payload", {}) if isinstance(issue.get("repair_payload"), dict) else {}
+            source_real_id = str(repair_payload.get("source_real_id") or issue.get("target_id", "")).strip()
             source_instance = real_id_to_instance.get(source_real_id, "")
-            match = WIRE_PORT_RANGE_PATTERN.search(str(issue.get("message", "")))
-            if not match:
-                raise ValueError(f"Unable to parse compile wire issue message: {issue.get('message', '')}")
+            target_real_id = str(repair_payload.get("target_real_id", "")).strip()
+            invalid_target_port = repair_payload.get("invalid_target_port")
+            target_input_count = repair_payload.get("target_input_count")
+            if not target_real_id or invalid_target_port is None:
+                # TODO(phase4.2): remove regex fallback after legacy verifier messages are fully retired.
+                match = WIRE_PORT_RANGE_PATTERN.search(str(issue.get("message", "")))
+                if not match:
+                    raise ValueError(f"Unable to parse compile wire issue message: {issue.get('message', '')}")
+                target_real_id = match.group("target_id").strip()
+                invalid_target_port = int(match.group("target_port"))
+                target_input_count = int(match.group("inputs"))
 
-            target_real_id = match.group("target_id").strip()
-            invalid_target_port = int(match.group("target_port"))
+            invalid_target_port = int(invalid_target_port)
             target_instance = real_id_to_instance.get(target_real_id, "")
             if not source_instance or not target_instance:
                 raise ValueError("Unable to map compiled ids back to assembled Graph IR instances.")
 
             target_node = node_map.get(target_instance, {})
-            target_input_count = int(target_node.get("input_count", 0) or 0)
+            target_input_count = int(target_input_count or target_node.get("input_count", 0) or 0)
             if target_input_count <= 0:
                 raise ValueError(f"Target node {target_instance} has no valid input ports to repair.")
 

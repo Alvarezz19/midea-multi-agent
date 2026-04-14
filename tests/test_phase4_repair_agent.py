@@ -24,11 +24,35 @@ def _planning_state() -> dict:
         "subsystem_descriptors": [
             {
                 "subsystem_id": "supply_fan_ctrl",
+                "interface_bindings": [
+                    {
+                        "signal_name": "supply_fan_available_flag",
+                        "signal_key": "supply_fan_available_flag",
+                        "canonical_signal_key": "supply_fan_available",
+                        "direction": "output",
+                        "binding_kind": "shared_signal",
+                        "allowed_external": False,
+                        "owner_subsystem_id": "",
+                        "port_index": 0,
+                    }
+                ],
                 "imports": [],
                 "exports": ["supply_fan_available_flag"],
             },
             {
                 "subsystem_id": "heater_ctrl",
+                "interface_bindings": [
+                    {
+                        "signal_name": "supply_fan_available_flag",
+                        "signal_key": "supply_fan_available_flag",
+                        "canonical_signal_key": "supply_fan_available",
+                        "direction": "input",
+                        "binding_kind": "shared_signal",
+                        "allowed_external": False,
+                        "owner_subsystem_id": "",
+                        "port_index": 0,
+                    }
+                ],
                 "imports": ["supply_fan_available_flag"],
                 "exports": ["heater_enable"],
             },
@@ -36,7 +60,8 @@ def _planning_state() -> dict:
         "shared_signal_registry": [
             {
                 "signal_name": "supply_fan_available_flag",
-                "signal_key": "supply_fan_available_flag",
+                "signal_key": "supply_fan_available",
+                "canonical_signal_key": "supply_fan_available",
                 "owner_subsystem_id": "",
                 "allowed_external": False,
                 "required_exporter_count": 1,
@@ -55,7 +80,8 @@ def _planning_state() -> dict:
         "shared_signal_registry": [
             {
                 "signal_name": "supply_fan_available_flag",
-                "signal_key": "supply_fan_available_flag",
+                "signal_key": "supply_fan_available",
+                "canonical_signal_key": "supply_fan_available",
                 "owner_subsystem_id": "",
                 "allowed_external": False,
                 "required_exporter_count": 1,
@@ -85,6 +111,14 @@ def _planning_state() -> dict:
                 "target_id": "supply_fan_available_flag",
                 "rule_id": "ir.unresolved.synthetic_shared_signal_source",
                 "message": "Shared signal supply_fan_available_flag has no real exporter.",
+                "repair_payload": {
+                    "signal_name": "supply_fan_available_flag",
+                    "canonical_signal_key": "supply_fan_available",
+                    "binding_kind": "shared_signal",
+                    "allowed_external": False,
+                    "candidate_exporters": ["supply_fan_ctrl"],
+                    "consumer_subsystem_ids": ["heater_ctrl"],
+                },
             }
         ],
         "warnings": [],
@@ -96,6 +130,123 @@ def _planning_state() -> dict:
         "next_node": "repair_agent",
         "reason": "planning_retry_allowed",
         "issue_ids": ["IR-001"],
+        "retry_exhausted": False,
+        "retry_count_for_scope": 0,
+        "retry_budget_for_scope": 2,
+    }
+    state["final_output"] = {"verification_report": state["verification_report"]}
+    return state
+
+
+def _planning_external_state() -> dict:
+    state = workflow.build_initial_state("为 AHU 生成送风机标准控制")
+    state["requirement_spec"] = {
+        "signals": {"inputs": [], "outputs": [], "software_points": [], "alarm_points": []},
+        "global_modes": [],
+    }
+    state["decomposition_result"] = {
+        "pages": [],
+        "subsystem_descriptors": [
+            {
+                "subsystem_id": "supply_fan_ctrl",
+                "imports": ["送风机运行状态"],
+                "exports": ["送风机运行标志"],
+                "interface_bindings": [
+                    {
+                        "signal_name": "送风机运行状态",
+                        "signal_key": "送风机运行状态",
+                        "canonical_signal_key": "supply_fan_run_state",
+                        "direction": "input",
+                        "binding_kind": "shared_signal",
+                        "allowed_external": False,
+                        "owner_subsystem_id": "",
+                        "port_index": 0,
+                    },
+                    {
+                        "signal_name": "送风机运行标志",
+                        "signal_key": "送风机运行标志",
+                        "canonical_signal_key": "supply_fan_run_state",
+                        "direction": "output",
+                        "binding_kind": "subsystem_output",
+                        "allowed_external": False,
+                        "owner_subsystem_id": "",
+                        "port_index": 0,
+                    },
+                ],
+            }
+        ],
+        "shared_signal_registry": [
+            {
+                "signal_name": "送风机运行状态",
+                "signal_key": "supply_fan_run_state",
+                "canonical_signal_key": "supply_fan_run_state",
+                "owner_subsystem_id": "",
+                "allowed_external": False,
+                "required_exporter_count": 1,
+                "consumers": ["supply_fan_ctrl"],
+                "source_reason": "planner projected consumer without owner",
+            }
+        ],
+        "template_needs": [],
+        "planning_order": ["supply_fan_ctrl"],
+        "warnings": [],
+    }
+    state["architecture_plan"] = {
+        "goal": "fan standard",
+        "pages": [],
+        "subsystem_slots": [],
+        "shared_signal_registry": [
+            {
+                "signal_name": "送风机运行状态",
+                "signal_key": "supply_fan_run_state",
+                "canonical_signal_key": "supply_fan_run_state",
+                "owner_subsystem_id": "",
+                "allowed_external": False,
+                "required_exporter_count": 1,
+                "consumers": ["supply_fan_ctrl"],
+                "source_reason": "planner projected consumer without owner",
+            }
+        ],
+        "global_constraints": [],
+        "naming_strategy": {},
+        "layout_strategy": {},
+        "pattern_bindings": [],
+        "warnings": [],
+    }
+    state["subsystem_plan_map"] = {
+        "supply_fan_ctrl": {"imported_signals": [{"signal_name": "送风机运行状态", "binding_kind": "shared_signal"}]},
+    }
+    state["assembled_graph_ir"] = {"unresolved_items": [{"type": "synthetic_shared_signal_source"}]}
+    state["compiled_artifact"] = {"json_text": "[]"}
+    state["verification_report"] = {
+        "status": "retryable_error",
+        "repair_scope": "planning",
+        "issues": [
+            {
+                "issue_id": "IR-EXT-001",
+                "scope": "planning",
+                "target_id": "送风机运行状态",
+                "rule_id": "ir.unresolved.synthetic_shared_signal_source",
+                "message": "Shared signal 送风机运行状态 has no real exporter.",
+                "repair_payload": {
+                    "signal_name": "送风机运行状态",
+                    "canonical_signal_key": "supply_fan_run_state",
+                    "binding_kind": "external_input",
+                    "allowed_external": True,
+                    "candidate_exporters": [],
+                    "consumer_subsystem_ids": ["supply_fan_ctrl"],
+                },
+            }
+        ],
+        "warnings": [],
+        "metrics": {},
+    }
+    state["route_decision"] = {
+        "decision": "planning_repair",
+        "repair_scope": "planning",
+        "next_node": "repair_agent",
+        "reason": "planning_retry_allowed",
+        "issue_ids": ["IR-EXT-001"],
         "retry_exhausted": False,
         "retry_count_for_scope": 0,
         "retry_budget_for_scope": 2,
@@ -190,7 +341,13 @@ def _compile_state() -> dict:
                 "scope": "compile",
                 "target_id": "src1",
                 "rule_id": "compile.wire.port.range",
-                "message": "wire 引用了越界端口: dst1[2] / inputs=1",
+                "message": "legacy message should not be required",
+                "repair_payload": {
+                    "source_real_id": "src1",
+                    "target_real_id": "dst1",
+                    "invalid_target_port": 2,
+                    "target_input_count": 1,
+                },
             }
         ],
         "warnings": [],
@@ -258,6 +415,23 @@ class RepairAgentTests(unittest.TestCase):
         self.assertEqual(result["verification_report"], {})
         self.assertEqual(result["final_output"], {})
 
+    def test_planning_repair_reclassifies_signal_as_external(self):
+        state = _planning_external_state()
+
+        result = RepairAgent()(state)
+
+        signal_entry = result["architecture_plan"]["shared_signal_registry"][0]
+        self.assertTrue(signal_entry["allowed_external"])
+        self.assertEqual(signal_entry["required_exporter_count"], 0)
+        descriptor_binding = result["decomposition_result"]["subsystem_descriptors"][0]["interface_bindings"][0]
+        self.assertEqual(descriptor_binding["binding_kind"], "external_input")
+        self.assertTrue(descriptor_binding["allowed_external"])
+        self.assertEqual(result["repair_context"]["resume_node"], "subsystem_planning")
+        self.assertEqual(result["route_decision"]["next_node"], "subsystem_planning")
+        self.assertIn("external_input", result["repair_history"][0]["actions"][0])
+        self.assertEqual(result["retry_counts_by_scope"]["planning"], 1)
+        self.assertEqual(result["subsystem_plan_map"], {})
+
     def test_assembly_repair_removes_invalid_local_edges(self):
         state = _assembly_state()
 
@@ -272,7 +446,7 @@ class RepairAgentTests(unittest.TestCase):
         self.assertEqual(result["assembled_graph_ir"], {})
         self.assertEqual(result["compiled_artifact"], {})
 
-    def test_compile_repair_clamps_target_port_and_clears_compiled_outputs(self):
+    def test_compile_repair_prefers_structured_payload_and_clears_compiled_outputs(self):
         state = _compile_state()
 
         result = RepairAgent()(state)
@@ -284,6 +458,16 @@ class RepairAgentTests(unittest.TestCase):
         self.assertEqual(result["compiled_artifact"], {})
         self.assertEqual(result["verification_report"], {})
         self.assertEqual(result["final_output"], {})
+
+    def test_issue_id_filtering_can_trigger_no_repairable_issue(self):
+        state = _planning_state()
+        state["route_decision"]["issue_ids"] = ["IR-404"]
+
+        result = RepairAgent()(state)
+
+        self.assertEqual(result["route_decision"]["decision"], "reject")
+        self.assertEqual(result["route_decision"]["reason"], "no_repairable_issue")
+        self.assertEqual(result["repair_history"][0]["result"], "rejected")
 
     def test_unsupported_issue_is_rejected_without_resume(self):
         state = _unsupported_state()
