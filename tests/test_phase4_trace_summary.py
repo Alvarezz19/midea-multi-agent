@@ -57,6 +57,9 @@ class Phase4TraceSummaryTests(unittest.TestCase):
         self.assertEqual(summary["last_repair_issue_ids"], [])
         self.assertEqual(summary["last_repair_actions"], [])
         self.assertEqual(summary["reject_reason"], "")
+        self.assertEqual(summary["planning_unresolved_by_type"], {})
+        self.assertEqual(summary["ambiguous_signal_count"], 0)
+        self.assertEqual(summary["repair_reject_category"], "")
 
     def test_summary_distinguishes_repair_then_accept(self):
         state = workflow.build_initial_state("repair then pass")
@@ -105,6 +108,9 @@ class Phase4TraceSummaryTests(unittest.TestCase):
             ["将共享信号 supply_fan_available_flag 的 owner_subsystem_id 收敛为 supply_fan_ctrl。"],
         )
         self.assertEqual(summary["reject_reason"], "")
+        self.assertEqual(summary["planning_unresolved_by_type"], {})
+        self.assertEqual(summary["ambiguous_signal_count"], 0)
+        self.assertEqual(summary["repair_reject_category"], "")
 
     def test_summary_distinguishes_budget_exhausted_reject(self):
         state = workflow.build_initial_state("budget exhausted")
@@ -147,6 +153,9 @@ class Phase4TraceSummaryTests(unittest.TestCase):
         self.assertEqual(summary["last_repair_issue_ids"], ["CP-001"])
         self.assertEqual(summary["last_repair_actions"], [])
         self.assertEqual(summary["reject_reason"], "retry_budget_exhausted")
+        self.assertEqual(summary["planning_unresolved_by_type"], {})
+        self.assertEqual(summary["ambiguous_signal_count"], 0)
+        self.assertEqual(summary["repair_reject_category"], "budget_exhausted")
 
     def test_summary_distinguishes_unsupported_issue_reject(self):
         state = workflow.build_initial_state("unsupported issue")
@@ -203,6 +212,85 @@ class Phase4TraceSummaryTests(unittest.TestCase):
             ["当前 repair scope 不支持自动修复规则: template_input_interface_mismatch"],
         )
         self.assertEqual(summary["reject_reason"], "unsupported_repair_issue")
+        self.assertEqual(summary["planning_unresolved_by_type"], {})
+        self.assertEqual(summary["ambiguous_signal_count"], 0)
+        self.assertEqual(summary["repair_reject_category"], "unsupported_repair_issue")
+
+    def test_summary_counts_planning_unresolved_and_ambiguous_rejects(self):
+        state = workflow.build_initial_state("ambiguous reject")
+        state["architecture_plan"] = {
+            "shared_signal_registry": [
+                {
+                    "signal_name": "supply_fan_available_flag",
+                    "signal_key": "supply_fan_available",
+                    "canonical_signal_key": "supply_fan_available",
+                    "resolution_status": "ambiguous",
+                    "candidate_exporters": ["supply_fan_ctrl", "backup_ctrl"],
+                }
+            ]
+        }
+        state["assembled_graph_ir"] = {
+            "unresolved_items": [
+                {
+                    "type": "ambiguous_shared_signal",
+                    "severity": "error",
+                    "scope": "planning",
+                    "signal_name": "supply_fan_available_flag",
+                    "canonical_signal_key": "supply_fan_available",
+                },
+                {
+                    "type": "synthetic_shared_signal_source",
+                    "severity": "error",
+                    "scope": "planning",
+                    "signal_name": "heater_enable",
+                    "canonical_signal_key": "heater_enable",
+                },
+            ]
+        }
+        state["verification_report"] = {
+            "status": "retryable_error",
+            "repair_scope": "planning",
+            "issue_summary": "共享信号歧义未收敛。",
+            "issues": [
+                {
+                    "issue_id": "IR-AMB-001",
+                    "scope": "planning",
+                    "target_id": "supply_fan_available_flag",
+                    "rule_id": "ir.unresolved.ambiguous_shared_signal",
+                    "message": "ambiguous shared signal",
+                    "repair_payload": {
+                        "canonical_signal_key": "supply_fan_available",
+                        "resolution_status": "ambiguous",
+                    },
+                }
+            ],
+            "warnings": [],
+            "metrics": {},
+        }
+        state["route_decision"] = {
+            "decision": "reject",
+            "repair_scope": "planning",
+            "next_node": "END",
+            "reason": "ambiguous_shared_signal_unresolved",
+            "issue_ids": ["IR-AMB-001"],
+            "retry_exhausted": False,
+            "retry_count_for_scope": 1,
+            "retry_budget_for_scope": 2,
+        }
+        state["retry_counts_by_scope"] = {"planning": 1, "assembly": 0, "compile": 0}
+        state["retry_count"] = 1
+
+        summary = _summary_for(state)
+
+        self.assertEqual(
+            summary["planning_unresolved_by_type"],
+            {
+                "ambiguous_shared_signal": 1,
+                "synthetic_shared_signal_source": 1,
+            },
+        )
+        self.assertEqual(summary["ambiguous_signal_count"], 1)
+        self.assertEqual(summary["repair_reject_category"], "ambiguous_shared_signal")
 
 
 if __name__ == "__main__":

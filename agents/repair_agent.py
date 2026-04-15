@@ -1,16 +1,15 @@
 """Deterministic repair agent for the Phase 4 repair loop."""
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, Iterable, List
 
-from utils.phase3_adapters import normalize_signal_name
 from utils.phase3_contracts import default_retry_budget, default_retry_counts_by_scope
 from utils.signal_semantics import canonicalize_signal_name
 
 
 SUPPORTED_RULE_IDS_BY_SCOPE = {
     "planning": {
+        "ir.unresolved.ambiguous_shared_signal",
         "ir.unresolved.synthetic_shared_signal_source",
         "ir.unresolved.shared_signal_owner_mismatch",
     },
@@ -46,7 +45,12 @@ REPAIR_STRATEGY_BY_SCOPE = {
     "assembly": "remove_invalid_local_edges",
     "compile": "repair_compile_wires",
 }
-WIRE_PORT_RANGE_PATTERN = re.compile(r"wire 引用了越界端口: (?P<target_id>[^\[]+)\[(?P<target_port>\d+)\] / inputs=(?P<inputs>\d+)")
+
+
+class RepairIssueReject(ValueError):
+    def __init__(self, reason: str, message: str):
+        super().__init__(message)
+        self.reason = reason
 
 
 def _coerce_non_negative_int(value: Any, default: int = 0) -> int:
@@ -89,6 +93,17 @@ def _collect_external_signal_keys(requirement_spec: Dict[str, Any]) -> set[str]:
     }
 
 
+def _normalize_string_list(values: Any) -> List[str]:
+    if not isinstance(values, list):
+        return []
+    normalized: List[str] = []
+    for value in values:
+        item = str(value or "").strip()
+        if item and item not in normalized:
+            normalized.append(item)
+    return normalized
+
+
 def _iter_shared_signal_registries(state: Dict[str, Any]) -> Iterable[tuple[str, List[Dict[str, Any]]]]:
     architecture_plan = state.get("architecture_plan", {}) or {}
     decomposition_result = state.get("decomposition_result", {}) or {}
@@ -117,11 +132,26 @@ def _upsert_shared_signal_entry(registry: List[Dict[str, Any]], signal_name: str
         "owner_subsystem_id": "",
         "allowed_external": False,
         "required_exporter_count": 1,
+        "candidate_exporters": [],
+        "resolution_status": "unresolved",
+        "resolution_evidence": [],
         "consumers": [],
         "source_reason": "Inserted by RepairAgent.",
     }
     registry.append(entry)
     return entry
+
+
+def _append_resolution_evidence(entry: Dict[str, Any], evidence: str) -> None:
+    evidence = str(evidence or "").strip()
+    if not evidence:
+        return
+    evidence_list = entry.get("resolution_evidence")
+    if not isinstance(evidence_list, list):
+        evidence_list = []
+    if evidence not in evidence_list:
+        evidence_list.append(evidence)
+    entry["resolution_evidence"] = evidence_list
 
 
 def _collect_descriptor_exporters(decomposition_result: Dict[str, Any], signal_key: str) -> List[str]:
@@ -174,22 +204,42 @@ def _collect_current_owner_candidates(state: Dict[str, Any], signal_key: str) ->
     return candidates
 
 
-def _infer_unique_owner(state: Dict[str, Any], signal_name: str) -> str:
-    signal_key = canonicalize_signal_name(signal_name)
-    if not signal_key:
-        return ""
-
+def _collect_candidate_exporters_from_state(state: Dict[str, Any], signal_key: str) -> List[str]:
     descriptor_exporters = _collect_descriptor_exporters(state.get("decomposition_result", {}) or {}, signal_key)
     plan_exporters = _collect_plan_exporters(state.get("subsystem_plan_map", {}) or {}, signal_key)
     current_owners = _collect_current_owner_candidates(state, signal_key)
 
-    merged_candidates = []
+    merged_candidates: List[str] = []
     for candidate_list in (plan_exporters, descriptor_exporters, current_owners):
         for candidate in candidate_list:
             if candidate and candidate not in merged_candidates:
                 merged_candidates.append(candidate)
+    return merged_candidates
 
-    return merged_candidates[0] if len(merged_candidates) == 1 else ""
+
+def _resolve_unique_candidate_exporter(
+    state: Dict[str, Any],
+    signal_key: str,
+    candidate_exporters: List[str] | None = None,
+    *,
+    strict_candidates: bool = False,
+) -> tuple[str, List[str], List[str]]:
+    preferred_candidates = _normalize_string_list(candidate_exporters)
+    actual_candidates = _collect_candidate_exporters_from_state(state, signal_key)
+
+    filtered_candidates = list(preferred_candidates)
+    if preferred_candidates and actual_candidates:
+        overlapping_candidates = [candidate for candidate in preferred_candidates if candidate in actual_candidates]
+        if overlapping_candidates:
+            filtered_candidates = overlapping_candidates
+    elif not preferred_candidates:
+        filtered_candidates = list(actual_candidates)
+
+    if len(filtered_candidates) == 1:
+        return filtered_candidates[0], filtered_candidates, actual_candidates
+    if not strict_candidates and len(actual_candidates) == 1:
+        return actual_candidates[0], actual_candidates, actual_candidates
+    return "", filtered_candidates, actual_candidates
 
 
 def _upsert_shared_signal_constraint(architecture_plan: Dict[str, Any], signal_name: str, owner_subsystem_id: str) -> None:
@@ -348,6 +398,61 @@ class RepairAgent:
             else:
                 state[key] = {}
 
+    def _mark_shared_signal_as_external(
+        self,
+        state: Dict[str, Any],
+        architecture_plan: Dict[str, Any],
+        decomposition_result: Dict[str, Any],
+        *,
+        signal_name: str,
+        signal_key: str,
+        binding_kind: str,
+    ) -> str:
+        for _, registry in _iter_shared_signal_registries(state):
+            entry = _upsert_shared_signal_entry(registry, signal_name)
+            entry["owner_subsystem_id"] = ""
+            entry["allowed_external"] = True
+            entry["required_exporter_count"] = 0
+            entry["candidate_exporters"] = []
+            entry["resolution_status"] = "resolved_external_input"
+            entry["source_reason"] = "Marked as an allowed external signal by RepairAgent."
+            _append_resolution_evidence(entry, "RepairAgent reclassified the signal as an allowed external input.")
+        _upsert_shared_signal_constraint(architecture_plan, signal_name, "")
+        patched_subsystems = _reclassify_signal_bindings_as_external(
+            decomposition_result,
+            signal_name,
+            signal_key,
+            binding_kind,
+        )
+        action = f"将共享信号 {signal_name} 重分类为 {binding_kind}。"
+        if patched_subsystems:
+            action += f" 影响子系统: {', '.join(sorted(patched_subsystems))}。"
+        return action
+
+    def _bind_shared_signal_owner(
+        self,
+        state: Dict[str, Any],
+        architecture_plan: Dict[str, Any],
+        *,
+        signal_name: str,
+        owner_subsystem_id: str,
+        candidate_exporters: List[str],
+        resolution_status: str,
+        resolution_evidence: str,
+    ) -> str:
+        normalized_candidates = _normalize_string_list(candidate_exporters) or [owner_subsystem_id]
+        for _, registry in _iter_shared_signal_registries(state):
+            entry = _upsert_shared_signal_entry(registry, signal_name)
+            entry["owner_subsystem_id"] = owner_subsystem_id
+            entry["allowed_external"] = False
+            entry["required_exporter_count"] = 1
+            entry["candidate_exporters"] = normalized_candidates
+            entry["resolution_status"] = resolution_status
+            entry["source_reason"] = "Rebound to a unique exporter by RepairAgent."
+            _append_resolution_evidence(entry, resolution_evidence)
+        _upsert_shared_signal_constraint(architecture_plan, signal_name, owner_subsystem_id)
+        return f"将共享信号 {signal_name} 的 owner_subsystem_id 收敛为 {owner_subsystem_id}。"
+
     def _apply_planning_repair(self, state: Dict[str, Any], issues: List[Dict[str, Any]]) -> tuple[List[str], List[str]]:
         requirement_spec = state.get("requirement_spec", {}) or {}
         architecture_plan = state.get("architecture_plan", {}) or {}
@@ -358,6 +463,7 @@ class RepairAgent:
         target_ids: List[str] = []
 
         for issue in issues:
+            rule_id = str(issue.get("rule_id", "")).strip()
             repair_payload = issue.get("repair_payload", {}) if isinstance(issue.get("repair_payload"), dict) else {}
             signal_name = str(repair_payload.get("signal_name") or issue.get("target_id", "")).strip()
             signal_key = str(repair_payload.get("canonical_signal_key") or canonicalize_signal_name(signal_name)).strip()
@@ -366,63 +472,88 @@ class RepairAgent:
 
             suggested_binding_kind = str(repair_payload.get("binding_kind", "")).strip() or "external_input"
             allowed_external = bool(repair_payload.get("allowed_external", False)) or signal_key in external_signal_keys
-            if allowed_external and suggested_binding_kind != "shared_signal":
-                for _, registry in _iter_shared_signal_registries(state):
-                    entry = _upsert_shared_signal_entry(registry, signal_name)
-                    entry["owner_subsystem_id"] = ""
-                    entry["allowed_external"] = True
-                    entry["required_exporter_count"] = 0
-                    entry["source_reason"] = "Marked as an allowed external signal by RepairAgent."
-                _upsert_shared_signal_constraint(architecture_plan, signal_name, "")
-                patched_subsystems = _reclassify_signal_bindings_as_external(
-                    decomposition_result,
-                    signal_name,
+            candidate_exporters = _normalize_string_list(repair_payload.get("candidate_exporters"))
+            resolution_status = str(repair_payload.get("resolution_status", "")).strip()
+            is_ambiguous_issue = (
+                rule_id == "ir.unresolved.ambiguous_shared_signal"
+                or resolution_status == "ambiguous"
+            )
+            if is_ambiguous_issue:
+                inferred_owner, filtered_candidates, actual_candidates = _resolve_unique_candidate_exporter(
+                    state,
                     signal_key,
-                    suggested_binding_kind,
+                    candidate_exporters,
+                    strict_candidates=True,
                 )
-                action = f"将共享信号 {signal_name} 重分类为 {suggested_binding_kind}。"
-                if patched_subsystems:
-                    action += f" 影响子系统: {', '.join(sorted(patched_subsystems))}。"
-                actions.append(action)
+                if inferred_owner:
+                    actions.append(
+                        self._bind_shared_signal_owner(
+                            state,
+                            architecture_plan,
+                            signal_name=signal_name,
+                            owner_subsystem_id=inferred_owner,
+                            candidate_exporters=filtered_candidates,
+                            resolution_status="resolved_unique_exporter",
+                            resolution_evidence="RepairAgent narrowed ambiguous candidate exporters to a single owner.",
+                        )
+                    )
+                    target_ids.append(signal_name)
+                    continue
+
+                raw_candidates = candidate_exporters or actual_candidates
+                filtered_text = ", ".join(filtered_candidates) if filtered_candidates else "none"
+                raw_text = ", ".join(raw_candidates) if raw_candidates else "none"
+                raise RepairIssueReject(
+                    "ambiguous_shared_signal_unresolved",
+                    f"共享信号 {signal_name} 无法收敛唯一 exporter。原始候选: {raw_text}; 过滤后: {filtered_text}。",
+                )
+
+            if allowed_external and suggested_binding_kind != "shared_signal":
+                actions.append(
+                    self._mark_shared_signal_as_external(
+                        state,
+                        architecture_plan,
+                        decomposition_result,
+                        signal_name=signal_name,
+                        signal_key=signal_key,
+                        binding_kind=suggested_binding_kind,
+                    )
+                )
                 target_ids.append(signal_name)
                 continue
 
-            candidate_exporters = [
-                str(item).strip()
-                for item in repair_payload.get("candidate_exporters", []) or []
-                if str(item).strip()
-            ]
-            inferred_owner = candidate_exporters[0] if len(candidate_exporters) == 1 else _infer_unique_owner(state, signal_name)
+            inferred_owner, filtered_candidates, actual_candidates = _resolve_unique_candidate_exporter(
+                state,
+                signal_key,
+                candidate_exporters,
+                strict_candidates=False,
+            )
             if inferred_owner:
-                for _, registry in _iter_shared_signal_registries(state):
-                    entry = _upsert_shared_signal_entry(registry, signal_name)
-                    entry["owner_subsystem_id"] = inferred_owner
-                    entry["allowed_external"] = False
-                    entry["required_exporter_count"] = 1
-                    entry["source_reason"] = "Rebound to a unique exporter by RepairAgent."
-                _upsert_shared_signal_constraint(architecture_plan, signal_name, inferred_owner)
-                actions.append(f"将共享信号 {signal_name} 的 owner_subsystem_id 收敛为 {inferred_owner}。")
+                actions.append(
+                    self._bind_shared_signal_owner(
+                        state,
+                        architecture_plan,
+                        signal_name=signal_name,
+                        owner_subsystem_id=inferred_owner,
+                        candidate_exporters=filtered_candidates or actual_candidates,
+                        resolution_status="resolved_unique_exporter",
+                        resolution_evidence="RepairAgent rebound the signal to a unique exporter.",
+                    )
+                )
                 target_ids.append(signal_name)
                 continue
 
             if allowed_external:
-                for _, registry in _iter_shared_signal_registries(state):
-                    entry = _upsert_shared_signal_entry(registry, signal_name)
-                    entry["owner_subsystem_id"] = ""
-                    entry["allowed_external"] = True
-                    entry["required_exporter_count"] = 0
-                    entry["source_reason"] = "Marked as an allowed external signal by RepairAgent."
-                _upsert_shared_signal_constraint(architecture_plan, signal_name, "")
-                patched_subsystems = _reclassify_signal_bindings_as_external(
-                    decomposition_result,
-                    signal_name,
-                    signal_key,
-                    suggested_binding_kind,
+                actions.append(
+                    self._mark_shared_signal_as_external(
+                        state,
+                        architecture_plan,
+                        decomposition_result,
+                        signal_name=signal_name,
+                        signal_key=signal_key,
+                        binding_kind=suggested_binding_kind,
+                    )
                 )
-                action = f"将共享信号 {signal_name} 重分类为 {suggested_binding_kind}。"
-                if patched_subsystems:
-                    action += f" 影响子系统: {', '.join(sorted(patched_subsystems))}。"
-                actions.append(action)
                 target_ids.append(signal_name)
                 continue
 
@@ -436,24 +567,48 @@ class RepairAgent:
         target_ids: List[str] = []
 
         for issue in issues:
-            subsystem_id = str(issue.get("target_id", "")).strip()
+            repair_payload = issue.get("repair_payload", {}) if isinstance(issue.get("repair_payload"), dict) else {}
+            subsystem_id = str(repair_payload.get("subsystem_id") or issue.get("target_id", "")).strip()
             subsystem_plan = subsystem_plan_map.get(subsystem_id, {}) or {}
-            node_ids = {
-                str(node.get("logic_id", "")).strip()
-                for node in subsystem_plan.get("node_instances", []) or []
-                if str(node.get("logic_id", "")).strip()
-            }
             old_edges = list(subsystem_plan.get("edges", []) or [])
-            valid_edges = [
-                edge
-                for edge in old_edges
-                if str(edge.get("from_node", "")).strip() in node_ids and str(edge.get("to_node", "")).strip() in node_ids
-            ]
-            removed_count = len(old_edges) - len(valid_edges)
+            edge_ids = set(_normalize_string_list(repair_payload.get("edge_ids")))
+            from_node = str(repair_payload.get("from_node", "")).strip()
+            to_node = str(repair_payload.get("to_node", "")).strip()
+            reason = str(repair_payload.get("reason") or issue.get("message") or "").strip()
+
+            matching_edges: List[Dict[str, Any]] = []
+            if edge_ids:
+                matching_edges.extend(
+                    edge
+                    for edge in old_edges
+                    if str(edge.get("edge_id", "")).strip() in edge_ids and edge not in matching_edges
+                )
+            if (from_node or to_node) and not matching_edges:
+                matching_edges.extend(
+                    edge
+                    for edge in old_edges
+                    if (not from_node or str(edge.get("from_node", "")).strip() == from_node)
+                    and (not to_node or str(edge.get("to_node", "")).strip() == to_node)
+                    and edge not in matching_edges
+                )
+            if not matching_edges:
+                node_ids = {
+                    str(node.get("logic_id", "")).strip()
+                    for node in subsystem_plan.get("node_instances", []) or []
+                    if str(node.get("logic_id", "")).strip()
+                }
+                matching_edges.extend(
+                    edge
+                    for edge in old_edges
+                    if str(edge.get("from_node", "")).strip() not in node_ids
+                    or str(edge.get("to_node", "")).strip() not in node_ids
+                )
+
+            removed_count = len(matching_edges)
             if removed_count <= 0:
                 raise ValueError(f"No removable invalid local edges found for subsystem {subsystem_id}.")
 
-            subsystem_plan["edges"] = valid_edges
+            subsystem_plan["edges"] = [edge for edge in old_edges if edge not in matching_edges]
             subsystem_plan.setdefault("unresolved_items", []).append(
                 {
                     "type": "degraded_removed_invalid_local_edge",
@@ -461,11 +616,27 @@ class RepairAgent:
                     "scope": "assembly",
                     "subsystem_id": subsystem_id,
                     "message": f"RepairAgent removed {removed_count} invalid local edges from subsystem {subsystem_id}.",
+                    "reason": reason or "missing_local_edge_endpoint",
+                    "edge_ids": sorted(
+                        {
+                            str(edge.get("edge_id", "")).strip()
+                            for edge in matching_edges
+                            if str(edge.get("edge_id", "")).strip()
+                        }
+                    ),
                     "suggested_fix": "补齐真实局部语义后再恢复被删除的边。",
                 }
             )
-            actions.append(f"删除子系统 {subsystem_id} 中 {removed_count} 条非法局部边，并记录降级告警。")
-            target_ids.append(subsystem_id)
+            actions.append(
+                f"按结构化 payload 删除子系统 {subsystem_id} 中 {removed_count} 条非法局部边，并记录降级告警。"
+            )
+            target_ids.extend(
+                edge_id
+                for edge_id in sorted(edge_ids)
+                if edge_id
+            )
+            if not edge_ids:
+                target_ids.append(subsystem_id)
 
         return actions, target_ids
 
@@ -485,19 +656,13 @@ class RepairAgent:
 
         for issue in issues:
             repair_payload = issue.get("repair_payload", {}) if isinstance(issue.get("repair_payload"), dict) else {}
-            source_real_id = str(repair_payload.get("source_real_id") or issue.get("target_id", "")).strip()
+            source_real_id = str(repair_payload.get("source_real_id", "")).strip()
             source_instance = real_id_to_instance.get(source_real_id, "")
             target_real_id = str(repair_payload.get("target_real_id", "")).strip()
             invalid_target_port = repair_payload.get("invalid_target_port")
             target_input_count = repair_payload.get("target_input_count")
-            if not target_real_id or invalid_target_port is None:
-                # TODO(phase4.2): remove regex fallback after legacy verifier messages are fully retired.
-                match = WIRE_PORT_RANGE_PATTERN.search(str(issue.get("message", "")))
-                if not match:
-                    raise ValueError(f"Unable to parse compile wire issue message: {issue.get('message', '')}")
-                target_real_id = match.group("target_id").strip()
-                invalid_target_port = int(match.group("target_port"))
-                target_input_count = int(match.group("inputs"))
+            if not source_real_id or not target_real_id or invalid_target_port is None:
+                raise ValueError("Compile repair requires structured source/target/port fields in repair_payload.")
 
             invalid_target_port = int(invalid_target_port)
             target_instance = real_id_to_instance.get(target_real_id, "")
@@ -595,6 +760,17 @@ class RepairAgent:
                 actions, target_ids = self._apply_compile_repair(state, repairable_issues)
             else:
                 raise ValueError(f"Unsupported repair scope: {repair_scope}")
+        except RepairIssueReject as exc:
+            return self._reject(
+                state,
+                repair_scope=repair_scope,
+                issue_ids=issue_ids,
+                repair_round=repair_round,
+                retry_budget=retry_budget,
+                retry_counts_by_scope=retry_counts_by_scope,
+                reason=exc.reason,
+                actions=[str(exc)],
+            )
         except ValueError as exc:
             return self._reject(
                 state,

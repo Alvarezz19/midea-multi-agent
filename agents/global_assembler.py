@@ -158,6 +158,55 @@ class GlobalAssembler(AssemblyAgent):
                 return dict(policy_map[signal_key])
         return {}
 
+    @staticmethod
+    def _policy_candidate_exporters(signal_policy: Dict[str, Any]) -> List[str]:
+        values = signal_policy.get("candidate_exporters", []) or signal_policy.get("exporter_candidates", []) or []
+        return sorted({str(item).strip() for item in values if str(item).strip()})
+
+    @staticmethod
+    def _consumer_subsystem_ids(signal_policy: Dict[str, Any], binding: Dict[str, Any]) -> List[str]:
+        consumers = {
+            str(item).strip()
+            for item in signal_policy.get("consumer_subsystem_ids", []) or signal_policy.get("consumers", []) or []
+            if str(item).strip()
+        }
+        binding_subsystem_id = str(binding.get("subsystem_id", "")).strip()
+        if binding_subsystem_id:
+            consumers.add(binding_subsystem_id)
+        return sorted(consumers)
+
+    @staticmethod
+    def _planning_unresolved_item(
+        *,
+        issue_type: str,
+        signal_name: str,
+        binding: Dict[str, Any],
+        signal_policy: Dict[str, Any],
+        candidate_exporters: List[str],
+        consumer_subsystem_ids: List[str],
+        message: str,
+        suggested_fix: str,
+        resolution_hint: str,
+    ) -> Dict[str, Any]:
+        return {
+            "type": issue_type,
+            "severity": "error",
+            "scope": "planning",
+            "signal_name": signal_name,
+            "signal_key": str(binding.get("signal_key", "")).strip(),
+            "canonical_signal_key": str(binding.get("canonical_signal_key", "")).strip(),
+            "binding_kind": str(binding.get("binding_kind", "")).strip(),
+            "allowed_external": bool(binding.get("allowed_external", False)),
+            "owner_subsystem_id": str(signal_policy.get("owner_subsystem_id", "")).strip(),
+            "candidate_exporters": list(candidate_exporters),
+            "consumer_subsystem_ids": list(consumer_subsystem_ids),
+            "resolution_status": str(signal_policy.get("resolution_status", "")).strip(),
+            "resolution_hint": resolution_hint,
+            "resolution_evidence": list(signal_policy.get("resolution_evidence", []) or []),
+            "message": message,
+            "suggested_fix": suggested_fix,
+        }
+
     def assemble(
         self,
         architecture_plan: Dict[str, Any],
@@ -253,15 +302,32 @@ class GlobalAssembler(AssemblyAgent):
             for local_edge in subsystem_plan.get("edges", []) or []:
                 from_logic = str(local_edge.get("from_node", "")).strip()
                 to_logic = str(local_edge.get("to_node", "")).strip()
+                local_edge_id = str(local_edge.get("edge_id", "")).strip()
                 from_instance = logic_to_instance.get((subsystem_id, from_logic))
                 to_instance = logic_to_instance.get((subsystem_id, to_logic))
                 if not from_instance or not to_instance:
+                    edge_ids = [local_edge_id] if local_edge_id else []
                     unresolved_items.append(
                         {
                             "type": "missing_local_edge_endpoint",
                             "severity": "error",
                             "scope": "assembly",
                             "subsystem_id": subsystem_id,
+                            "edge_locator": {
+                                "subsystem_id": subsystem_id,
+                                "edge_id": local_edge_id,
+                                "edge_ids": list(edge_ids),
+                                "from_node": from_logic,
+                                "to_node": to_logic,
+                            },
+                            "edge_ids": edge_ids,
+                            "from_node": from_logic,
+                            "to_node": to_logic,
+                            "reason": "missing_local_edge_endpoint",
+                            "candidate_exporters": [],
+                            "consumer_subsystem_ids": [],
+                            "resolution_status": "",
+                            "resolution_hint": "修正局部边端点后重新 assembly。",
                             "message": f"Local edge references missing nodes: {from_logic} -> {to_logic}.",
                             "suggested_fix": "修正 subsystem_plan_map 中的局部边定义，确保 from_node/to_node 都能映射到真实节点。",
                         }
@@ -316,6 +382,10 @@ class GlobalAssembler(AssemblyAgent):
                         "canonical_signal_key": str(binding.get("canonical_signal_key", "")).strip(),
                         "binding_kind": str(binding.get("binding_kind", "")).strip(),
                         "allowed_external": bool(binding.get("allowed_external", False)),
+                        "owner_subsystem_id": str(binding.get("owner_subsystem_id", "")).strip(),
+                        "resolution_status": str(binding.get("resolution_status", "")).strip(),
+                        "candidate_exporters": list(binding.get("candidate_exporters", []) or []),
+                        "resolution_evidence": list(binding.get("resolution_evidence", []) or []),
                         "page_id": str(binding.get("page_id", "")).strip() or subsystem_plan.get("page_id", self.DEFAULT_PAGE_ID),
                     }
                 )
@@ -336,7 +406,12 @@ class GlobalAssembler(AssemblyAgent):
             signal_key = lookup_keys[0] if lookup_keys else normalize_signal_name(signal_name)
             binding_kind = str(binding.get("binding_kind", "")).strip() or "shared_signal"
             signal_policy = self._first_policy_match(shared_signal_policy_map, binding)
+            policy_candidate_exporters = self._policy_candidate_exporters(signal_policy)
+            actual_candidate_exporters: List[str] = []
+            structured_candidate_exporters = list(policy_candidate_exporters)
             owner_subsystem_id = str(signal_policy.get("owner_subsystem_id", "")).strip()
+            resolution_status = str(signal_policy.get("resolution_status", "")).strip()
+            consumer_subsystem_ids = self._consumer_subsystem_ids(signal_policy, binding)
             allowed_external = bool(binding.get("allowed_external", False)) or bool(signal_policy.get("allowed_external", False)) or signal_key in external_signal_keys or binding_kind != "shared_signal"
             required_exporter_count = int(signal_policy.get("required_exporter_count", 0) or 0)
 
@@ -354,6 +429,17 @@ class GlobalAssembler(AssemblyAgent):
                             continue
                         seen_candidates.add(candidate_id)
                         export_candidates.append(item)
+                actual_candidate_exporters = sorted(
+                    {
+                        str(item.get("subsystem_id", "")).strip()
+                        for item in export_candidates
+                        if str(item.get("subsystem_id", "")).strip()
+                    }
+                )
+                structured_candidate_exporters = sorted(set(policy_candidate_exporters) | set(actual_candidate_exporters))
+                if not owner_subsystem_id and resolution_status == "resolved" and len(policy_candidate_exporters) == 1:
+                    owner_subsystem_id = policy_candidate_exporters[0]
+                planning_issue_added = False
                 if owner_subsystem_id:
                     owner_candidates = [
                         item
@@ -364,29 +450,56 @@ class GlobalAssembler(AssemblyAgent):
                         export_candidates = owner_candidates
                     elif export_candidates and not owner_candidates:
                         unresolved_items.append(
-                            {
-                                "type": "shared_signal_owner_mismatch",
-                                "severity": "error",
-                                "scope": "planning",
-                                "signal_name": signal_name,
-                                "message": f"Shared signal {signal_name} expects exporter {owner_subsystem_id}, but current subsystem plans export {', '.join(sorted(item['subsystem_id'] for item in export_candidates))}.",
-                                "suggested_fix": "让 ArchitecturePlanner/SubSystemPlanner 对齐共享信号 owner_subsystem_id 与 exported_signals。",
-                            }
+                            self._planning_unresolved_item(
+                                issue_type="shared_signal_owner_mismatch",
+                                signal_name=signal_name,
+                                binding=binding,
+                                signal_policy=signal_policy,
+                                candidate_exporters=structured_candidate_exporters,
+                                consumer_subsystem_ids=consumer_subsystem_ids,
+                                message=(
+                                    f"Shared signal {signal_name} expects exporter {owner_subsystem_id}, "
+                                    f"but current subsystem plans export {', '.join(sorted(item['subsystem_id'] for item in export_candidates))}."
+                                ),
+                                suggested_fix="让 ArchitecturePlanner/SubSystemPlanner 对齐共享信号 owner_subsystem_id 与 exported_signals。",
+                                resolution_hint="架构层 owner 与当前导出方不一致。",
+                            )
                         )
+                        planning_issue_added = True
+                        export_candidates = []
                     elif len(owner_candidates) > 1:
-                        export_candidates = owner_candidates
+                        unresolved_items.append(
+                            self._planning_unresolved_item(
+                                issue_type="ambiguous_shared_signal",
+                                signal_name=signal_name,
+                                binding=binding,
+                                signal_policy={**signal_policy, "resolution_status": resolution_status or "ambiguous"},
+                                candidate_exporters=structured_candidate_exporters,
+                                consumer_subsystem_ids=consumer_subsystem_ids,
+                                message=f"Multiple exporters still match declared owner for shared signal {signal_name}.",
+                                suggested_fix="在 ArchitecturePlanner/SubsystemPlanner 中继续收敛共享信号归属，确保唯一导出方。",
+                                resolution_hint="declared owner 仍对应多个实际导出方。",
+                            )
+                        )
+                        planning_issue_added = True
+                        export_candidates = []
 
-                if len(export_candidates) > 1 and required_exporter_count <= 1:
+                elif resolution_status == "ambiguous" or (len(structured_candidate_exporters) > 1 and required_exporter_count <= 1):
                     unresolved_items.append(
-                        {
-                            "type": "ambiguous_shared_signal",
-                            "severity": "error",
-                            "scope": "planning",
-                            "signal_name": signal_name,
-                            "message": f"Multiple exporters found for shared signal {signal_name}.",
-                            "suggested_fix": "在 ArchitecturePlanner/SubsystemPlanner 中收敛共享信号归属，确保一个共享信号只有唯一导出方。",
-                        }
+                        self._planning_unresolved_item(
+                            issue_type="ambiguous_shared_signal",
+                            signal_name=signal_name,
+                            binding=binding,
+                            signal_policy={**signal_policy, "resolution_status": resolution_status or "ambiguous"},
+                            candidate_exporters=structured_candidate_exporters,
+                            consumer_subsystem_ids=consumer_subsystem_ids,
+                            message=f"Multiple exporters found for shared signal {signal_name}.",
+                            suggested_fix="在 ArchitecturePlanner/SubsystemPlanner 中收敛共享信号归属，确保一个共享信号只有唯一导出方。",
+                            resolution_hint="共享信号存在多个候选导出方，尚未收敛。",
+                        )
                     )
+                    planning_issue_added = True
+                    export_candidates = []
                 if export_candidates:
                     export_candidate = export_candidates[0]
                     edge_counter += 1
@@ -413,6 +526,24 @@ class GlobalAssembler(AssemblyAgent):
                     )
                     occupied_inputs[target_instance].add(target_port)
                     continue
+                if not planning_issue_added and not allowed_external:
+                    unresolved_items.append(
+                        self._planning_unresolved_item(
+                            issue_type="synthetic_shared_signal_source",
+                            signal_name=signal_name,
+                            binding=binding,
+                            signal_policy={
+                                **signal_policy,
+                                "resolution_status": "missing_exporter" if not actual_candidate_exporters else (resolution_status or "missing_exporter"),
+                            },
+                            candidate_exporters=structured_candidate_exporters,
+                            consumer_subsystem_ids=consumer_subsystem_ids,
+                            message=f"Shared signal {signal_name} has no real exporter; GlobalAssembler injected a synthetic placeholder source.",
+                            suggested_fix="让真实子系统通过 exported_signals 导出该信号，或在 requirement_spec 中明确它是外部输入/全局模式。",
+                            resolution_hint="当前没有可用的真实导出方，只能注入占位源。",
+                        )
+                    )
+                    planning_issue_added = True
 
             if not placeholder_source_doc:
                 unresolved_items.append(
@@ -421,6 +552,20 @@ class GlobalAssembler(AssemblyAgent):
                         "severity": "error",
                         "scope": "planning",
                         "signal_name": signal_name,
+                        "signal_key": str(binding.get("signal_key", "")).strip(),
+                        "canonical_signal_key": str(binding.get("canonical_signal_key", "")).strip(),
+                        "binding_kind": binding_kind,
+                        "allowed_external": allowed_external,
+                        "owner_subsystem_id": owner_subsystem_id,
+                        "candidate_exporters": list(structured_candidate_exporters),
+                        "consumer_subsystem_ids": consumer_subsystem_ids,
+                        "resolution_status": (
+                            "missing_exporter"
+                            if binding_kind == "shared_signal" and not actual_candidate_exporters
+                            else resolution_status
+                        ),
+                        "resolution_hint": "缺少占位输入源模块，无法继续装配。",
+                        "resolution_evidence": list(signal_policy.get("resolution_evidence", []) or []),
                         "message": f"No placeholder source module available for shared signal {signal_name}.",
                         "suggested_fix": "补齐可作为占位输入源的零输入原子模块，或让该信号由真实子系统导出。",
                     }
@@ -455,17 +600,6 @@ class GlobalAssembler(AssemblyAgent):
                     ),
                 )
             )
-            if binding_kind == "shared_signal" and not allowed_external:
-                unresolved_items.append(
-                    {
-                        "type": "synthetic_shared_signal_source",
-                        "severity": "error",
-                        "scope": "planning",
-                        "signal_name": signal_name,
-                        "message": f"Shared signal {signal_name} has no real exporter; GlobalAssembler injected a synthetic placeholder source.",
-                        "suggested_fix": "让真实子系统通过 exported_signals 导出该信号，或在 requirement_spec 中明确它是外部输入/全局模式。",
-                    }
-                )
             edge_counter += 1
             signal_id = f"signal::placeholder::{signal_key or placeholder_counter}"
             edges.append(

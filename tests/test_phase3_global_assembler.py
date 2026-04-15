@@ -126,6 +126,9 @@ def make_architecture_plan() -> dict:
                 "allowed_external": False,
                 "required_exporter_count": 1,
                 "consumers": ["heater_ctrl"],
+                "candidate_exporters": ["supply_fan_ctrl"],
+                "resolution_status": "resolved",
+                "resolution_evidence": ["consumers=heater_ctrl", "exporters=supply_fan_ctrl", "owner=supply_fan_ctrl"],
                 "source_reason": "fan export",
             },
         ],
@@ -264,6 +267,12 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
         self.assertTrue(
             any(item.get("type") == "synthetic_shared_signal_source" for item in graph_ir["unresolved_items"])
         )
+        unresolved = next(
+            item for item in graph_ir["unresolved_items"]
+            if item.get("type") == "synthetic_shared_signal_source"
+        )
+        self.assertEqual(unresolved["resolution_status"], "missing_exporter")
+        self.assertEqual(unresolved["consumer_subsystem_ids"], ["heater_ctrl"])
 
         artifact = CodingAgent().compile_graph(graph_ir, make_bundle())
         report = VerifierAgent().verify(graph_ir, artifact)
@@ -308,6 +317,13 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
         subsystem_plan_map = make_subsystem_plan_map()
         architecture_plan = make_architecture_plan()
         architecture_plan["shared_signal_registry"][0]["owner_subsystem_id"] = ""
+        architecture_plan["shared_signal_registry"][0]["candidate_exporters"] = ["backup_fan_ctrl", "supply_fan_ctrl"]
+        architecture_plan["shared_signal_registry"][0]["resolution_status"] = "ambiguous"
+        architecture_plan["shared_signal_registry"][0]["resolution_evidence"] = [
+            "consumers=heater_ctrl",
+            "exporters=backup_fan_ctrl, supply_fan_ctrl",
+            "multiple exporter candidates detected",
+        ]
         subsystem_plan_map["backup_fan_ctrl"] = {
             "subsystem_id": "backup_fan_ctrl",
             "page_id": "page_control",
@@ -357,6 +373,20 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
         self.assertTrue(
             any(item.get("type") == "ambiguous_shared_signal" for item in graph_ir["unresolved_items"])
         )
+        unresolved = next(
+            item for item in graph_ir["unresolved_items"]
+            if item.get("type") == "ambiguous_shared_signal"
+        )
+        self.assertEqual(unresolved["resolution_status"], "ambiguous")
+        self.assertEqual(unresolved["candidate_exporters"], ["backup_fan_ctrl", "supply_fan_ctrl"])
+        self.assertEqual(unresolved["consumer_subsystem_ids"], ["heater_ctrl"])
+        self.assertFalse(
+            any(
+                edge["to_instance"] == "node::heater_ctrl::heater_main"
+                and edge["from_instance"] != "node::placeholder::supply_fan_available_flag"
+                for edge in graph_ir["edges"]
+            )
+        )
 
         artifact = CodingAgent().compile_graph(graph_ir, make_bundle())
         report = VerifierAgent().verify(graph_ir, artifact)
@@ -364,6 +394,46 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
         self.assertTrue(
             any(issue.get("rule_id") == "ir.unresolved.ambiguous_shared_signal" for issue in report["issues"])
         )
+
+    def test_global_assembler_projects_structured_edge_locator_for_missing_local_edge_endpoint(self):
+        subsystem_plan_map = make_subsystem_plan_map()
+        subsystem_plan_map["heater_ctrl"]["edges"] = [
+            {
+                "edge_id": "edge::heater_ghost",
+                "from_node": "ghost_source",
+                "from_port": 0,
+                "to_node": "heater_main",
+                "to_port": 0,
+                "signal_name": "schedule_enable",
+            }
+        ]
+
+        with patch.object(config, "DEBUG", False):
+            assembler = GlobalAssembler()
+            graph_ir = assembler.assemble(
+                architecture_plan=make_architecture_plan(),
+                subsystem_plan_map=subsystem_plan_map,
+                bundle_or_context=make_bundle(),
+                requirement_spec=make_requirement_spec(),
+            )
+
+        unresolved = next(
+            item for item in graph_ir["unresolved_items"]
+            if item.get("type") == "missing_local_edge_endpoint"
+        )
+        self.assertEqual(unresolved["edge_ids"], ["edge::heater_ghost"])
+        self.assertEqual(
+            unresolved["edge_locator"],
+            {
+                "subsystem_id": "heater_ctrl",
+                "edge_id": "edge::heater_ghost",
+                "edge_ids": ["edge::heater_ghost"],
+                "from_node": "ghost_source",
+                "to_node": "heater_main",
+            },
+        )
+        self.assertEqual(unresolved["from_node"], "ghost_source")
+        self.assertEqual(unresolved["to_node"], "heater_main")
 
     def test_global_assembler_prefers_declared_owner_when_multiple_exporters_exist(self):
         subsystem_plan_map = make_subsystem_plan_map()

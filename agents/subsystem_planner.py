@@ -154,6 +154,9 @@ class SubsystemPlanner:
                     "binding_kind": str(binding.get("binding_kind", "")).strip(),
                     "allowed_external": bool(binding.get("allowed_external", False)),
                     "owner_subsystem_id": str(binding.get("owner_subsystem_id", "")).strip(),
+                    "resolution_status": str(binding.get("resolution_status", "")).strip(),
+                    "candidate_exporters": list(binding.get("candidate_exporters", []) or []),
+                    "resolution_evidence": list(binding.get("resolution_evidence", []) or []),
                     "semantic_role": semantic_role,
                     "required": True,
                     "reasoning": "Projected from subsystem interface_bindings.",
@@ -230,6 +233,19 @@ class SubsystemPlanner:
                         ),
                         "owner_subsystem_id": str(binding.get("owner_subsystem_id", "")).strip()
                         or str(registry_entry.get("owner_subsystem_id", "")).strip(),
+                        "resolution_status": str(binding.get("resolution_status", "")).strip()
+                        or str(registry_entry.get("resolution_status", "")).strip(),
+                        "candidate_exporters": list(
+                            binding.get("candidate_exporters", [])
+                            or registry_entry.get("candidate_exporters", [])
+                            or registry_entry.get("exporter_candidates", [])
+                            or []
+                        ),
+                        "resolution_evidence": list(
+                            binding.get("resolution_evidence", [])
+                            or registry_entry.get("resolution_evidence", [])
+                            or []
+                        ),
                         "port_index": int(binding.get("port_index", len(normalized_bindings)) or len(normalized_bindings)),
                         "evidence": list(binding.get("evidence", []) or []),
                         "confidence": float(binding.get("confidence", 0.0) or 0.0),
@@ -259,6 +275,13 @@ class SubsystemPlanner:
                         "binding_kind": binding_kind,
                         "allowed_external": bool(registry_entry.get("allowed_external", direction == "input" and binding_kind != "shared_signal")),
                         "owner_subsystem_id": str(registry_entry.get("owner_subsystem_id", "")).strip(),
+                        "resolution_status": str(registry_entry.get("resolution_status", "")).strip(),
+                        "candidate_exporters": list(
+                            registry_entry.get("candidate_exporters", [])
+                            or registry_entry.get("exporter_candidates", [])
+                            or []
+                        ),
+                        "resolution_evidence": list(registry_entry.get("resolution_evidence", []) or []),
                         "port_index": port_index,
                         "evidence": ["Synthesized from compat imports/exports."],
                         "confidence": 0.5,
@@ -350,9 +373,15 @@ class SubsystemPlanner:
         subsystem_plan.update(
             {
                 "implementation_mode": "reuse_template",
+                "selection_reason": str(slot.get("selection_reason", "")).strip()
+                or f"Selected reusable template {template_id}.",
+                "degrade_reason": "",
                 "template_binding": {
                     "template_id": template_id,
                     "reasoning": "Matched architecture preferred_template_ids against retrieval bundle.",
+                    "selection_reason": str(slot.get("selection_reason", "")).strip()
+                    or f"Selected reusable template {template_id}.",
+                    "score_breakdown": list(slot.get("score_breakdown", []) or []),
                 },
                 "node_instances": [
                     {
@@ -399,6 +428,9 @@ class SubsystemPlanner:
             subsystem_plan.update(
                 {
                     "implementation_mode": "atomic_assembly",
+                    "selection_reason": str(slot.get("selection_reason", "")).strip()
+                    or "No reusable template selected; entering atomic fallback.",
+                    "degrade_reason": "No atomic module candidates available for fallback.",
                     "template_interface_bindings": self._descriptor_interface_bindings(descriptor, shared_signal_registry),
                     "reasoning": "No atomic module candidates available.",
                     "unresolved_items": [
@@ -492,10 +524,17 @@ class SubsystemPlanner:
         subsystem_plan.update(
             {
                 "implementation_mode": "atomic_assembly",
+                "selection_reason": str(slot.get("selection_reason", "")).strip()
+                or "No reusable template selected; entering atomic fallback.",
+                "degrade_reason": str(slot.get("degrade_reason", "")).strip()
+                or "No qualified reusable template was available; used atomic modules.",
                 "template_binding": {
                     "template_id": "",
                     "reasoning": "Preferred templates unavailable; fell back to atomic modules.",
                     "degraded": True,
+                    "degrade_reason": str(slot.get("degrade_reason", "")).strip()
+                    or "No qualified reusable template was available; used atomic modules.",
+                    "score_breakdown": list(slot.get("score_breakdown", []) or []),
                 },
                 "node_instances": node_instances,
                 "edges": edges,

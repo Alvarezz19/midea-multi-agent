@@ -245,6 +245,78 @@ class Phase3VerifierNativeContractTests(unittest.TestCase):
         self.assertEqual(issue["repair_payload"]["signal_name"], "schedule_enable")
         self.assertEqual(issue["repair_payload"]["binding_kind"], "external_input")
         self.assertTrue(issue["repair_payload"]["allowed_external"])
+        self.assertEqual(issue["repair_payload"]["resolution_status"], "externalized")
+
+    def test_verifier_projects_structured_payload_for_assembly_unresolved_item(self):
+        graph_ir = {
+            "graph_ir_version": "2.0",
+            "goal": "assembly repair payload",
+            "pages": [{"page_id": "page_control", "label": "控制", "kind": "control", "order": 0}],
+            "subflow_definitions": [],
+            "node_instances": [
+                {
+                    "instance_id": "node::heater",
+                    "logic_id": "heater_main",
+                    "module_type": "constInput",
+                    "page_id": "page_control",
+                    "subflow_id": None,
+                    "template_id": None,
+                    "parameters": {"name": "heater", "fixedValue": 1},
+                    "position": {"x": 0, "y": 0},
+                    "input_count": 1,
+                    "output_count": 1,
+                    "reasoning": "assembly payload",
+                }
+            ],
+            "edges": [],
+            "signal_registry": [],
+            "layout_hints": {},
+            "unresolved_items": [
+                {
+                    "type": "missing_local_edge_endpoint",
+                    "severity": "error",
+                    "scope": "assembly",
+                    "subsystem_id": "heater_ctrl",
+                    "message": "Local edge references missing nodes.",
+                    "edge_locator": {
+                        "subsystem_id": "heater_ctrl",
+                        "edge_ids": ["edge::ghost"],
+                        "from_node": "ghost_source",
+                        "to_node": "heater_main",
+                    },
+                    "reason": "missing_local_edge_endpoint",
+                }
+            ],
+        }
+        artifact = {
+            "json_text": "[]",
+            "flow_objects": [
+                {"id": "tab1", "type": "tab", "label": "控制"},
+                {"id": "heater1", "type": "constInput", "z": "tab1", "wires": [[]], "inputs": 1, "outputs": 1},
+            ],
+            "id_map": {"node::heater": "heater1"},
+            "layout_map": {},
+            "compile_report": {"node_count": 1, "subflow_count": 0, "page_count": 1, "warnings": []},
+        }
+
+        with patch.object(config, "DEBUG", False):
+            report = VerifierAgent().verify(
+                graph_ir,
+                artifact,
+                requirement_spec=make_requirement_spec(),
+                architecture_plan=make_architecture_plan(),
+                subsystem_plan_map=make_subsystem_plan_map(),
+            )
+
+        issue = next(
+            issue for issue in report["issues"]
+            if issue["rule_id"] == "ir.unresolved.missing_local_edge_endpoint"
+        )
+        self.assertEqual(issue["repair_payload"]["subsystem_id"], "heater_ctrl")
+        self.assertEqual(issue["repair_payload"]["edge_ids"], ["edge::ghost"])
+        self.assertEqual(issue["repair_payload"]["from_node"], "ghost_source")
+        self.assertEqual(issue["repair_payload"]["to_node"], "heater_main")
+        self.assertEqual(issue["repair_payload"]["reason"], "missing_local_edge_endpoint")
 
     def test_verifier_emits_structured_payload_for_compile_port_range_issue(self):
         graph_ir = {

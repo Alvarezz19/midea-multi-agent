@@ -81,6 +81,9 @@ class SubsystemSlot(TypedDict, total=False):
     page_id: str
     preferred_implementation: str
     preferred_template_ids: List[str]
+    score_breakdown: List[Dict[str, Any]]
+    selection_reason: str
+    degrade_reason: str
     fallback_mode: str
     priority: int
     reasoning: str
@@ -111,6 +114,22 @@ class InterfaceBindingSpec(TypedDict, total=False):
     confidence: float
 
 
+class SharedSignalRegistryEntry(TypedDict, total=False):
+    signal_name: str
+    signal_key: str
+    canonical_signal_key: str
+    semantic_role: str
+    owner_subsystem_id: str
+    allowed_external: bool
+    required_exporter_count: int
+    consumers: List[str]
+    exporter_candidates: List[str]
+    candidate_exporters: List[str]
+    resolution_status: str
+    resolution_evidence: List[str]
+    source_reason: str
+
+
 class SubsystemSignalBinding(TypedDict, total=False):
     signal_name: str
     signal_key: str
@@ -121,6 +140,9 @@ class SubsystemSignalBinding(TypedDict, total=False):
     binding_kind: str
     allowed_external: bool
     owner_subsystem_id: str
+    candidate_exporters: List[str]
+    resolution_status: str
+    resolution_evidence: List[str]
     semantic_role: str
     required: bool
     reasoning: str
@@ -139,6 +161,7 @@ class SubsystemPlanNode(TypedDict, total=False):
 
 
 class SubsystemPlanEdge(TypedDict, total=False):
+    edge_id: str
     from_node: str
     from_port: int
     to_node: str
@@ -151,6 +174,8 @@ class SubsystemPlan(TypedDict, total=False):
     page_id: str
     implementation_mode: str
     template_binding: Dict[str, Any]
+    selection_reason: str
+    degrade_reason: str
     template_interface_bindings: List[InterfaceBindingSpec]
     node_instances: List[SubsystemPlanNode]
     edges: List[SubsystemPlanEdge]
@@ -261,6 +286,8 @@ def empty_subsystem_plan(subsystem_id: str = "", page_id: str = "") -> Subsystem
         "page_id": page_id,
         "implementation_mode": "",
         "template_binding": {},
+        "selection_reason": "",
+        "degrade_reason": "",
         "template_interface_bindings": [],
         "node_instances": [],
         "edges": [],

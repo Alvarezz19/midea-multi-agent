@@ -200,6 +200,73 @@ def make_interface_semantics_requirement_spec() -> dict:
     }
 
 
+def make_minimal_pattern_bundle() -> dict:
+    return {
+        "atomic_modules": [],
+        "subflow_templates": [],
+        "system_patterns": [
+            {
+                "pattern_id": "ahu_minimal_pattern",
+                "system_type": "AHU",
+                "required_pages": [
+                    {"page_key": "control", "label": "控制", "kind": "control"},
+                ],
+                "optional_pages": [],
+            }
+        ],
+        "style_guides": [],
+        "metadata": {"selected_case_pattern_id": "ahu_minimal_pattern"},
+    }
+
+
+def make_ambiguous_shared_signal_requirement_spec() -> dict:
+    return {
+        "schema_version": "3.0",
+        "system_type": "AHU",
+        "scenario_summary": "双风机与电加热联动控制",
+        "subsystems": [
+            {
+                "subsystem_id": "supply_fan_ctrl",
+                "subsystem_type": "supply_fan_control",
+                "goal": "主送风机控制",
+                "page_hint": "控制",
+                "priority": 1,
+                "preferred_templates": [],
+                "imports": [],
+                "exports": ["supply_fan_available_flag"],
+            },
+            {
+                "subsystem_id": "backup_fan_ctrl",
+                "subsystem_type": "supply_fan_control",
+                "goal": "备用送风机控制",
+                "page_hint": "控制",
+                "priority": 2,
+                "preferred_templates": [],
+                "imports": [],
+                "exports": ["supply_fan_available_flag"],
+            },
+            {
+                "subsystem_id": "heater_ctrl",
+                "subsystem_type": "heater_control",
+                "goal": "电加热控制",
+                "page_hint": "控制",
+                "priority": 3,
+                "preferred_templates": [],
+                "imports": ["supply_fan_available_flag"],
+                "exports": ["heater_enable"],
+            },
+        ],
+        "signals": {"inputs": [], "outputs": [], "software_points": [], "alarm_points": []},
+        "required_pages": ["控制"],
+        "global_modes": [],
+        "ambiguities": [],
+        "assumptions": [],
+        "acceptance_criteria": [],
+        "confidence": 0.8,
+        "warnings": [],
+    }
+
+
 class Phase3ArchitecturePlannerTests(unittest.TestCase):
     def test_architecture_planner_binds_real_ahu_system_pattern(self):
         bundle = make_real_bundle()
@@ -226,6 +293,9 @@ class Phase3ArchitecturePlannerTests(unittest.TestCase):
         self.assertNotIn("schedule_enable", shared_signal_map)
         self.assertIn("supply_fan_available", shared_signal_map)
         self.assertEqual(shared_signal_map["supply_fan_available"]["owner_subsystem_id"], "supply_fan_ctrl")
+        self.assertEqual(shared_signal_map["supply_fan_available"]["resolution_status"], "resolved")
+        self.assertEqual(shared_signal_map["supply_fan_available"]["candidate_exporters"], ["supply_fan_ctrl"])
+        self.assertTrue(shared_signal_map["supply_fan_available"]["resolution_evidence"])
         descriptor_map = {item["subsystem_id"]: item for item in decomposition_result["subsystem_descriptors"]}
         supply_bindings = descriptor_map["supply_fan_ctrl"]["interface_bindings"]
         self.assertTrue(
@@ -249,6 +319,9 @@ class Phase3ArchitecturePlannerTests(unittest.TestCase):
         self.assertIn("dx_ctrl", slot_map)
         self.assertTrue(slot_map["supply_fan_ctrl"]["preferred_template_ids"])
         self.assertEqual(slot_map["supply_fan_ctrl"]["preferred_implementation"], "reuse_template")
+        self.assertTrue(slot_map["supply_fan_ctrl"]["score_breakdown"])
+        self.assertTrue(slot_map["supply_fan_ctrl"]["selection_reason"])
+        self.assertEqual(slot_map["supply_fan_ctrl"]["degrade_reason"], "")
         template_role_by_id = {
             item["template_id"]: item["template_role"]
             for item in bundle["subflow_templates"]
@@ -270,6 +343,7 @@ class Phase3ArchitecturePlannerTests(unittest.TestCase):
         self.assertEqual(architecture_plan["pattern_bindings"][0]["pattern_id"], "ahu_dx_pattern")
         self.assertGreater(architecture_plan["pattern_bindings"][0]["score"], 0)
         self.assertTrue(architecture_plan["pattern_bindings"][0]["score_reasons"])
+        self.assertTrue(architecture_plan["pattern_bindings"][0]["score_breakdown"])
 
     def test_architecture_planner_keeps_external_template_inputs_out_of_shared_signal_registry(self):
         bundle = make_interface_semantics_bundle()
@@ -293,6 +367,26 @@ class Phase3ArchitecturePlannerTests(unittest.TestCase):
             for item in architecture_plan["shared_signal_registry"]
         }
         self.assertEqual(shared_signal_keys, {"supply_fan_available"})
+        registry_entry = architecture_plan["shared_signal_registry"][0]
+        self.assertEqual(registry_entry["resolution_status"], "resolved")
+        self.assertEqual(registry_entry["candidate_exporters"], ["supply_fan_ctrl"])
+
+    def test_architecture_planner_marks_ambiguous_shared_signal_with_candidate_exporters(self):
+        bundle = make_minimal_pattern_bundle()
+
+        with patch.object(config, "DEBUG", False):
+            planner = ArchitecturePlanner()
+            _, architecture_plan = planner.plan(make_ambiguous_shared_signal_requirement_spec(), bundle)
+
+        registry_entry = architecture_plan["shared_signal_registry"][0]
+        self.assertEqual(registry_entry["signal_key"], "supply_fan_available")
+        self.assertEqual(registry_entry["resolution_status"], "ambiguous")
+        self.assertEqual(
+            registry_entry["candidate_exporters"],
+            ["backup_fan_ctrl", "supply_fan_ctrl"],
+        )
+        self.assertFalse(registry_entry["owner_subsystem_id"])
+        self.assertTrue(registry_entry["resolution_evidence"])
 
 
 if __name__ == "__main__":

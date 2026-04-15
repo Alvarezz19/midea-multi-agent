@@ -37,6 +37,7 @@ except ModuleNotFoundError:
     RetrievalAgent = None
 
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
+TRACE_OUTPUT_ROOT = "outputs"
 
 
 def _make_serializable(obj: Any) -> Any:
@@ -115,6 +116,90 @@ def _ordered_unique_scopes(scopes: list[Any]) -> list[str]:
     return ordered
 
 
+def _planning_unresolved_by_type(unresolved_items: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in unresolved_items:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("scope", "")).strip() != "planning":
+            continue
+        issue_type = str(item.get("type", "")).strip() or "unknown"
+        counts[issue_type] = counts.get(issue_type, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _normalize_signal_key(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _collect_ambiguous_signal_keys(final_state: dict[str, Any], unresolved_items: list[dict[str, Any]]) -> set[str]:
+    ambiguous_keys: set[str] = set()
+
+    for registry_key in ("architecture_plan", "decomposition_result"):
+        registry = ((final_state or {}).get(registry_key, {}) or {}).get("shared_signal_registry", []) or []
+        for entry in registry:
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("resolution_status", "")).strip() != "ambiguous":
+                continue
+            signal_key = (
+                _normalize_signal_key(entry.get("canonical_signal_key"))
+                or _normalize_signal_key(entry.get("signal_key"))
+                or _normalize_signal_key(entry.get("signal_name"))
+            )
+            if signal_key:
+                ambiguous_keys.add(signal_key)
+
+    for item in unresolved_items:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("type", "")).strip() != "ambiguous_shared_signal":
+            continue
+        signal_key = (
+            _normalize_signal_key(item.get("canonical_signal_key"))
+            or _normalize_signal_key(item.get("signal_key"))
+            or _normalize_signal_key(item.get("signal_name"))
+        )
+        if signal_key:
+            ambiguous_keys.add(signal_key)
+
+    verification_issues = ((final_state or {}).get("verification_report", {}) or {}).get("issues", []) or []
+    for issue in verification_issues:
+        if not isinstance(issue, dict):
+            continue
+        repair_payload = issue.get("repair_payload", {}) if isinstance(issue.get("repair_payload"), dict) else {}
+        if (
+            str(issue.get("rule_id", "")).strip() != "ir.unresolved.ambiguous_shared_signal"
+            and str(repair_payload.get("resolution_status", "")).strip() != "ambiguous"
+        ):
+            continue
+        signal_key = (
+            _normalize_signal_key(repair_payload.get("canonical_signal_key"))
+            or _normalize_signal_key(issue.get("target_id"))
+        )
+        if signal_key:
+            ambiguous_keys.add(signal_key)
+
+    return ambiguous_keys
+
+
+def _repair_reject_category(route_decision: dict[str, Any]) -> str:
+    decision = str((route_decision or {}).get("decision", "")).strip()
+    if decision != "reject":
+        return ""
+
+    reason = str((route_decision or {}).get("reason", "")).strip()
+    reject_categories = {
+        "ambiguous_shared_signal_unresolved": "ambiguous_shared_signal",
+        "retry_budget_exhausted": "budget_exhausted",
+        "unsupported_repair_issue": "unsupported_repair_issue",
+        "unsupported_repair_scope": "unsupported_repair_scope",
+        "no_repairable_issue": "no_repairable_issue",
+        "repair_patch_failed": "repair_patch_failed",
+    }
+    return reject_categories.get(reason, reason)
+
+
 def _build_trace_summary(
     user_query: str,
     node_io_records: list[dict],
@@ -144,6 +229,8 @@ def _build_trace_summary(
             if str((item or {}).get("type", "")).strip()
         }
     )
+    planning_unresolved_by_type = _planning_unresolved_by_type(unresolved_items)
+    ambiguous_signal_count = len(_collect_ambiguous_signal_keys(final_state, unresolved_items))
 
     last_successful_node = next(
         (record.get("node_name", "") for record in reversed(node_io_records) if record.get("status") == "success"),
@@ -180,6 +267,7 @@ def _build_trace_summary(
     last_repair_issue_ids = list(last_repair_entry.get("issue_ids", []) or route_decision.get("issue_ids", []) or [])
     last_repair_actions = list(last_repair_entry.get("actions", []) or [])
     reject_reason = str(route_decision.get("reason", "")).strip() if final_route_decision == "reject" else ""
+    repair_reject_category = _repair_reject_category(route_decision)
 
     acceptance_summary = (
         f"status={verification_status or workflow_status}; "
@@ -210,6 +298,8 @@ def _build_trace_summary(
         "unresolved_error_count": unresolved_error_count,
         "unresolved_warning_count": unresolved_warning_count,
         "unresolved_item_types": unresolved_item_types,
+        "planning_unresolved_by_type": planning_unresolved_by_type,
+        "ambiguous_signal_count": ambiguous_signal_count,
         "verification_status": verification_status,
         "verification_repair_scope": str(verification_report.get("repair_scope", "")).strip(),
         "verification_issue_summary": str(verification_report.get("issue_summary", "")).strip(),
@@ -228,6 +318,7 @@ def _build_trace_summary(
         "last_repair_issue_ids": last_repair_issue_ids,
         "last_repair_actions": last_repair_actions,
         "reject_reason": reject_reason,
+        "repair_reject_category": repair_reject_category,
         "compile_report_summary": {
             "page_count": _to_int(compile_report.get("page_count", 0)),
             "subflow_count": _to_int(compile_report.get("subflow_count", 0)),
@@ -273,8 +364,8 @@ def _wrap_node(node_name: str, node_callable: Callable[[dict], dict], node_io_re
 
 
 def _save_workflow_trace(user_query: str, node_io_records: list[dict], final_state: dict, total_elapsed_seconds: float) -> dict:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    trace_dir = os.path.join("outputs", f"workflow_trace_{timestamp}")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    trace_dir = os.path.join(TRACE_OUTPUT_ROOT, f"workflow_trace_{timestamp}")
     os.makedirs(trace_dir, exist_ok=True)
 
     trace_summary = _build_trace_summary(
@@ -320,6 +411,11 @@ def _save_workflow_trace(user_query: str, node_io_records: list[dict], final_sta
             f"types={', '.join(summary['unresolved_item_types']) if summary['unresolved_item_types'] else 'none'}\n"
         ),
         (
+            f"**Planning 未解析分类**: "
+            f"{', '.join(f'{key}={value}' for key, value in summary['planning_unresolved_by_type'].items()) if summary['planning_unresolved_by_type'] else 'none'} / "
+            f"ambiguous_signal_count={summary['ambiguous_signal_count']}\n"
+        ),
+        (
             f"**验收摘要**: status={summary['verification_status'] or 'N/A'} / "
             f"scope={summary['verification_repair_scope'] or 'N/A'} / "
             f"errors={summary['verification_error_count']} / "
@@ -363,6 +459,8 @@ def _save_workflow_trace(user_query: str, node_io_records: list[dict], final_sta
 
     if summary["reject_reason"]:
         markdown_lines.append(f"**Reject 原因**: {summary['reject_reason']}\n")
+    if summary["repair_reject_category"]:
+        markdown_lines.append(f"**Reject 分类**: {summary['repair_reject_category']}\n")
 
     markdown_lines.extend([
         f"**运行目录**: {os.path.abspath(trace_dir)}\n",

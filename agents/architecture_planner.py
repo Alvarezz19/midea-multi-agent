@@ -125,22 +125,35 @@ class ArchitecturePlanner:
         }
         score = 0
         reasons: List[str] = []
+        score_breakdown: Dict[str, Any] = {
+            "system_type": 0,
+            "required_pages": {"matched": [], "missing": [], "score": 0},
+            "subsystem_type": {},
+            "global_modes": {},
+            "signals": {},
+            "selected_case_pattern": 0,
+        }
 
         requested_system_type = str(requirement_spec.get("system_type", "")).strip().upper()
         pattern_system_type = str(pattern.get("system_type", "")).strip().upper()
         if requested_system_type and pattern_system_type and requested_system_type == pattern_system_type:
             score += 6
             reasons.append("system_type 匹配")
+            score_breakdown["system_type"] = 6
 
         matched_pages = sorted(pattern_page_keys & requirement_page_keys)
         if matched_pages:
             score += len(matched_pages) * 4
             reasons.append(f"命中页面键: {', '.join(matched_pages)}")
+            score_breakdown["required_pages"]["matched"] = matched_pages
+            score_breakdown["required_pages"]["score"] += len(matched_pages) * 4
 
         missing_pages = sorted(requirement_page_keys - pattern_page_keys)
         if missing_pages:
             score -= len(missing_pages) * 2
             reasons.append(f"缺少页面键: {', '.join(missing_pages)}")
+            score_breakdown["required_pages"]["missing"] = missing_pages
+            score_breakdown["required_pages"]["score"] -= len(missing_pages) * 2
 
         for subsystem_type in subsystem_types:
             related_page_keys = set(_SUBSYSTEM_PATTERN_PAGE_KEYS.get(subsystem_type, ()))
@@ -148,10 +161,47 @@ class ArchitecturePlanner:
             if matched:
                 score += len(matched) * 3
                 reasons.append(f"{subsystem_type} 对应页面匹配: {', '.join(sorted(matched))}")
+                score_breakdown["subsystem_type"][subsystem_type] = {
+                    "matched_page_keys": sorted(matched),
+                    "score": len(matched) * 3,
+                }
+
+        for mode in requirement_spec.get("global_modes", []) or []:
+            mode_name = str(mode).strip()
+            if not mode_name:
+                continue
+            related_page_keys = set(_GLOBAL_MODE_PAGE_KEYS.get(mode_name, ()))
+            matched = sorted(related_page_keys & pattern_page_keys)
+            if matched:
+                delta = len(matched) * 2
+                score += delta
+                reasons.append(f"global_mode {mode_name} 页面支撑: {', '.join(matched)}")
+                score_breakdown["global_modes"][mode_name] = {"matched_page_keys": matched, "score": delta}
+
+        signals = requirement_spec.get("signals", {}) if isinstance(requirement_spec.get("signals"), dict) else {}
+        signal_texts = [
+            str(item).strip()
+            for key in ("inputs", "outputs", "software_points", "alarm_points")
+            for item in signals.get(key, []) or []
+            if str(item).strip()
+        ]
+        if signal_texts and "fault" in pattern_page_keys:
+            fault_signals = [text for text in signal_texts if "故障" in text]
+            if fault_signals:
+                score += 1
+                reasons.append("故障类 signals 存在，pattern 提供 fault 页面支撑")
+                score_breakdown["signals"]["fault"] = {"matched": fault_signals, "score": 1}
+        if signal_texts and "status" in pattern_page_keys:
+            status_signals = [text for text in signal_texts if "状态" in text]
+            if status_signals:
+                score += 1
+                reasons.append("状态类 signals 存在，pattern 提供 status 页面支撑")
+                score_breakdown["signals"]["status"] = {"matched": status_signals, "score": 1}
 
         if selected_pattern_id and pattern_id == selected_pattern_id:
             score += 3
             reasons.append("selected_case_pattern_id 命中，作为强信号加分")
+            score_breakdown["selected_case_pattern"] = 3
 
         return {
             "pattern_id": pattern_id,
@@ -159,6 +209,7 @@ class ArchitecturePlanner:
             "matched_pages": matched_pages,
             "missing_pages": missing_pages,
             "reasons": reasons,
+            "score_breakdown": score_breakdown,
         }
 
     @classmethod
@@ -177,7 +228,6 @@ class ArchitecturePlanner:
             cls._score_system_pattern(pattern, requirement_spec, selected_pattern_id)
             for pattern in patterns
         ]
-        score_by_id = {item["pattern_id"]: item for item in score_cards if item.get("pattern_id")}
         if score_cards:
             score_cards.sort(key=lambda item: (-item["score"], item["pattern_id"]))
             winner_id = score_cards[0]["pattern_id"]
@@ -253,6 +303,135 @@ class ArchitecturePlanner:
             seen.add(dedupe_key)
 
         return merged
+
+    @staticmethod
+    def _requirement_signal_context(requirement_spec: Dict[str, Any], subsystem: Dict[str, Any]) -> set[str]:
+        signals = requirement_spec.get("signals", {}) if isinstance(requirement_spec.get("signals"), dict) else {}
+        values: List[Any] = []
+        for key in ("inputs", "outputs", "software_points", "alarm_points"):
+            values.extend(list(signals.get(key, []) or []))
+        values.extend(list(requirement_spec.get("global_modes", []) or []))
+        values.extend(list(subsystem.get("imports", []) or []))
+        values.extend(list(subsystem.get("exports", []) or []))
+        return {
+            canonical_key
+            for value in values
+            if (canonical_key := canonicalize_signal_name(value))
+        }
+
+    @classmethod
+    def _score_template_candidate(
+        cls,
+        subsystem: Dict[str, Any],
+        template: Dict[str, Any],
+        requirement_spec: Dict[str, Any],
+        page_label: str,
+    ) -> Dict[str, Any]:
+        template_id = str(template.get("template_id") or template.get("module_type") or "").strip()
+        subsystem_type = str(subsystem.get("subsystem_type", "")).strip()
+        template_role = str(template.get("template_role", "")).strip()
+        searchable = " ".join(
+            str(template.get(key, "")).lower()
+            for key in ("template_name", "template_role", "description", "category")
+        )
+        goal_text = " ".join(
+            str(subsystem.get(key, "")).lower()
+            for key in ("subsystem_type", "goal", "reasoning")
+        )
+        keywords = _SUBSYSTEM_TEMPLATE_KEYWORDS.get(subsystem_type, ())
+        signal_context = cls._requirement_signal_context(requirement_spec, subsystem)
+        template_ports = cls._extract_template_ports(template, "inputs") + cls._extract_template_ports(template, "outputs")
+        template_signal_keys = {
+            canonicalize_signal_name(item.get("label"))
+            for item in template_ports
+            if canonicalize_signal_name(item.get("label"))
+        }
+        global_mode_keys = {
+            canonicalize_signal_name(value)
+            for value in requirement_spec.get("global_modes", []) or []
+            if canonicalize_signal_name(value)
+        }
+
+        score = 0
+        reasons: List[str] = []
+        score_breakdown: Dict[str, Any] = {
+            "template_role": 0,
+            "subsystem_type": 0,
+            "keyword_overlap": {"matched": [], "score": 0},
+            "signal_overlap": {"matched": [], "score": 0},
+            "global_modes": {"matched": [], "score": 0},
+            "required_pages": {"page_hint": page_label, "score": 0},
+            "preferred_template": 0,
+        }
+
+        preferred_template_ids = {
+            str(item).strip()
+            for item in subsystem.get("preferred_templates", []) or []
+            if str(item).strip()
+        }
+        if template_id in preferred_template_ids:
+            score += 100
+            reasons.append("命中 requirement_spec.preferred_templates")
+            score_breakdown["preferred_template"] = 100
+
+        if template_role == subsystem_type:
+            score += 20
+            reasons.append("template_role 与 subsystem_type 精确匹配")
+            score_breakdown["template_role"] = 20
+            score_breakdown["subsystem_type"] = 20
+        elif template_role and template_role.lower() in goal_text:
+            score += 8
+            reasons.append("template_role 在 subsystem goal/reasoning 中被命中")
+            score_breakdown["template_role"] = 8
+
+        matched_keywords = sorted({keyword for keyword in keywords if keyword.lower() in searchable})
+        if matched_keywords:
+            delta = len(matched_keywords) * 3
+            score += delta
+            reasons.append(f"关键词命中: {', '.join(matched_keywords)}")
+            score_breakdown["keyword_overlap"] = {"matched": matched_keywords, "score": delta}
+
+        matched_signals = sorted(signal_context & template_signal_keys)
+        if matched_signals:
+            delta = len(matched_signals) * 4
+            score += delta
+            reasons.append(f"signals/global_modes 与模板端口重合: {', '.join(matched_signals)}")
+            score_breakdown["signal_overlap"] = {"matched": matched_signals, "score": delta}
+
+        matched_modes = sorted(global_mode_keys & template_signal_keys)
+        if matched_modes:
+            delta = len(matched_modes) * 2
+            score += delta
+            reasons.append(f"global_modes 与模板端口重合: {', '.join(matched_modes)}")
+            score_breakdown["global_modes"] = {"matched": matched_modes, "score": delta}
+
+        required_pages = {str(value).strip() for value in requirement_spec.get("required_pages", []) or [] if str(value).strip()}
+        if page_label and page_label in required_pages:
+            score += 1
+            reasons.append(f"subsystem page_hint={page_label} 属于 required_pages")
+            score_breakdown["required_pages"]["score"] = 1
+
+        return {
+            "template_id": template_id,
+            "score": score,
+            "reasons": reasons,
+            "score_breakdown": score_breakdown,
+        }
+
+    @classmethod
+    def _rank_template_candidates(
+        cls,
+        subsystem: Dict[str, Any],
+        subflow_templates: List[Dict[str, Any]],
+        requirement_spec: Dict[str, Any],
+        page_label: str,
+    ) -> List[Dict[str, Any]]:
+        scored_cards = [
+            cls._score_template_candidate(subsystem, template, requirement_spec, page_label)
+            for template in subflow_templates
+            if str(template.get("template_id") or template.get("module_type") or "").strip()
+        ]
+        return sorted(scored_cards, key=lambda item: (-int(item.get("score", 0) or 0), item.get("template_id", "")))
 
     def _build_interface_bindings(
         self,
@@ -407,6 +586,9 @@ class ArchitecturePlanner:
                     "required_exporter_count": 0 if signal_key in external_signal_keys else 1,
                     "consumers": [],
                     "exporter_candidates": [],
+                    "candidate_exporters": [],
+                    "resolution_status": "",
+                    "resolution_evidence": [],
                     "source_reason": "",
                 },
             )
@@ -449,29 +631,78 @@ class ArchitecturePlanner:
             entry = registry_by_key[signal_key]
             exporters = list(entry.get("exporter_candidates", []) or [])
             consumers = list(entry.get("consumers", []) or [])
+            resolution_evidence: List[str] = []
+            if consumers:
+                resolution_evidence.append(f"consumers={', '.join(sorted(consumers))}")
+            if exporters:
+                resolution_evidence.append(f"exporters={', '.join(sorted(exporters))}")
             if len(exporters) == 1:
                 entry["owner_subsystem_id"] = exporters[0]
                 entry["required_exporter_count"] = 1
+                entry["candidate_exporters"] = sorted(exporters)
+                entry["resolution_status"] = "resolved"
+                resolution_evidence.append(f"owner={exporters[0]}")
                 entry["source_reason"] = entry.get("source_reason") or "Single exporting subsystem detected from requirement projection."
             elif len(exporters) > 1:
                 entry["owner_subsystem_id"] = ""
                 entry["required_exporter_count"] = 1
+                entry["candidate_exporters"] = sorted(exporters)
+                entry["resolution_status"] = "ambiguous"
+                resolution_evidence.append("multiple exporter candidates detected")
                 entry["source_reason"] = "Multiple exporter candidates detected; planner must disambiguate ownership."
                 warnings.append(
                     f"共享信号 {entry['signal_name']} 存在多个候选导出方: {', '.join(sorted(exporters))}。"
                 )
-            elif entry.get("allowed_external"):
-                entry["required_exporter_count"] = 0
-                entry["source_reason"] = entry.get("source_reason") or "Signal may be satisfied by external input or software point."
             elif consumers:
                 entry["required_exporter_count"] = 1
+                entry["candidate_exporters"] = []
+                entry["resolution_status"] = "missing_exporter"
+                resolution_evidence.append("no exporter candidate detected")
                 entry["source_reason"] = "Consumers detected but no exporter projected; planner expects a real subsystem exporter."
                 warnings.append(
                     f"共享信号 {entry['signal_name']} 目前只有消费者 {', '.join(sorted(consumers))}，缺少明确导出方。"
                 )
+            else:
+                entry["candidate_exporters"] = []
+                entry["resolution_status"] = "missing_exporter"
+                resolution_evidence.append("shared signal projected without exporter/consumer evidence")
+            entry["resolution_evidence"] = resolution_evidence
             registry.append(entry)
 
         return registry, warnings
+
+    @staticmethod
+    def _propagate_shared_signal_resolution(
+        subsystem_descriptors: List[Dict[str, Any]],
+        shared_signal_registry: List[Dict[str, Any]],
+    ) -> None:
+        registry_by_key = {
+            canonicalize_signal_name(
+                item.get("canonical_signal_key")
+                or item.get("signal_key")
+                or item.get("signal_name")
+            ): item
+            for item in shared_signal_registry
+            if isinstance(item, dict)
+        }
+        for descriptor in subsystem_descriptors:
+            for binding in descriptor.get("interface_bindings", []) or []:
+                if not isinstance(binding, dict):
+                    continue
+                if str(binding.get("binding_kind", "")).strip() != "shared_signal":
+                    continue
+                signal_key = canonicalize_signal_name(
+                    binding.get("canonical_signal_key")
+                    or binding.get("signal_key")
+                    or binding.get("signal_name")
+                )
+                registry_entry = registry_by_key.get(signal_key, {})
+                if not registry_entry:
+                    continue
+                binding["owner_subsystem_id"] = str(registry_entry.get("owner_subsystem_id", "")).strip()
+                binding["candidate_exporters"] = list(registry_entry.get("candidate_exporters", []) or [])
+                binding["resolution_status"] = str(registry_entry.get("resolution_status", "")).strip()
+                binding["resolution_evidence"] = list(registry_entry.get("resolution_evidence", []) or [])
 
     def _build_pages(
         self,
@@ -610,10 +841,27 @@ class ArchitecturePlanner:
                 continue
             subsystem_id = str(subsystem.get("subsystem_id", "")).strip() or f"subsystem_{index}"
             subsystem_type = str(subsystem.get("subsystem_type", "")).strip() or "generic_control"
-            preferred_template_ids = self._match_template_ids(subsystem, subflow_templates)
             page_label = self._pick_page_label(subsystem_type, subsystem, pages)
             page_id = make_page_id(page_label)
+            template_score_cards = self._rank_template_candidates(subsystem, subflow_templates, requirement_spec, page_label)
+            preferred_template_ids = [
+                str(item.get("template_id", "")).strip()
+                for item in template_score_cards
+                if int(item.get("score", 0) or 0) > 0 and str(item.get("template_id", "")).strip()
+            ]
             implementation_preference = "reuse_template" if preferred_template_ids else "atomic_assembly"
+            winning_template_card = template_score_cards[0] if preferred_template_ids and template_score_cards else {}
+            selection_reason = (
+                f"Selected template {winning_template_card.get('template_id')} with score={winning_template_card.get('score')}."
+                f" Reasons: {'; '.join(winning_template_card.get('reasons', []) or [])}"
+                if winning_template_card
+                else "No qualified reusable template matched current subsystem context."
+            )
+            degrade_reason = (
+                "No qualified reusable template matched current subsystem context; fallback to atomic_assembly."
+                if not preferred_template_ids
+                else ""
+            )
 
             template_doc = next(
                 (item for item in subflow_templates if item.get("template_id") == preferred_template_ids[0]),
@@ -657,6 +905,9 @@ class ArchitecturePlanner:
                     "page_id": page_id,
                     "preferred_implementation": implementation_preference,
                     "preferred_template_ids": preferred_template_ids,
+                    "score_breakdown": template_score_cards[:3],
+                    "selection_reason": selection_reason,
+                    "degrade_reason": degrade_reason,
                     "fallback_mode": "atomic_assembly",
                     "priority": int(subsystem.get("priority", index) or index),
                     "reasoning": f"{implementation_preference} based on subflow template coverage.",
@@ -676,6 +927,7 @@ class ArchitecturePlanner:
             subsystem_descriptors,
             planning_order,
         )
+        self._propagate_shared_signal_resolution(subsystem_descriptors, shared_signal_registry)
 
         pattern_bindings: List[Dict[str, Any]] = []
         if selected_pattern:
@@ -690,6 +942,7 @@ class ArchitecturePlanner:
                     "reasoning": "Use scored system pattern selection to seed pages and shared-signal constraints.",
                     "score": int(selected_card.get("score", 0) or 0),
                     "score_reasons": list(selected_card.get("reasons", []) or []),
+                    "score_breakdown": dict(selected_card.get("score_breakdown", {}) or {}),
                     "applied_scope": {
                         "pages": [page.get("page_id") for page in pages],
                         "required_page_count": len(selected_pattern.get("required_pages", []) or []),

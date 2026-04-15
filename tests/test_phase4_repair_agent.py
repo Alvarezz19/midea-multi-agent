@@ -261,12 +261,29 @@ def _assembly_state() -> dict:
         "heater_ctrl": {
             "subsystem_id": "heater_ctrl",
             "page_id": "page_control",
-            "node_instances": [{"logic_id": "heater_main"}],
+            "node_instances": [{"logic_id": "heater_source"}, {"logic_id": "heater_main"}],
             "edges": [
                 {
+                    "edge_id": "edge::valid",
+                    "from_node": "heater_source",
+                    "from_port": 0,
+                    "to_node": "heater_main",
+                    "to_port": 0,
+                    "signal_name": "heater_enable",
+                },
+                {
+                    "edge_id": "edge::ghost_remove",
                     "from_node": "ghost_source",
                     "from_port": 0,
                     "to_node": "heater_main",
+                    "to_port": 0,
+                    "signal_name": "schedule_enable",
+                },
+                {
+                    "edge_id": "edge::ghost_keep",
+                    "from_node": "heater_source",
+                    "from_port": 0,
+                    "to_node": "ghost_target",
                     "to_port": 0,
                     "signal_name": "schedule_enable",
                 }
@@ -286,6 +303,13 @@ def _assembly_state() -> dict:
                 "target_id": "heater_ctrl",
                 "rule_id": "ir.unresolved.missing_local_edge_endpoint",
                 "message": "Local edge references missing nodes.",
+                "repair_payload": {
+                    "subsystem_id": "heater_ctrl",
+                    "edge_ids": ["edge::ghost_remove"],
+                    "from_node": "ghost_source",
+                    "to_node": "heater_main",
+                    "reason": "missing_local_edge_endpoint",
+                },
             }
         ],
         "warnings": [],
@@ -302,6 +326,63 @@ def _assembly_state() -> dict:
         "retry_budget_for_scope": 2,
     }
     state["final_output"] = {"verification_report": state["verification_report"]}
+    return state
+
+
+def _planning_ambiguous_converge_state() -> dict:
+    state = _planning_state()
+    state["decomposition_result"]["subsystem_descriptors"].append(
+        {
+            "subsystem_id": "backup_ctrl",
+            "interface_bindings": [],
+            "imports": [],
+            "exports": [],
+        }
+    )
+    state["verification_report"]["issues"] = [
+        {
+            "issue_id": "IR-AMB-001",
+            "scope": "planning",
+            "target_id": "supply_fan_available_flag",
+            "rule_id": "ir.unresolved.ambiguous_shared_signal",
+            "message": "Shared signal supply_fan_available_flag has multiple candidate exporters.",
+            "repair_payload": {
+                "signal_name": "supply_fan_available_flag",
+                "canonical_signal_key": "supply_fan_available",
+                "binding_kind": "shared_signal",
+                "allowed_external": False,
+                "candidate_exporters": ["supply_fan_ctrl", "backup_ctrl"],
+                "consumer_subsystem_ids": ["heater_ctrl"],
+                "resolution_status": "ambiguous",
+            },
+        }
+    ]
+    state["route_decision"]["issue_ids"] = ["IR-AMB-001"]
+    return state
+
+
+def _planning_ambiguous_unresolved_state() -> dict:
+    state = _planning_ambiguous_converge_state()
+    state["decomposition_result"]["subsystem_descriptors"][-1] = {
+        "subsystem_id": "backup_ctrl",
+        "interface_bindings": [
+            {
+                "signal_name": "supply_fan_available_flag",
+                "signal_key": "supply_fan_available_flag",
+                "canonical_signal_key": "supply_fan_available",
+                "direction": "output",
+                "binding_kind": "shared_signal",
+                "allowed_external": False,
+                "owner_subsystem_id": "",
+                "port_index": 0,
+            }
+        ],
+        "imports": [],
+        "exports": ["supply_fan_available_flag"],
+    }
+    state["subsystem_plan_map"]["backup_ctrl"] = {
+        "exported_signals": [{"signal_name": "supply_fan_available_flag"}]
+    }
     return state
 
 
@@ -438,8 +519,12 @@ class RepairAgentTests(unittest.TestCase):
         result = RepairAgent()(state)
 
         subsystem_plan = result["subsystem_plan_map"]["heater_ctrl"]
-        self.assertEqual(subsystem_plan["edges"], [])
+        self.assertEqual(
+            [edge["edge_id"] for edge in subsystem_plan["edges"]],
+            ["edge::valid", "edge::ghost_keep"],
+        )
         self.assertEqual(subsystem_plan["unresolved_items"][0]["severity"], "warning")
+        self.assertEqual(subsystem_plan["unresolved_items"][0]["edge_ids"], ["edge::ghost_remove"])
         self.assertEqual(result["repair_context"]["resume_node"], "global_assembly")
         self.assertEqual(result["route_decision"]["next_node"], "global_assembly")
         self.assertEqual(result["retry_counts_by_scope"]["assembly"], 1)
@@ -458,6 +543,29 @@ class RepairAgentTests(unittest.TestCase):
         self.assertEqual(result["compiled_artifact"], {})
         self.assertEqual(result["verification_report"], {})
         self.assertEqual(result["final_output"], {})
+
+    def test_planning_repair_converges_ambiguous_shared_signal_when_filtered_candidates_are_unique(self):
+        state = _planning_ambiguous_converge_state()
+
+        result = RepairAgent()(state)
+
+        signal_entry = result["architecture_plan"]["shared_signal_registry"][0]
+        self.assertEqual(signal_entry["owner_subsystem_id"], "supply_fan_ctrl")
+        self.assertEqual(signal_entry["resolution_status"], "resolved_unique_exporter")
+        self.assertEqual(signal_entry["candidate_exporters"], ["supply_fan_ctrl"])
+        self.assertEqual(result["route_decision"]["reason"], "repair_patch_applied")
+        self.assertEqual(result["repair_context"]["resume_node"], "subsystem_planning")
+
+    def test_planning_repair_rejects_when_ambiguous_shared_signal_remains_unresolved(self):
+        state = _planning_ambiguous_unresolved_state()
+
+        result = RepairAgent()(state)
+
+        self.assertEqual(result["route_decision"]["decision"], "reject")
+        self.assertEqual(result["route_decision"]["reason"], "ambiguous_shared_signal_unresolved")
+        self.assertEqual(result["repair_history"][0]["result"], "rejected")
+        self.assertIn("无法收敛唯一 exporter", result["repair_history"][0]["actions"][0])
+        self.assertEqual(result["current_step"], "repair_rejected")
 
     def test_issue_id_filtering_can_trigger_no_repairable_issue(self):
         state = _planning_state()

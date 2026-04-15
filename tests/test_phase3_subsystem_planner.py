@@ -146,6 +146,9 @@ def make_decomposition_and_architecture(prefer_template: bool = True) -> tuple[d
                 "page_id": "page_control",
                 "preferred_implementation": "reuse_template" if prefer_template else "atomic_assembly",
                 "preferred_template_ids": ["fan_template"] if prefer_template else [],
+                "score_breakdown": [{"template_id": "fan_template", "score": 20}] if prefer_template else [],
+                "selection_reason": "Selected reusable template fan_template." if prefer_template else "No qualified reusable template matched current subsystem context.",
+                "degrade_reason": "" if prefer_template else "No qualified reusable template matched current subsystem context; fallback to atomic_assembly.",
                 "fallback_mode": "atomic_assembly",
                 "priority": 1,
                 "reasoning": "phase3 test slot",
@@ -261,6 +264,9 @@ def make_multi_subsystem_inputs() -> tuple[dict, dict]:
                 "allowed_external": False,
                 "required_exporter_count": 1,
                 "consumers": ["heater_ctrl"],
+                "candidate_exporters": ["supply_fan_ctrl"],
+                "resolution_status": "resolved",
+                "resolution_evidence": ["consumers=heater_ctrl", "exporters=supply_fan_ctrl", "owner=supply_fan_ctrl"],
                 "source_reason": "fan export",
             },
         ],
@@ -277,6 +283,9 @@ def make_multi_subsystem_inputs() -> tuple[dict, dict]:
                 "page_id": "page_control",
                 "preferred_implementation": "reuse_template",
                 "preferred_template_ids": ["fan_template"],
+                "score_breakdown": [{"template_id": "fan_template", "score": 24}],
+                "selection_reason": "Selected reusable template fan_template.",
+                "degrade_reason": "",
                 "fallback_mode": "atomic_assembly",
                 "priority": 1,
                 "reasoning": "fan",
@@ -286,6 +295,9 @@ def make_multi_subsystem_inputs() -> tuple[dict, dict]:
                 "page_id": "page_control",
                 "preferred_implementation": "atomic_assembly",
                 "preferred_template_ids": [],
+                "score_breakdown": [],
+                "selection_reason": "No qualified reusable template matched current subsystem context.",
+                "degrade_reason": "No qualified reusable template matched current subsystem context; fallback to atomic_assembly.",
                 "fallback_mode": "atomic_assembly",
                 "priority": 2,
                 "reasoning": "heater",
@@ -320,6 +332,9 @@ class Phase3SubsystemPlannerTests(unittest.TestCase):
         self.assertEqual(plan["exported_signals"][0]["signal_name"], "supply_fan_available_flag")
         self.assertEqual(plan["exported_signals"][0]["binding_kind"], "shared_signal")
         self.assertTrue(plan["template_interface_bindings"])
+        self.assertTrue(plan["selection_reason"])
+        self.assertEqual(plan["degrade_reason"], "")
+        self.assertTrue(plan["template_binding"]["score_breakdown"])
 
     def test_subsystem_planner_falls_back_to_atomic_assembly(self):
         decomposition_result, architecture_plan = make_decomposition_and_architecture(prefer_template=False)
@@ -337,6 +352,9 @@ class Phase3SubsystemPlannerTests(unittest.TestCase):
         self.assertEqual(plan["imported_signals"][0]["binding_kind"], "external_input")
         self.assertEqual(plan["exported_signals"][0]["signal_name"], "supply_fan_available_flag")
         self.assertTrue(plan["template_binding"]["degraded"])
+        self.assertTrue(plan["selection_reason"])
+        self.assertTrue(plan["degrade_reason"])
+        self.assertTrue(plan["template_binding"]["degrade_reason"])
 
     def test_subsystem_planner_uses_shared_signal_registry_for_cross_subsystem_interfaces(self):
         decomposition_result, architecture_plan = make_multi_subsystem_inputs()
@@ -357,7 +375,16 @@ class Phase3SubsystemPlannerTests(unittest.TestCase):
         binding_kind_map = {item["signal_name"]: item["binding_kind"] for item in heater_plan["imported_signals"]}
         self.assertEqual(binding_kind_map["schedule_enable"], "external_input")
         self.assertEqual(binding_kind_map["supply_fan_available_flag"], "shared_signal")
+        shared_binding = next(
+            item for item in heater_plan["imported_signals"]
+            if item["signal_name"] == "supply_fan_available_flag"
+        )
+        self.assertEqual(shared_binding["owner_subsystem_id"], "supply_fan_ctrl")
+        self.assertEqual(shared_binding["resolution_status"], "resolved")
+        self.assertEqual(shared_binding["candidate_exporters"], ["supply_fan_ctrl"])
         self.assertEqual(heater_plan["implementation_mode"], "atomic_assembly")
+        self.assertTrue(heater_plan["selection_reason"])
+        self.assertTrue(heater_plan["degrade_reason"])
 
 
 if __name__ == "__main__":

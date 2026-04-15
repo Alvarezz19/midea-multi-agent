@@ -24,6 +24,17 @@ class VerifierAgent:
 
     _REPAIR_SCOPE_PRIORITY = ("planning", "assembly", "compile")
 
+    @staticmethod
+    def _normalize_string_list(values: Any) -> List[str]:
+        if not isinstance(values, list):
+            return []
+        normalized: List[str] = []
+        for value in values:
+            item = str(value or "").strip()
+            if item and item not in normalized:
+                normalized.append(item)
+        return normalized
+
     def _make_issue(
         self,
         issue_id: str,
@@ -136,15 +147,24 @@ class VerifierAgent:
         if registry_entry:
             allowed_external = allowed_external or bool(registry_entry.get("allowed_external", False))
 
-        candidate_exporters = sorted(
-            {
-                str(item.get("subsystem_id", "")).strip()
-                for item in export_matches
-                if str(item.get("subsystem_id", "")).strip()
-            }
-        )
+        candidate_exporters = self._normalize_string_list(unresolved.get("candidate_exporters"))
+        if not candidate_exporters:
+            candidate_exporters = sorted(
+                {
+                    str(item.get("subsystem_id", "")).strip()
+                    for item in export_matches
+                    if str(item.get("subsystem_id", "")).strip()
+                }
+                | {
+                    str(item).strip()
+                    for item in registry_entry.get("candidate_exporters", []) or []
+                    if str(item).strip()
+                }
+            )
+
         consumer_subsystem_ids = sorted(
-            {
+            set(self._normalize_string_list(unresolved.get("consumer_subsystem_ids")))
+            | {
                 str(item.get("subsystem_id", "")).strip()
                 for item in import_matches
                 if str(item.get("subsystem_id", "")).strip()
@@ -152,6 +172,11 @@ class VerifierAgent:
             | {
                 str(item).strip()
                 for item in registry_entry.get("consumers", []) or []
+                if str(item).strip()
+            }
+            | {
+                str(item).strip()
+                for item in registry_entry.get("consumer_subsystem_ids", []) or []
                 if str(item).strip()
             }
         )
@@ -163,6 +188,23 @@ class VerifierAgent:
             or canonical_signal_key in external_signal_keys
             or bool(inferred_binding.get("allowed_external", False))
         )
+        owner_subsystem_id = str(
+            unresolved.get("owner_subsystem_id")
+            or registry_entry.get("owner_subsystem_id", "")
+        ).strip()
+        resolution_status = str(
+            unresolved.get("resolution_status")
+            or registry_entry.get("resolution_status", "")
+        ).strip()
+        if not resolution_status:
+            if owner_subsystem_id:
+                resolution_status = "resolved"
+            elif allowed_external and binding_kind != "shared_signal":
+                resolution_status = "externalized"
+            elif len(candidate_exporters) > 1:
+                resolution_status = "ambiguous"
+            else:
+                resolution_status = "missing_exporter"
 
         return {
             "signal_name": signal_name,
@@ -171,7 +213,39 @@ class VerifierAgent:
             "allowed_external": allowed_external,
             "candidate_exporters": candidate_exporters,
             "consumer_subsystem_ids": consumer_subsystem_ids,
-            "owner_subsystem_id": str(registry_entry.get("owner_subsystem_id", "")).strip(),
+            "owner_subsystem_id": owner_subsystem_id,
+            "resolution_status": resolution_status,
+        }
+
+    def _assembly_repair_payload(self, unresolved: Dict[str, Any]) -> Dict[str, Any]:
+        edge_locator = unresolved.get("edge_locator", {}) if isinstance(unresolved.get("edge_locator"), dict) else {}
+        edge_ids = self._normalize_string_list(unresolved.get("edge_ids"))
+        edge_ids.extend(
+            edge_id
+            for edge_id in self._normalize_string_list(edge_locator.get("edge_ids"))
+            if edge_id not in edge_ids
+        )
+        single_edge_id = str(unresolved.get("edge_id") or edge_locator.get("edge_id") or "").strip()
+        if single_edge_id and single_edge_id not in edge_ids:
+            edge_ids.append(single_edge_id)
+
+        return {
+            "subsystem_id": str(
+                unresolved.get("subsystem_id")
+                or edge_locator.get("subsystem_id")
+                or unresolved.get("target_id")
+                or ""
+            ).strip(),
+            "edge_ids": edge_ids,
+            "from_node": str(unresolved.get("from_node") or edge_locator.get("from_node") or "").strip(),
+            "to_node": str(unresolved.get("to_node") or edge_locator.get("to_node") or "").strip(),
+            "reason": str(
+                unresolved.get("reason")
+                or unresolved.get("resolution_hint")
+                or unresolved.get("message")
+                or unresolved.get("type")
+                or ""
+            ).strip(),
         }
 
     def _compat_planning_issues(self, assembled_graph_ir: Dict[str, Any]) -> List[VerificationIssue]:
@@ -502,6 +576,8 @@ class VerifierAgent:
                             subsystem_plan_map,
                         )
                         if str(unresolved.get("scope", "") or "assembly") == "planning"
+                        else self._assembly_repair_payload(unresolved)
+                        if str(unresolved.get("scope", "") or "assembly") == "assembly"
                         else {}
                     ),
                 ))

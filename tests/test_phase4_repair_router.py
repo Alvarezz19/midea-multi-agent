@@ -112,6 +112,24 @@ class RepairRouterTests(unittest.TestCase):
         self.assertEqual(result["retry_count"], 4)
         self.assertEqual(result["retry_count"], sum(result["retry_counts_by_scope"].values()))
 
+    def test_router_does_not_add_business_branch_for_ambiguous_shared_signal(self):
+        state = make_state(
+            repair_scope="planning",
+            issues=[
+                {
+                    "issue_id": "IR-AMB-001",
+                    "scope": "planning",
+                    "rule_id": "ir.unresolved.ambiguous_shared_signal",
+                }
+            ],
+        )
+
+        result = RepairRouter()(state)
+
+        self.assertEqual(result["route_decision"]["decision"], "planning_repair")
+        self.assertEqual(result["route_decision"]["reason"], "planning_retry_allowed")
+        self.assertEqual(result["route_decision"]["next_node"], "repair_agent")
+
     def test_phase4_topology_helper_can_register_repair_loop(self):
         def _noop(state):
             return state

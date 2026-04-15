@@ -243,6 +243,166 @@ class StubGlobalAssemblyExternal:
         return state
 
 
+class StubArchitecturePlanningAmbiguous:
+    def __call__(self, state):
+        state["decomposition_result"] = {
+            "pages": [],
+            "subsystem_descriptors": [
+                {"subsystem_id": "supply_fan_ctrl", "imports": [], "exports": ["supply_fan_available_flag"]},
+                {"subsystem_id": "heater_ctrl", "imports": ["supply_fan_available_flag"], "exports": ["heater_enable"]},
+                {"subsystem_id": "backup_ctrl", "imports": [], "exports": []},
+            ],
+            "shared_signal_registry": [
+                {
+                    "signal_name": "supply_fan_available_flag",
+                    "signal_key": "supply_fan_available_flag",
+                    "canonical_signal_key": "supply_fan_available",
+                    "owner_subsystem_id": "",
+                    "allowed_external": False,
+                    "required_exporter_count": 1,
+                    "candidate_exporters": ["supply_fan_ctrl", "backup_ctrl"],
+                    "consumers": ["heater_ctrl"],
+                    "source_reason": "projected ambiguous owner",
+                }
+            ],
+            "template_needs": [],
+            "planning_order": ["supply_fan_ctrl", "heater_ctrl", "backup_ctrl"],
+            "warnings": [],
+        }
+        state["architecture_plan"] = {
+            "goal": "fan heater ambiguous",
+            "pages": [],
+            "subsystem_slots": [],
+            "shared_signal_registry": [
+                {
+                    "signal_name": "supply_fan_available_flag",
+                    "signal_key": "supply_fan_available_flag",
+                    "canonical_signal_key": "supply_fan_available",
+                    "owner_subsystem_id": "",
+                    "allowed_external": False,
+                    "required_exporter_count": 1,
+                    "candidate_exporters": ["supply_fan_ctrl", "backup_ctrl"],
+                    "consumers": ["heater_ctrl"],
+                    "source_reason": "projected ambiguous owner",
+                }
+            ],
+            "global_constraints": [],
+            "naming_strategy": {},
+            "layout_strategy": {},
+            "pattern_bindings": [],
+            "warnings": [],
+        }
+        state["current_step"] = "architecture_planned"
+        return state
+
+
+class StubSubsystemPlanningAmbiguousUnique:
+    def __call__(self, state):
+        owner = _shared_signal_owner(state)
+        if owner == "supply_fan_ctrl":
+            state["subsystem_plan_map"] = {
+                "supply_fan_ctrl": {"exported_signals": [{"signal_name": "supply_fan_available_flag"}]},
+                "heater_ctrl": {"imported_signals": [{"signal_name": "supply_fan_available_flag"}]},
+                "backup_ctrl": {"exported_signals": []},
+            }
+        else:
+            state["subsystem_plan_map"] = {
+                "supply_fan_ctrl": {"exported_signals": [{"signal_name": "supply_fan_available_flag"}]},
+                "heater_ctrl": {"imported_signals": [{"signal_name": "supply_fan_available_flag"}]},
+                "backup_ctrl": {"exported_signals": []},
+            }
+        state["current_step"] = "subsystem_planned"
+        return state
+
+
+class StubSubsystemPlanningAmbiguousConflict:
+    def __call__(self, state):
+        state["subsystem_plan_map"] = {
+            "supply_fan_ctrl": {"exported_signals": [{"signal_name": "supply_fan_available_flag"}]},
+            "heater_ctrl": {"imported_signals": [{"signal_name": "supply_fan_available_flag"}]},
+            "backup_ctrl": {"exported_signals": [{"signal_name": "supply_fan_available_flag"}]},
+        }
+        state["current_step"] = "subsystem_planned"
+        return state
+
+
+class StubVerifierAmbiguousSuccessAfterRepair:
+    def __call__(self, state):
+        owner = _shared_signal_owner(state)
+        if owner == "supply_fan_ctrl":
+            report = {
+                "status": "passed",
+                "repair_scope": "none",
+                "issue_summary": "结构校验通过。",
+                "issues": [],
+                "warnings": [],
+                "metrics": {},
+            }
+        else:
+            report = {
+                "status": "retryable_error",
+                "repair_scope": "planning",
+                "issue_summary": "发现 1 个结构错误。",
+                "issues": [
+                    {
+                        "issue_id": "IR-AMB-001",
+                        "scope": "planning",
+                        "target_id": "supply_fan_available_flag",
+                        "rule_id": "ir.unresolved.ambiguous_shared_signal",
+                        "message": "Shared signal supply_fan_available_flag has multiple candidate exporters.",
+                        "repair_payload": {
+                            "signal_name": "supply_fan_available_flag",
+                            "canonical_signal_key": "supply_fan_available",
+                            "binding_kind": "shared_signal",
+                            "allowed_external": False,
+                            "candidate_exporters": ["supply_fan_ctrl", "backup_ctrl"],
+                            "consumer_subsystem_ids": ["heater_ctrl"],
+                            "resolution_status": "ambiguous",
+                        },
+                    }
+                ],
+                "warnings": [],
+                "metrics": {},
+            }
+        state["verification_report"] = report
+        state["final_output"] = {"verification_report": report}
+        state["current_step"] = "verification_completed"
+        return state
+
+
+class StubVerifierAmbiguousReject:
+    def __call__(self, state):
+        report = {
+            "status": "retryable_error",
+            "repair_scope": "planning",
+            "issue_summary": "发现 1 个结构错误。",
+            "issues": [
+                {
+                    "issue_id": "IR-AMB-002",
+                    "scope": "planning",
+                    "target_id": "supply_fan_available_flag",
+                    "rule_id": "ir.unresolved.ambiguous_shared_signal",
+                    "message": "Shared signal supply_fan_available_flag has multiple candidate exporters.",
+                    "repair_payload": {
+                        "signal_name": "supply_fan_available_flag",
+                        "canonical_signal_key": "supply_fan_available",
+                        "binding_kind": "shared_signal",
+                        "allowed_external": False,
+                        "candidate_exporters": ["supply_fan_ctrl", "backup_ctrl"],
+                        "consumer_subsystem_ids": ["heater_ctrl"],
+                        "resolution_status": "ambiguous",
+                    },
+                }
+            ],
+            "warnings": [],
+            "metrics": {},
+        }
+        state["verification_report"] = report
+        state["final_output"] = {"verification_report": report}
+        state["current_step"] = "verification_completed"
+        return state
+
+
 class StubCoding:
     def __call__(self, state):
         state["compiled_artifact"] = {"json_text": "[]", "flow_objects": [], "compile_report": {"warnings": []}}
@@ -405,6 +565,38 @@ class Phase4WorkflowRepairLoopTests(unittest.TestCase):
         binding = result["decomposition_result"]["subsystem_descriptors"][0]["interface_bindings"][0]
         self.assertEqual(binding["binding_kind"], "external_input")
         self.assertTrue(binding["allowed_external"])
+
+    def test_workflow_repairs_ambiguous_shared_signal_when_candidates_converge(self):
+        with patch.object(workflow, "AnalysisAgent", StubAnalysis), \
+             patch.object(workflow, "RetrievalAgent", StubRetrieval), \
+             patch.object(workflow, "ArchitecturePlanner", StubArchitecturePlanningAmbiguous), \
+             patch.object(workflow, "SubsystemPlanner", StubSubsystemPlanningAmbiguousUnique), \
+             patch.object(workflow, "GlobalAssembler", StubGlobalAssembly), \
+             patch.object(workflow, "CodingAgent", StubCoding), \
+             patch.object(workflow, "VerifierAgent", StubVerifierAmbiguousSuccessAfterRepair):
+            result = workflow.run_workflow("fan heater ambiguous unique")
+
+        self.assertEqual(result["verification_report"]["status"], "passed")
+        self.assertEqual(result["route_decision"]["decision"], "accept")
+        self.assertEqual(result["retry_counts_by_scope"]["planning"], 1)
+        self.assertEqual(_shared_signal_owner(result), "supply_fan_ctrl")
+
+    def test_workflow_rejects_ambiguous_shared_signal_when_candidates_remain_multiple(self):
+        with patch.object(workflow, "AnalysisAgent", StubAnalysis), \
+             patch.object(workflow, "RetrievalAgent", StubRetrieval), \
+             patch.object(workflow, "ArchitecturePlanner", StubArchitecturePlanningAmbiguous), \
+             patch.object(workflow, "SubsystemPlanner", StubSubsystemPlanningAmbiguousConflict), \
+             patch.object(workflow, "GlobalAssembler", StubGlobalAssembly), \
+             patch.object(workflow, "CodingAgent", StubCoding), \
+             patch.object(workflow, "VerifierAgent", StubVerifierAmbiguousReject):
+            result = workflow.run_workflow("fan heater ambiguous reject")
+
+        self.assertEqual(result["verification_report"]["status"], "retryable_error")
+        self.assertEqual(result["route_decision"]["decision"], "reject")
+        self.assertEqual(result["route_decision"]["reason"], "ambiguous_shared_signal_unresolved")
+        self.assertEqual(result["repair_history"][0]["result"], "rejected")
+        self.assertEqual(result["retry_counts_by_scope"]["planning"], 1)
+        self.assertEqual(result["current_step"], "repair_rejected")
 
     def test_workflow_trace_records_repair_router_and_repair_agent(self):
         captured_records: dict[str, list[dict]] = {}
