@@ -356,6 +356,62 @@ class Phase3SubsystemPlannerTests(unittest.TestCase):
         self.assertTrue(plan["degrade_reason"])
         self.assertTrue(plan["template_binding"]["degrade_reason"])
 
+    def test_subsystem_planner_degrades_to_atomic_when_template_inputs_are_insufficient(self):
+        decomposition_result, architecture_plan = make_decomposition_and_architecture(prefer_template=True)
+        descriptor = decomposition_result["subsystem_descriptors"][0]
+        descriptor["interface_bindings"].append(
+            {
+                "signal_name": "fan_enable_feedback",
+                "signal_key": "fan_enable_feedback",
+                "canonical_signal_key": "fan_enable_feedback",
+                "direction": "input",
+                "binding_kind": "external_input",
+                "allowed_external": True,
+                "owner_subsystem_id": "",
+                "port_index": 2,
+            }
+        )
+        descriptor["imports"].append("fan_enable_feedback")
+
+        with patch.object(config, "DEBUG", False):
+            planner = SubsystemPlanner()
+            subsystem_plan_map = planner.plan({}, decomposition_result, architecture_plan, make_bundle(include_template=True))
+
+        plan = subsystem_plan_map["supply_fan_ctrl"]
+        imported_names = [item["signal_name"] for item in plan["imported_signals"]]
+        self.assertEqual(plan["implementation_mode"], "atomic_assembly")
+        self.assertTrue(plan["template_binding"]["degraded"])
+        self.assertEqual(plan["template_binding"]["template_id"], "fan_template")
+        self.assertIn("template_input_interface_mismatch", plan["degrade_reason"])
+        self.assertIn("fan_enable_feedback", imported_names)
+
+    def test_subsystem_planner_degrades_to_atomic_when_template_outputs_are_insufficient(self):
+        decomposition_result, architecture_plan = make_decomposition_and_architecture(prefer_template=True)
+        descriptor = decomposition_result["subsystem_descriptors"][0]
+        descriptor["interface_bindings"].append(
+            {
+                "signal_name": "supply_fan_status_flag",
+                "signal_key": "supply_fan_status_flag",
+                "canonical_signal_key": "supply_fan_status_flag",
+                "direction": "output",
+                "binding_kind": "subsystem_output",
+                "allowed_external": False,
+                "owner_subsystem_id": "",
+                "port_index": 1,
+            }
+        )
+        descriptor["exports"].append("supply_fan_status_flag")
+
+        with patch.object(config, "DEBUG", False):
+            planner = SubsystemPlanner()
+            subsystem_plan_map = planner.plan({}, decomposition_result, architecture_plan, make_bundle(include_template=True))
+
+        plan = subsystem_plan_map["supply_fan_ctrl"]
+        self.assertEqual(plan["implementation_mode"], "atomic_assembly")
+        self.assertTrue(plan["template_binding"]["degraded"])
+        self.assertEqual(plan["template_binding"]["template_id"], "fan_template")
+        self.assertIn("template_output_interface_mismatch", plan["degrade_reason"])
+
     def test_subsystem_planner_uses_shared_signal_registry_for_cross_subsystem_interfaces(self):
         decomposition_result, architecture_plan = make_multi_subsystem_inputs()
 

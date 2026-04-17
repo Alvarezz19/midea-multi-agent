@@ -259,6 +259,16 @@ class RetrievalAgentPhase2ChromaTests(unittest.TestCase):
         self.assertEqual(bundle["metadata"]["retrieved_atomic_count"], 1)
         self.assertEqual(bundle["metadata"]["retrieved_subflow_count"], 1)
         self.assertEqual(bundle["metadata"]["retrieved_pattern_count"], 1)
+        self.assertTrue(bundle["metadata"]["rewrite_used"])
+        self.assertTrue(bundle["metadata"]["analysis_used"])
+        self.assertEqual(bundle["metadata"]["llm_queries"], ["fan control"])
+        self.assertEqual(bundle["metadata"]["analysis_summary"], "")
+        self.assertEqual(bundle["metadata"]["top_atomic_module_types"], ["constInput"])
+        self.assertEqual(bundle["metadata"]["top_subflow_template_ids"], ["fan_template"])
+        self.assertEqual(bundle["metadata"]["top_system_pattern_ids"], ["ahu_control_pattern_v1"])
+        self.assertEqual(len(bundle["metadata"]["top_atomic_scores"]), 1)
+        self.assertEqual(len(bundle["metadata"]["top_subflow_scores"]), 1)
+        self.assertEqual(len(bundle["metadata"]["top_system_pattern_scores"]), 1)
         self.assertEqual(
             bundle["metadata"]["selected_case_pattern_id"], "ahu_control_pattern_v1"
         )

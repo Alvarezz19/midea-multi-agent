@@ -291,6 +291,51 @@ def _real_multisubsystem_analysis_result(case_name: str) -> dict:
             "operating_conditions": ["定时启停"],
             "interlocks": ["送风机故障联锁", "直膨机状态联锁"],
         },
+        "fan_damper": {
+            "query": "为 AHU 生成送风机与新风阀/回风阀 CO2 联动控制",
+            "retrieval_queries": ["AHU 送风机 风阀 CO2 联动控制", "送风机标准控制", "新风阀 回风阀 CO2 控制"],
+            "summary": "AHU 送风机与新风阀/回风阀 CO2 联动控制",
+            "business_goal": "送风机与风阀 CO2 联动控制 supply_fan_control air_damper_control",
+            "equipment_object": "送风机、新风阀、回风阀 supply_fan_control air_damper_control",
+            "actuator": "送风机、风阀 supply_fan_control air_damper_control",
+            "controlled_variable": "CO2 浓度",
+            "output_signal": "送风机可用标志、风阀开度命令",
+            "control_strategy": "标准控制 + CO2 联动",
+            "input_signals": ["CO2 浓度", "送风机运行状态", "送风机启停手/自动", "新风阀反馈", "回风阀反馈"],
+            "output_signals": ["送风机可用标志", "新风阀开度命令", "回风阀开度命令"],
+            "operating_conditions": ["定时启停"],
+            "interlocks": ["送风机故障联锁"],
+        },
+        "supply_and_exhaust_fan": {
+            "query": "为 AHU 生成送风机与排风机联动控制",
+            "retrieval_queries": ["AHU 送风机 排风机 联动控制", "送风机标准控制", "排风机标准控制"],
+            "summary": "AHU 送风机与排风机联动控制",
+            "business_goal": "送风机与排风机联动控制 supply_fan_control exhaust_fan_control",
+            "equipment_object": "送风机、排风机 supply_fan_control exhaust_fan_control",
+            "actuator": "送风机、排风机 supply_fan_control exhaust_fan_control",
+            "controlled_variable": "送排风平衡",
+            "output_signal": "送风机可用标志、排风机运行命令",
+            "control_strategy": "标准控制 + 联锁",
+            "input_signals": ["送风机运行状态", "送风机故障状态", "排风机运行状态", "排风机故障状态"],
+            "output_signals": ["送风机可用标志", "排风机运行命令"],
+            "operating_conditions": ["定时启停"],
+            "interlocks": ["送风机故障联锁", "排风机故障联锁"],
+        },
+        "fan_heater_chw_triplet": {
+            "query": "为 AHU 生成送风机、电加热、冷水阀三子系统联动控制",
+            "retrieval_queries": ["AHU 送风机 电加热 冷水阀 联动控制", "送风机标准控制", "电加热标准控制", "冷水阀标准控制"],
+            "summary": "AHU 送风机、电加热、冷水阀三子系统联动控制",
+            "business_goal": "送风机、电加热、冷水阀三子系统联动控制 supply_fan_control heater_control chw_valve_control",
+            "equipment_object": "送风机、电加热、冷水阀 supply_fan_control heater_control chw_valve_control",
+            "actuator": "送风机、电加热、冷水阀 supply_fan_control heater_control chw_valve_control",
+            "controlled_variable": "送风温度",
+            "output_signal": "送风机可用标志、电加热启停命令、冷水阀开度命令",
+            "control_strategy": "标准控制 + 联锁",
+            "input_signals": ["送风温度", "送风机运行状态", "送风机故障状态", "送风机启停手/自动"],
+            "output_signals": ["送风机可用标志", "电加热启停命令", "冷水阀开度命令"],
+            "operating_conditions": ["定时启停"],
+            "interlocks": ["送风机故障联锁"],
+        },
     }
     case = cases[case_name]
     return {
@@ -418,6 +463,17 @@ class Phase3WorkflowTraceSummaryTests(unittest.TestCase):
                 "retrieved_atomic_count": 1,
                 "retrieved_subflow_count": 1,
                 "retrieved_pattern_count": 1,
+                "top_atomic_module_types": ["constInput"],
+                "top_atomic_scores": [0.95],
+                "top_subflow_template_ids": ["fan_template"],
+                "top_subflow_scores": [0.91],
+                "top_system_pattern_ids": ["ahu_test_pattern"],
+                "top_system_pattern_scores": [0.88],
+                "query_variants": ["送风机控制", "AHU 送风机控制"],
+                "llm_queries": ["送风机控制", "AHU 送风机控制"],
+                "rewrite_used": True,
+                "analysis_used": True,
+                "analysis_confidence": 0.93,
             }
         )
         final_state["retrieval_bundle"] = bundle
@@ -464,8 +520,17 @@ class Phase3WorkflowTraceSummaryTests(unittest.TestCase):
         self.assertEqual(summary["retrieved_atomic_count"], 1)
         self.assertEqual(summary["retrieved_subflow_count"], 1)
         self.assertEqual(summary["retrieved_pattern_count"], 1)
+        self.assertEqual(summary["top_atomic_module_types"], ["constInput"])
+        self.assertEqual(summary["top_subflow_template_ids"], ["fan_template"])
+        self.assertEqual(summary["top_system_pattern_ids"], ["ahu_test_pattern"])
+        self.assertEqual(summary["query_variants_count"], 2)
+        self.assertEqual(summary["llm_queries_count"], 2)
+        self.assertTrue(summary["rewrite_used"])
+        self.assertTrue(summary["analysis_used"])
+        self.assertEqual(summary["analysis_confidence"], 0.93)
         self.assertEqual(summary["reuse_template_subsystem_count"], 1)
         self.assertEqual(summary["atomic_assembly_subsystem_count"], 1)
+        self.assertEqual(summary["subsystem_ids"], ["supply_fan_ctrl", "heater_ctrl"])
         self.assertEqual(summary["unresolved_item_count"], 2)
         self.assertEqual(summary["unresolved_error_count"], 1)
         self.assertEqual(summary["unresolved_warning_count"], 1)
@@ -481,6 +546,7 @@ class Phase3WorkflowTraceSummaryTests(unittest.TestCase):
         self.assertEqual(summary["last_repair_issue_ids"], [])
         self.assertEqual(summary["last_repair_actions"], [])
         self.assertEqual(summary["reject_reason"], "")
+        self.assertEqual(summary["failure_bucket"], "other_retryable_error")
         self.assertIn("synthetic_shared_signal_source", summary["unresolved_item_types"])
         self.assertIn("status=retryable_error", summary["acceptance_summary"])
 
@@ -545,9 +611,30 @@ class Phase3WorkflowRealIntegrationTests(unittest.TestCase):
 
     def test_workflow_runs_multi_subsystem_cases_with_real_phase2_assets(self):
         cases = {
-            "fan_heater": {"subsystems": {"supply_fan_ctrl", "heater_ctrl"}},
-            "fan_chw": {"subsystems": {"supply_fan_ctrl", "chw_valve_ctrl"}},
-            "fan_dx": {"subsystems": {"supply_fan_ctrl", "dx_ctrl"}},
+            "fan_heater": {
+                "subsystems": {"supply_fan_ctrl", "heater_ctrl"},
+                "expected_reuse_subsystems": {"supply_fan_ctrl", "heater_ctrl"},
+            },
+            "fan_chw": {
+                "subsystems": {"supply_fan_ctrl", "chw_valve_ctrl"},
+                "expected_reuse_subsystems": {"supply_fan_ctrl", "chw_valve_ctrl"},
+            },
+            "fan_dx": {
+                "subsystems": {"supply_fan_ctrl", "dx_ctrl"},
+                "expected_reuse_subsystems": {"supply_fan_ctrl", "dx_ctrl"},
+            },
+            "fan_damper": {
+                "subsystems": {"supply_fan_ctrl", "air_damper_ctrl"},
+                "expected_reuse_subsystems": {"supply_fan_ctrl"},
+            },
+            "supply_and_exhaust_fan": {
+                "subsystems": {"supply_fan_ctrl", "exhaust_fan_ctrl"},
+                "expected_reuse_subsystems": {"supply_fan_ctrl", "exhaust_fan_ctrl"},
+            },
+            "fan_heater_chw_triplet": {
+                "subsystems": {"supply_fan_ctrl", "heater_ctrl", "chw_valve_ctrl"},
+                "expected_reuse_subsystems": {"supply_fan_ctrl", "heater_ctrl", "chw_valve_ctrl"},
+            },
         }
 
         for case_name, expectation in cases.items():
@@ -561,16 +648,21 @@ class Phase3WorkflowRealIntegrationTests(unittest.TestCase):
                 result = workflow.run_workflow(_real_multisubsystem_analysis_result(case_name)["scenario_analysis"]["summary"])
 
             self.assertEqual(result["verification_report"]["status"], "passed")
+            self.assertEqual(result["route_decision"]["decision"], "accept")
             self.assertTrue(expectation["subsystems"].issubset(set(result["subsystem_plan_map"].keys())))
-            for subsystem_id in expectation["subsystems"]:
+            for subsystem_id in expectation["expected_reuse_subsystems"]:
                 self.assertEqual(result["subsystem_plan_map"][subsystem_id]["implementation_mode"], "reuse_template")
+                self.assertFalse(result["subsystem_plan_map"][subsystem_id]["degrade_reason"])
             unresolved_types = {
                 item.get("type")
                 for item in result["assembled_graph_ir"].get("unresolved_items", [])
             }
             self.assertNotIn("synthetic_shared_signal_source", unresolved_types)
             self.assertNotIn("ambiguous_shared_signal", unresolved_types)
-            self.assertGreaterEqual(result["retrieval_bundle"]["metadata"]["retrieved_subflow_count"], 2)
+            self.assertGreaterEqual(
+                result["retrieval_bundle"]["metadata"]["retrieved_subflow_count"],
+                len(expectation["subsystems"]),
+            )
             self.assertTrue(result["assembled_graph_ir"]["edges"])
 
 

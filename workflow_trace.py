@@ -30,6 +30,7 @@ from workflow import (
     build_initial_state,
     populate_phase4_workflow,
 )
+from utils.phase6_diagnostics import derive_failure_bucket, ordered_subsystem_ids
 
 try:
     from agents.retrieval_agent import RetrievalAgent
@@ -208,6 +209,7 @@ def _build_trace_summary(
 ) -> dict:
     retrieval_metadata = ((final_state or {}).get("retrieval_bundle", {}) or {}).get("metadata", {}) or {}
     subsystem_plan_map = (final_state or {}).get("subsystem_plan_map", {}) or {}
+    architecture_plan = (final_state or {}).get("architecture_plan", {}) or {}
     assembled_graph_ir = (final_state or {}).get("assembled_graph_ir", {}) or {}
     compiled_artifact = (final_state or {}).get("compiled_artifact", {}) or {}
     verification_report = (final_state or {}).get("verification_report", {}) or {}
@@ -255,6 +257,7 @@ def _build_trace_summary(
     verification_metrics = verification_report.get("metrics", {}) or {}
     compile_report = compiled_artifact.get("compile_report", {}) or {}
     subsystem_mode_counts = _count_subsystem_modes(subsystem_plan_map)
+    subsystem_ids = ordered_subsystem_ids(architecture_plan, subsystem_plan_map)
     last_repair_entry = repair_history[-1] if repair_history else {}
     repair_scopes_seen = _ordered_unique_scopes([
         entry.get("scope", "")
@@ -268,6 +271,28 @@ def _build_trace_summary(
     last_repair_actions = list(last_repair_entry.get("actions", []) or [])
     reject_reason = str(route_decision.get("reason", "")).strip() if final_route_decision == "reject" else ""
     repair_reject_category = _repair_reject_category(route_decision)
+    top_atomic_module_types = list(retrieval_metadata.get("top_atomic_module_types", []) or [])
+    top_atomic_scores = list(retrieval_metadata.get("top_atomic_scores", []) or [])
+    top_subflow_template_ids = list(retrieval_metadata.get("top_subflow_template_ids", []) or [])
+    top_subflow_scores = list(retrieval_metadata.get("top_subflow_scores", []) or [])
+    top_system_pattern_ids = list(retrieval_metadata.get("top_system_pattern_ids", []) or [])
+    top_system_pattern_scores = list(retrieval_metadata.get("top_system_pattern_scores", []) or [])
+    query_variants = list(retrieval_metadata.get("query_variants", []) or [])
+    llm_queries = list(retrieval_metadata.get("llm_queries", []) or [])
+    try:
+        analysis_confidence = float(retrieval_metadata.get("analysis_confidence", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        analysis_confidence = 0.0
+    failure_bucket = derive_failure_bucket(
+        verification_report=verification_report,
+        route_decision=route_decision,
+        repair_history=repair_history,
+        unresolved_item_types=unresolved_item_types,
+        repair_reject_category=repair_reject_category,
+        workflow_status=workflow_status,
+        error_type=str((failed_output or {}).get("error_type", "")).strip(),
+        error_message=str((failed_output or {}).get("error_message", "")).strip(),
+    )
 
     acceptance_summary = (
         f"status={verification_status or workflow_status}; "
@@ -292,8 +317,20 @@ def _build_trace_summary(
         "retrieved_atomic_count": _to_int(retrieval_metadata.get("retrieved_atomic_count", 0)),
         "retrieved_subflow_count": _to_int(retrieval_metadata.get("retrieved_subflow_count", 0)),
         "retrieved_pattern_count": _to_int(retrieval_metadata.get("retrieved_pattern_count", 0)),
+        "top_atomic_module_types": top_atomic_module_types,
+        "top_atomic_scores": top_atomic_scores,
+        "top_subflow_template_ids": top_subflow_template_ids,
+        "top_subflow_scores": top_subflow_scores,
+        "top_system_pattern_ids": top_system_pattern_ids,
+        "top_system_pattern_scores": top_system_pattern_scores,
+        "query_variants_count": len(query_variants),
+        "llm_queries_count": len(llm_queries),
+        "rewrite_used": bool(retrieval_metadata.get("rewrite_used", False)),
+        "analysis_used": bool(retrieval_metadata.get("analysis_used", False)),
+        "analysis_confidence": analysis_confidence,
         "reuse_template_subsystem_count": subsystem_mode_counts["reuse_template_subsystem_count"],
         "atomic_assembly_subsystem_count": subsystem_mode_counts["atomic_assembly_subsystem_count"],
+        "subsystem_ids": subsystem_ids,
         "unresolved_item_count": len(unresolved_items),
         "unresolved_error_count": unresolved_error_count,
         "unresolved_warning_count": unresolved_warning_count,
@@ -319,6 +356,7 @@ def _build_trace_summary(
         "last_repair_actions": last_repair_actions,
         "reject_reason": reject_reason,
         "repair_reject_category": repair_reject_category,
+        "failure_bucket": failure_bucket,
         "compile_report_summary": {
             "page_count": _to_int(compile_report.get("page_count", 0)),
             "subflow_count": _to_int(compile_report.get("subflow_count", 0)),
@@ -401,8 +439,20 @@ def _save_workflow_trace(user_query: str, node_io_records: list[dict], final_sta
             f"pattern={summary['retrieved_pattern_count']}\n"
         ),
         (
+            f"**检索诊断**: rewrite_used={summary['rewrite_used']} / "
+            f"analysis_used={summary['analysis_used']} / "
+            f"query_variants={summary['query_variants_count']} / "
+            f"llm_queries={summary['llm_queries_count']} / "
+            f"analysis_confidence={summary['analysis_confidence']}\n"
+        ),
+        (
+            f"**检索 Top IDs**: subflow={', '.join(summary['top_subflow_template_ids']) if summary['top_subflow_template_ids'] else 'none'} / "
+            f"pattern={', '.join(summary['top_system_pattern_ids']) if summary['top_system_pattern_ids'] else 'none'}\n"
+        ),
+        (
             f"**子系统实现**: reuse_template={summary['reuse_template_subsystem_count']} / "
-            f"atomic_assembly={summary['atomic_assembly_subsystem_count']}\n"
+            f"atomic_assembly={summary['atomic_assembly_subsystem_count']} / "
+            f"subsystem_ids={', '.join(summary['subsystem_ids']) if summary['subsystem_ids'] else 'none'}\n"
         ),
         (
             f"**未解析项**: total={summary['unresolved_item_count']} / "
@@ -461,6 +511,8 @@ def _save_workflow_trace(user_query: str, node_io_records: list[dict], final_sta
         markdown_lines.append(f"**Reject 原因**: {summary['reject_reason']}\n")
     if summary["repair_reject_category"]:
         markdown_lines.append(f"**Reject 分类**: {summary['repair_reject_category']}\n")
+    if summary["failure_bucket"]:
+        markdown_lines.append(f"**Failure Bucket**: {summary['failure_bucket']}\n")
 
     markdown_lines.extend([
         f"**运行目录**: {os.path.abspath(trace_dir)}\n",

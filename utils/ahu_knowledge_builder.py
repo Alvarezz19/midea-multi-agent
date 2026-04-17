@@ -30,6 +30,14 @@ _TOPOLOGY_IGNORED_KEYS = {
     "d",
 }
 
+_PAGE_ROLE_ALIAS_RULES: Dict[str, Dict[str, Any]] = {
+    "exhaust_fan": {
+        "alias_role": "exhaust_fan_control",
+        "base_template_roles": ("supply_fan_control",),
+        "keywords": ("排风机", "排风", "exhaust fan", "exhaust", "ef", "开排风机"),
+    }
+}
+
 
 def _normalize_text(value: Any) -> str:
     if not isinstance(value, str):
@@ -447,6 +455,111 @@ def _build_subflow_template_asset(
     }
 
 
+def _unique_texts(values: Iterable[Any]) -> List[str]:
+    ordered: List[str] = []
+    seen: Set[str] = set()
+    for value in values:
+        normalized = _normalize_text(value)
+        if normalized and normalized not in seen:
+            ordered.append(normalized)
+            seen.add(normalized)
+    return ordered
+
+
+def _alias_template_name(base_template_name: str, alias_role: str) -> str:
+    normalized_name = _normalize_text(base_template_name)
+    if alias_role == "exhaust_fan_control":
+        replaced = normalized_name.replace("送风机", "排风机")
+        if replaced != normalized_name:
+            return replaced
+        return "排风机标准控制"
+    return normalized_name or alias_role
+
+
+def _collect_alias_signal_examples(page_objects: Iterable[Dict[str, Any]], keywords: Iterable[str]) -> List[str]:
+    lowered_keywords = tuple(_normalize_text(keyword).lower() for keyword in keywords if _normalize_text(keyword))
+    examples: List[str] = []
+    for obj in page_objects:
+        if not isinstance(obj, dict):
+            continue
+        for candidate in (
+            obj.get("name"),
+            obj.get("label"),
+            obj.get("labelName"),
+            obj.get("labelNameOld"),
+        ):
+            normalized = _normalize_text(candidate)
+            lowered = normalized.lower()
+            if not normalized:
+                continue
+            if lowered_keywords and any(keyword in lowered for keyword in lowered_keywords):
+                examples.append(normalized)
+                continue
+            if "ef" in lowered:
+                examples.append(normalized)
+    return _unique_texts(examples)[:6]
+
+
+def _build_role_alias_template_asset(
+    base_asset: Dict[str, Any],
+    *,
+    alias_role: str,
+    source_path: Path,
+    page_label: str,
+    page_key: str,
+    signal_examples: List[str],
+) -> Dict[str, Any]:
+    base_template_name = _normalize_text(base_asset.get("template_name", ""))
+    alias_name = _alias_template_name(base_template_name, alias_role)
+    source_info = dict(base_asset.get("source_info", {}) or {})
+    signature_hash = _normalize_text(source_info.get("signature_hash", ""))
+    signature_token = signature_hash[:10] or hashlib.sha1(
+        f"{base_asset.get('template_id', '')}:{alias_role}".encode("utf-8")
+    ).hexdigest()[:10]
+    template_id = (
+        f"{_slugify(base_asset.get('system_type') or DEFAULT_SYSTEM_TYPE) or 'ahu'}"
+        f"_subflow_alias__{_slugify(alias_role) or 'role'}__{signature_token}__v1"
+    )
+
+    alias_template = copy.deepcopy(base_asset)
+    alias_template["module_type"] = template_id
+    alias_template["template_id"] = template_id
+    alias_template["definition_id"] = _normalize_text(base_asset.get("definition_id", "")) or template_id
+    alias_template["template_name"] = alias_name
+    alias_template["template_role"] = alias_role
+    alias_template["keywords"] = _unique_texts(
+        list(base_asset.get("keywords", []) or [])
+        + [alias_name, page_label, alias_role.replace("_", " ")]
+        + list(signal_examples)
+    )
+    alias_template["category"] = f"{alias_template.get('system_type', DEFAULT_SYSTEM_TYPE)}子流程模板/{alias_role}"
+    alias_template["description"] = (
+        f"{alias_name} 子流程模板，复用 {base_template_name or base_asset.get('template_id', '')} 正式定义；"
+        f"source_page={page_label or page_key}"
+        + (
+            f"；source_signals={', '.join(signal_examples[:4])}"
+            if signal_examples
+            else ""
+        )
+    )
+
+    template_json = copy.deepcopy(base_asset.get("template_json", {}) or {})
+    template_json["template_id"] = template_id
+    template_json["definition_id"] = alias_template["definition_id"]
+    template_json["id"] = alias_template["definition_id"]
+    alias_template["template_json"] = template_json
+
+    alias_source = alias_template.setdefault("source_info", {})
+    alias_source["source_flows"] = [source_path.name]
+    alias_source["source_flow_paths"] = [str(source_path)]
+    alias_source["alias_of_template_id"] = _normalize_text(base_asset.get("template_id", ""))
+    alias_source["alias_of_template_role"] = _normalize_text(base_asset.get("template_role", ""))
+    alias_source["alias_page_keys"] = [page_key] if page_key else []
+    alias_source["alias_page_labels"] = [page_label] if page_label else []
+    alias_source["alias_signal_examples"] = list(signal_examples)
+    return alias_template
+
+
 def _merge_subflow_assets(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
     existing_source = existing.setdefault("source_info", {})
     incoming_source = incoming.get("source_info", {})
@@ -467,6 +580,19 @@ def _merge_subflow_assets(existing: Dict[str, Any], incoming: Dict[str, Any]) ->
         existing_source["original_subflow_id"] = incoming_source.get("original_subflow_id", "")
     if not existing_source.get("signature_hash"):
         existing_source["signature_hash"] = incoming_source.get("signature_hash", "")
+    if not existing_source.get("alias_of_template_id"):
+        existing_source["alias_of_template_id"] = incoming_source.get("alias_of_template_id", "")
+    if not existing_source.get("alias_of_template_role"):
+        existing_source["alias_of_template_role"] = incoming_source.get("alias_of_template_role", "")
+
+    for key in ("alias_page_keys", "alias_page_labels", "alias_signal_examples"):
+        existing_values = list(existing_source.get(key, []))
+        for value in incoming_source.get(key, []):
+            normalized = _normalize_text(value)
+            if normalized and normalized not in existing_values:
+                existing_values.append(normalized)
+        if existing_values:
+            existing_source[key] = existing_values
 
     existing_dependencies = set(existing.get("dependency_module_types", []))
     existing_dependencies.update(incoming.get("dependency_module_types", []))
@@ -481,11 +607,79 @@ def _merge_subflow_assets(existing: Dict[str, Any], incoming: Dict[str, Any]) ->
     return existing
 
 
+def _collect_role_alias_templates(
+    flow_documents: List[Dict[str, Any]],
+    templates: Dict[str, Dict[str, Any]],
+    template_id_by_source_definition: Dict[Tuple[str, str], str],
+) -> Dict[str, Dict[str, Any]]:
+    alias_templates: Dict[str, Dict[str, Any]] = {}
+
+    for document in flow_documents:
+        objects = document.get("objects", []) or []
+        source_path = Path(document.get("source_path", ""))
+        page_meta_by_id: Dict[str, Dict[str, str]] = {}
+        page_objects: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+
+        for obj in objects:
+            if not isinstance(obj, dict):
+                continue
+            obj_id = _normalize_text(obj.get("id", ""))
+            if obj.get("type") == "tab":
+                page_label = _normalize_text(obj.get("label", ""))
+                page_key = _page_key_from_label(page_label)
+                page_meta_by_id[obj_id] = {"label": page_label, "page_key": page_key}
+                continue
+            page_id = _normalize_text(obj.get("z", ""))
+            if page_id:
+                page_objects.setdefault(page_id, []).append(obj)
+
+        for page_id, meta in page_meta_by_id.items():
+            page_key = meta.get("page_key", "")
+            rule = _PAGE_ROLE_ALIAS_RULES.get(page_key)
+            if not rule:
+                continue
+
+            alias_role = _normalize_text(rule.get("alias_role", ""))
+            base_roles = tuple(_normalize_text(role) for role in rule.get("base_template_roles", ()) if _normalize_text(role))
+            signal_examples = _collect_alias_signal_examples(page_objects.get(page_id, []), rule.get("keywords", ()))
+
+            for obj in page_objects.get(page_id, []):
+                if not isinstance(obj, dict):
+                    continue
+                obj_type = _normalize_text(obj.get("type", ""))
+                if not obj_type.startswith("subflow:"):
+                    continue
+                original_subflow_id = obj_type.split(":", 1)[1]
+                base_template_id = template_id_by_source_definition.get((source_path.name, original_subflow_id))
+                if not base_template_id:
+                    continue
+                base_template = templates.get(base_template_id, {})
+                if _normalize_text(base_template.get("template_role", "")) not in base_roles:
+                    continue
+
+                alias_asset = _build_role_alias_template_asset(
+                    base_template,
+                    alias_role=alias_role,
+                    source_path=source_path,
+                    page_label=meta.get("label", ""),
+                    page_key=page_key,
+                    signal_examples=signal_examples,
+                )
+                alias_template_id = alias_asset["template_id"]
+                if alias_template_id in alias_templates:
+                    alias_templates[alias_template_id] = _merge_subflow_assets(alias_templates[alias_template_id], alias_asset)
+                else:
+                    alias_templates[alias_template_id] = alias_asset
+
+    return alias_templates
+
+
 def collect_subflow_templates(
     flow_documents: List[Dict[str, Any]],
     system_type: str = DEFAULT_SYSTEM_TYPE,
 ) -> List[Dict[str, Any]]:
     templates: Dict[str, Dict[str, Any]] = {}
+    template_id_by_source_definition: Dict[Tuple[str, str], str] = {}
     for document in flow_documents:
         objects = document.get("objects", []) or []
         source_path = Path(document.get("source_path", ""))
@@ -498,10 +692,22 @@ def collect_subflow_templates(
             ]
             asset = _build_subflow_template_asset(subflow_obj, internal_objects, source_path, system_type)
             template_id = asset["template_id"]
+            if source_path.name and original_id:
+                template_id_by_source_definition[(source_path.name, original_id)] = template_id
             if template_id in templates:
                 templates[template_id] = _merge_subflow_assets(templates[template_id], asset)
             else:
                 templates[template_id] = asset
+
+    for template_id, asset in _collect_role_alias_templates(
+        flow_documents,
+        templates,
+        template_id_by_source_definition,
+    ).items():
+        if template_id in templates:
+            templates[template_id] = _merge_subflow_assets(templates[template_id], asset)
+        else:
+            templates[template_id] = asset
 
     return sorted(templates.values(), key=lambda item: item["template_id"])
 

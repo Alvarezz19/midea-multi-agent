@@ -80,6 +80,49 @@ class RetrievalAgent:
             return result[:max_items]
         return result
 
+    @classmethod
+    def _top_asset_identifiers(
+        cls,
+        items: Any,
+        *candidate_keys: str,
+        limit: int = 5,
+    ) -> List[str]:
+        if not isinstance(items, list):
+            return []
+
+        ordered: List[str] = []
+        seen = set()
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            identifier = ""
+            for key in candidate_keys:
+                identifier = cls._clean_text(item.get(key))
+                if identifier:
+                    break
+            if identifier and identifier not in seen:
+                ordered.append(identifier)
+                seen.add(identifier)
+            if len(ordered) >= limit:
+                break
+        return ordered
+
+    @staticmethod
+    def _top_asset_scores(items: Any, limit: int = 5) -> List[float]:
+        if not isinstance(items, list):
+            return []
+
+        scores: List[float] = []
+        for item in items[:limit]:
+            if not isinstance(item, dict):
+                scores.append(0.0)
+                continue
+            try:
+                scores.append(round(float(item.get("similarity_score", 0.0) or 0.0), 4))
+            except (TypeError, ValueError):
+                scores.append(0.0)
+        return scores
+
     def _normalize_retrieval_plan(self, retrieval_plan: Any, query: str) -> Dict[str, Any]:
         if not isinstance(retrieval_plan, dict):
             retrieval_plan = {}
@@ -528,6 +571,16 @@ class RetrievalAgent:
         if isinstance(selected_pattern.get("style_guides"), dict) and selected_pattern.get("style_guides"):
             style_guides.append(selected_pattern["style_guides"])
 
+        atomic_metadata = atomic_context.get("metadata", {}) if isinstance(atomic_context.get("metadata"), dict) else {}
+        llm_queries = self._clean_text_list(atomic_metadata.get("llm_queries", []), config.RETRIEVAL_LLM_MAX_QUERIES)
+        query_variants = retrieval_plan.get("queries", []) or [query]
+        analysis_summary = self._clean_text(atomic_metadata.get("analysis_summary", ""))
+        llm_category_l1 = self._clean_text(atomic_metadata.get("llm_category_l1", ""))
+        try:
+            analysis_confidence = float(atomic_metadata.get("analysis_confidence", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            analysis_confidence = 0.0
+
         return {
             "atomic_modules": atomic_context.get("relevant_nodes", []),
             "subflow_templates": subflow_templates,
@@ -535,7 +588,7 @@ class RetrievalAgent:
             "style_guides": style_guides,
             "metadata": {
                 "query_text": query,
-                "query_variants": retrieval_plan.get("queries", []) or [query],
+                "query_variants": query_variants,
                 "intent": retrieval_plan.get("intent", "general_query"),
                 "detected_operations": retrieval_plan.get("detected_operations", []),
                 "selected_case_pattern_id": selected_pattern.get("pattern_id", ""),
@@ -543,6 +596,31 @@ class RetrievalAgent:
                 "retrieved_subflow_count": len(subflow_templates),
                 "retrieved_pattern_count": len(system_patterns),
                 "avg_atomic_score": atomic_context.get("metadata", {}).get("avg_confidence_score", 0.0),
+                "rewrite_used": bool(atomic_metadata.get("rewrite_used", False)),
+                "analysis_used": bool(atomic_metadata.get("analysis_used", False)),
+                "llm_queries": llm_queries,
+                "llm_category_l1": llm_category_l1,
+                "analysis_summary": analysis_summary,
+                "analysis_confidence": analysis_confidence,
+                "top_atomic_module_types": self._top_asset_identifiers(
+                    atomic_context.get("relevant_nodes", []),
+                    "module_type",
+                    limit=5,
+                ),
+                "top_atomic_scores": self._top_asset_scores(atomic_context.get("relevant_nodes", []), limit=5),
+                "top_subflow_template_ids": self._top_asset_identifiers(
+                    subflow_templates,
+                    "template_id",
+                    "module_type",
+                    limit=5,
+                ),
+                "top_subflow_scores": self._top_asset_scores(subflow_templates, limit=5),
+                "top_system_pattern_ids": self._top_asset_identifiers(
+                    system_patterns,
+                    "pattern_id",
+                    limit=5,
+                ),
+                "top_system_pattern_scores": self._top_asset_scores(system_patterns, limit=5),
                 "query_bundle_version": "phase2-v1",
             },
         }

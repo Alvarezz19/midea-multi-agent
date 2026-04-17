@@ -326,44 +326,115 @@ class SubsystemPlanner:
             )
         return ordered
 
-    def _plan_template_reuse(
+    def _analyze_template_interface(
         self,
         descriptor: Dict[str, Any],
-        slot: Dict[str, Any],
         template_doc: Dict[str, Any],
         shared_signal_registry: Dict[str, Dict[str, Any]],
     ) -> Dict[str, Any]:
         subsystem_id = str(descriptor.get("subsystem_id", "")).strip()
-        page_id = str(descriptor.get("page_id", "")).strip()
         template_id = str(template_doc.get("template_id") or template_doc.get("module_type") or "").strip()
-        main_logic_id = f"{subsystem_id}_main"
         input_count, output_count = self._resolve_counts(template_doc, {})
         interface_bindings = self._descriptor_interface_bindings(descriptor, shared_signal_registry)
         input_bindings = self._bindings_for_direction(interface_bindings, "input")
         output_bindings = self._bindings_for_direction(interface_bindings, "output")
-        unresolved_items: List[Dict[str, Any]] = []
+
+        issues: List[Dict[str, Any]] = []
         if len(input_bindings) > input_count:
-            unresolved_items.append(
+            issues.append(
                 {
                     "type": "template_input_interface_mismatch",
                     "severity": "error",
                     "scope": "planning",
                     "subsystem_id": subsystem_id,
-                    "message": f"Template {template_id} only exposes {input_count} inputs but planner projected {len(input_bindings)} imported signals.",
+                    "message": (
+                        f"Template {template_id} only exposes {input_count} inputs but planner projected "
+                        f"{len(input_bindings)} imported signals."
+                    ),
                     "suggested_fix": "更换更匹配的子流程模板，或在架构层减少该子系统的共享输入约束。",
                 }
             )
         if len(output_bindings) > output_count:
-            unresolved_items.append(
+            issues.append(
                 {
                     "type": "template_output_interface_mismatch",
                     "severity": "error",
                     "scope": "planning",
                     "subsystem_id": subsystem_id,
-                    "message": f"Template {template_id} only exposes {output_count} outputs but planner projected {len(output_bindings)} exported signals.",
+                    "message": (
+                        f"Template {template_id} only exposes {output_count} outputs but planner projected "
+                        f"{len(output_bindings)} exported signals."
+                    ),
                     "suggested_fix": "更换更匹配的子流程模板，或在架构层修正该子系统的导出信号归属。",
                 }
             )
+
+        return {
+            "template_id": template_id,
+            "input_count": input_count,
+            "output_count": output_count,
+            "interface_bindings": interface_bindings,
+            "input_bindings": input_bindings,
+            "output_bindings": output_bindings,
+            "issues": issues,
+        }
+
+    def _plan_template_reuse(
+        self,
+        descriptor: Dict[str, Any],
+        slot: Dict[str, Any],
+        template_doc: Dict[str, Any],
+        atomic_modules: List[Dict[str, Any]],
+        shared_signal_registry: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        subsystem_id = str(descriptor.get("subsystem_id", "")).strip()
+        page_id = str(descriptor.get("page_id", "")).strip()
+        interface_analysis = self._analyze_template_interface(descriptor, template_doc, shared_signal_registry)
+        template_id = str(interface_analysis.get("template_id", "")).strip()
+        main_logic_id = f"{subsystem_id}_main"
+        input_count = int(interface_analysis.get("input_count", 0) or 0)
+        output_count = int(interface_analysis.get("output_count", 0) or 0)
+        interface_bindings = list(interface_analysis.get("interface_bindings", []) or [])
+        input_bindings = list(interface_analysis.get("input_bindings", []) or [])
+        output_bindings = list(interface_analysis.get("output_bindings", []) or [])
+        issues = list(interface_analysis.get("issues", []) or [])
+        if issues:
+            issue_types = [str(item.get("type", "")).strip() for item in issues if str(item.get("type", "")).strip()]
+            degrade_reason = (
+                f"Template {template_id} interface mismatch ({', '.join(issue_types)}); fallback to atomic_assembly. "
+                + " ".join(str(item.get("message", "")).strip() for item in issues if str(item.get("message", "")).strip())
+            ).strip()
+            degraded_slot = dict(slot)
+            degraded_slot["selection_reason"] = (
+                str(slot.get("selection_reason", "")).strip()
+                or f"Selected reusable template {template_id}."
+            ) + f" Rejected due to interface mismatch; fallback to atomic_assembly."
+            degraded_slot["degrade_reason"] = degrade_reason
+            degraded_slot["reasoning"] = "Atomic fallback path selected after template interface mismatch."
+            fallback_plan = self._plan_atomic_fallback(
+                descriptor,
+                degraded_slot,
+                atomic_modules,
+                shared_signal_registry,
+            )
+            template_binding = dict(fallback_plan.get("template_binding", {}) or {})
+            template_binding.update(
+                {
+                    "template_id": template_id,
+                    "reasoning": "Selected template rejected due to interface mismatch; fell back to atomic modules.",
+                    "degraded": True,
+                    "degrade_from": "reuse_template",
+                    "degrade_reason": degrade_reason,
+                    "degrade_issue_types": issue_types,
+                    "score_breakdown": list(slot.get("score_breakdown", []) or []),
+                }
+            )
+            fallback_plan["template_binding"] = template_binding
+            fallback_plan["selection_reason"] = degraded_slot["selection_reason"]
+            fallback_plan["degrade_reason"] = degrade_reason
+            fallback_plan["reasoning"] = degraded_slot["reasoning"]
+            return fallback_plan
+
         active_input_bindings = input_bindings[:input_count]
         active_output_bindings = output_bindings[:output_count]
         active_input_count = len(active_input_bindings)
@@ -407,7 +478,7 @@ class SubsystemPlanner:
                         "source": "architecture_plan.subsystem_slots",
                     }
                 ],
-                "unresolved_items": unresolved_items,
+                "unresolved_items": [],
                 "reasoning": str(slot.get("reasoning", "")).strip() or "Template reuse path selected.",
             }
         )
@@ -595,7 +666,13 @@ class SubsystemPlanner:
             slot = subsystem_slots.get(subsystem_id, {})
             template_doc = self._select_template_doc(slot, doc_map)
             if template_doc:
-                subsystem_plan = self._plan_template_reuse(descriptor, slot, template_doc, shared_signal_registry)
+                subsystem_plan = self._plan_template_reuse(
+                    descriptor,
+                    slot,
+                    template_doc,
+                    atomic_modules,
+                    shared_signal_registry,
+                )
             else:
                 subsystem_plan = self._plan_atomic_fallback(descriptor, slot, atomic_modules, shared_signal_registry)
             subsystem_plan_map[subsystem_id] = subsystem_plan

@@ -158,12 +158,20 @@ class ArchitecturePlanner:
         for subsystem_type in subsystem_types:
             related_page_keys = set(_SUBSYSTEM_PATTERN_PAGE_KEYS.get(subsystem_type, ()))
             matched = related_page_keys & pattern_page_keys
+            missing = related_page_keys - pattern_page_keys
+            delta = 0
             if matched:
-                score += len(matched) * 3
+                delta += len(matched) * 3
                 reasons.append(f"{subsystem_type} 对应页面匹配: {', '.join(sorted(matched))}")
+            if missing:
+                delta -= len(missing) * 3
+                reasons.append(f"{subsystem_type} 缺少页面支撑: {', '.join(sorted(missing))}")
+            if delta:
+                score += delta
                 score_breakdown["subsystem_type"][subsystem_type] = {
                     "matched_page_keys": sorted(matched),
-                    "score": len(matched) * 3,
+                    "missing_page_keys": sorted(missing),
+                    "score": delta,
                 }
 
         for mode in requirement_spec.get("global_modes", []) or []:
@@ -172,11 +180,21 @@ class ArchitecturePlanner:
                 continue
             related_page_keys = set(_GLOBAL_MODE_PAGE_KEYS.get(mode_name, ()))
             matched = sorted(related_page_keys & pattern_page_keys)
+            missing = sorted(related_page_keys - pattern_page_keys)
+            delta = 0
             if matched:
-                delta = len(matched) * 2
-                score += delta
+                delta += len(matched) * 2
                 reasons.append(f"global_mode {mode_name} 页面支撑: {', '.join(matched)}")
-                score_breakdown["global_modes"][mode_name] = {"matched_page_keys": matched, "score": delta}
+            if missing:
+                delta -= len(missing) * 2
+                reasons.append(f"global_mode {mode_name} 缺少页面支撑: {', '.join(missing)}")
+            if delta:
+                score += delta
+                score_breakdown["global_modes"][mode_name] = {
+                    "matched_page_keys": matched,
+                    "missing_page_keys": missing,
+                    "score": delta,
+                }
 
         signals = requirement_spec.get("signals", {}) if isinstance(requirement_spec.get("signals"), dict) else {}
         signal_texts = [
@@ -320,6 +338,32 @@ class ArchitecturePlanner:
         }
 
     @classmethod
+    def _interface_signal_keys(
+        cls,
+        subsystem: Dict[str, Any],
+        direction: str,
+    ) -> set[str]:
+        field_name = "imports" if direction == "input" else "exports"
+        return {
+            canonical_key
+            for value in subsystem.get(field_name, []) or []
+            if (canonical_key := canonicalize_signal_name(value))
+        }
+
+    @classmethod
+    def _template_interface_signal_keys(
+        cls,
+        template: Dict[str, Any],
+        direction: str,
+    ) -> set[str]:
+        port_direction = "inputs" if direction == "input" else "outputs"
+        return {
+            canonical_key
+            for item in cls._extract_template_ports(template, port_direction)
+            if (canonical_key := canonicalize_signal_name(item.get("label")))
+        }
+
+    @classmethod
     def _score_template_candidate(
         cls,
         subsystem: Dict[str, Any],
@@ -340,12 +384,18 @@ class ArchitecturePlanner:
         )
         keywords = _SUBSYSTEM_TEMPLATE_KEYWORDS.get(subsystem_type, ())
         signal_context = cls._requirement_signal_context(requirement_spec, subsystem)
-        template_ports = cls._extract_template_ports(template, "inputs") + cls._extract_template_ports(template, "outputs")
+        template_input_ports = cls._extract_template_ports(template, "inputs")
+        template_output_ports = cls._extract_template_ports(template, "outputs")
+        template_ports = template_input_ports + template_output_ports
         template_signal_keys = {
             canonicalize_signal_name(item.get("label"))
             for item in template_ports
             if canonicalize_signal_name(item.get("label"))
         }
+        expected_input_keys = cls._interface_signal_keys(subsystem, "input")
+        expected_output_keys = cls._interface_signal_keys(subsystem, "output")
+        template_input_signal_keys = cls._template_interface_signal_keys(template, "input")
+        template_output_signal_keys = cls._template_interface_signal_keys(template, "output")
         global_mode_keys = {
             canonicalize_signal_name(value)
             for value in requirement_spec.get("global_modes", []) or []
@@ -360,6 +410,11 @@ class ArchitecturePlanner:
             "keyword_overlap": {"matched": [], "score": 0},
             "signal_overlap": {"matched": [], "score": 0},
             "global_modes": {"matched": [], "score": 0},
+            "interface_coverage": {
+                "inputs": {"matched": [], "missing": [], "score": 0},
+                "outputs": {"matched": [], "missing": [], "score": 0},
+            },
+            "interface_capacity": {"input_shortage": 0, "output_shortage": 0, "score": 0},
             "required_pages": {"page_hint": page_label, "score": 0},
             "preferred_template": 0,
         }
@@ -404,6 +459,45 @@ class ArchitecturePlanner:
             score += delta
             reasons.append(f"global_modes 与模板端口重合: {', '.join(matched_modes)}")
             score_breakdown["global_modes"] = {"matched": matched_modes, "score": delta}
+
+        for direction, expected_keys, template_keys in (
+            ("inputs", expected_input_keys, template_input_signal_keys),
+            ("outputs", expected_output_keys, template_output_signal_keys),
+        ):
+            if not expected_keys:
+                continue
+            matched_keys = sorted(expected_keys & template_keys)
+            missing_keys = sorted(expected_keys - template_keys)
+            delta = len(matched_keys) * 6 - len(missing_keys) * 8
+            score += delta
+            if matched_keys:
+                reasons.append(f"{direction} 接口覆盖: {', '.join(matched_keys)}")
+            if missing_keys:
+                reasons.append(f"{direction} 接口缺失: {', '.join(missing_keys)}")
+            score_breakdown["interface_coverage"][direction] = {
+                "matched": matched_keys,
+                "missing": missing_keys,
+                "score": delta,
+            }
+
+        input_shortage = max(0, len(expected_input_keys) - len(template_input_ports))
+        output_shortage = max(0, len(expected_output_keys) - len(template_output_ports))
+        if input_shortage or output_shortage:
+            delta = -(input_shortage + output_shortage) * 10
+            score += delta
+            if input_shortage:
+                reasons.append(
+                    f"模板输入端口不足: required={len(expected_input_keys)} actual={len(template_input_ports)}"
+                )
+            if output_shortage:
+                reasons.append(
+                    f"模板输出端口不足: required={len(expected_output_keys)} actual={len(template_output_ports)}"
+                )
+            score_breakdown["interface_capacity"] = {
+                "input_shortage": input_shortage,
+                "output_shortage": output_shortage,
+                "score": delta,
+            }
 
         required_pages = {str(value).strip() for value in requirement_spec.get("required_pages", []) or [] if str(value).strip()}
         if page_label and page_label in required_pages:

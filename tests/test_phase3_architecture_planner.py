@@ -162,6 +162,78 @@ def make_interface_semantics_bundle() -> dict:
     }
 
 
+def make_template_interface_coverage_bundle() -> dict:
+    return {
+        "atomic_modules": [],
+        "subflow_templates": [
+            {
+                "module_type": "fan_template_incomplete",
+                "asset_type": "subflow_template",
+                "template_id": "fan_template_incomplete",
+                "definition_id": "fan_template_incomplete",
+                "template_name": "送风机简化控制",
+                "template_role": "supply_fan_control",
+                "name": "送风机简化控制",
+                "category": "AHU/subflow_templates/fan_control",
+                "description": "Reusable fan control subflow with incomplete interface coverage.",
+                "parameters_schema": {},
+                "ports_definition": {
+                    "inputs": [{"index": 0, "label": "schedule_enable"}],
+                    "outputs": [],
+                },
+                "template_json": {
+                    "type": "subflow",
+                    "id": "fan_template_incomplete",
+                    "name": "送风机简化控制",
+                    "inputs": 1,
+                    "outputs": 0,
+                },
+                "compile_hints": {"input_count": 1, "output_count": 0},
+            },
+            {
+                "module_type": "fan_template_full",
+                "asset_type": "subflow_template",
+                "template_id": "fan_template_full",
+                "definition_id": "fan_template_full",
+                "template_name": "送风机标准控制",
+                "template_role": "supply_fan_control",
+                "name": "送风机标准控制",
+                "category": "AHU/subflow_templates/fan_control",
+                "description": "Reusable fan control subflow with full interface coverage.",
+                "parameters_schema": {},
+                "ports_definition": {
+                    "inputs": [
+                        {"index": 0, "label": "schedule_enable"},
+                        {"index": 1, "label": "fan_fault_reset"},
+                    ],
+                    "outputs": [{"index": 0, "label": "supply_fan_available_flag"}],
+                },
+                "template_json": {
+                    "type": "subflow",
+                    "id": "fan_template_full",
+                    "name": "送风机标准控制",
+                    "inputs": 2,
+                    "outputs": 1,
+                },
+                "compile_hints": {"input_count": 2, "output_count": 1},
+            },
+        ],
+        "system_patterns": [
+            {
+                "pattern_id": "ahu_interface_coverage_pattern",
+                "system_type": "AHU",
+                "required_pages": [
+                    {"page_key": "control", "label": "控制", "kind": "control"},
+                    {"page_key": "io_comm", "label": "IO/通讯", "kind": "io"},
+                ],
+                "optional_pages": [],
+            }
+        ],
+        "style_guides": [],
+        "metadata": {"selected_case_pattern_id": "ahu_interface_coverage_pattern"},
+    }
+
+
 def make_interface_semantics_requirement_spec() -> dict:
     return {
         "schema_version": "3.0",
@@ -344,6 +416,8 @@ class Phase3ArchitecturePlannerTests(unittest.TestCase):
         self.assertGreater(architecture_plan["pattern_bindings"][0]["score"], 0)
         self.assertTrue(architecture_plan["pattern_bindings"][0]["score_reasons"])
         self.assertTrue(architecture_plan["pattern_bindings"][0]["score_breakdown"])
+        score_breakdown = architecture_plan["pattern_bindings"][0]["score_breakdown"]
+        self.assertIn("dx_control", score_breakdown["subsystem_type"])
 
     def test_architecture_planner_keeps_external_template_inputs_out_of_shared_signal_registry(self):
         bundle = make_interface_semantics_bundle()
@@ -370,6 +444,50 @@ class Phase3ArchitecturePlannerTests(unittest.TestCase):
         registry_entry = architecture_plan["shared_signal_registry"][0]
         self.assertEqual(registry_entry["resolution_status"], "resolved")
         self.assertEqual(registry_entry["candidate_exporters"], ["supply_fan_ctrl"])
+
+    def test_architecture_planner_prefers_templates_with_complete_interface_coverage(self):
+        bundle = make_template_interface_coverage_bundle()
+        requirement_spec = {
+            "schema_version": "3.0",
+            "system_type": "AHU",
+            "scenario_summary": "送风机控制",
+            "subsystems": [
+                {
+                    "subsystem_id": "supply_fan_ctrl",
+                    "subsystem_type": "supply_fan_control",
+                    "goal": "送风机控制",
+                    "page_hint": "控制",
+                    "priority": 1,
+                    "preferred_templates": [],
+                    "imports": ["schedule_enable", "fan_fault_reset"],
+                    "exports": ["supply_fan_available_flag"],
+                }
+            ],
+            "signals": {"inputs": [], "outputs": [], "software_points": [], "alarm_points": []},
+            "required_pages": ["IO/通讯", "控制"],
+            "global_modes": ["schedule_enable"],
+            "ambiguities": [],
+            "assumptions": [],
+            "acceptance_criteria": [],
+            "confidence": 0.9,
+            "warnings": [],
+        }
+
+        with patch.object(config, "DEBUG", False):
+            planner = ArchitecturePlanner()
+            decomposition_result, architecture_plan = planner.plan(requirement_spec, bundle)
+
+        slot = architecture_plan["subsystem_slots"][0]
+        self.assertEqual(slot["preferred_implementation"], "reuse_template")
+        self.assertEqual(slot["preferred_template_ids"][0], "fan_template_full")
+        top_score_cards = {item["template_id"]: item for item in slot["score_breakdown"]}
+        self.assertGreater(top_score_cards["fan_template_full"]["score"], top_score_cards["fan_template_incomplete"]["score"])
+        incomplete_breakdown = top_score_cards["fan_template_incomplete"]["score_breakdown"]
+        self.assertEqual(incomplete_breakdown["interface_capacity"]["input_shortage"], 1)
+        self.assertEqual(incomplete_breakdown["interface_capacity"]["output_shortage"], 1)
+        descriptor = decomposition_result["subsystem_descriptors"][0]
+        self.assertEqual(descriptor["imports"], ["schedule_enable", "fan_fault_reset"])
+        self.assertEqual(descriptor["exports"], ["supply_fan_available_flag"])
 
     def test_architecture_planner_marks_ambiguous_shared_signal_with_candidate_exporters(self):
         bundle = make_minimal_pattern_bundle()

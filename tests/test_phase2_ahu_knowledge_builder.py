@@ -277,6 +277,55 @@ class AHUKnowledgeBuilderTests(unittest.TestCase):
         different_id = source_sets[frozenset({"flows_20240103.json"})]
         self.assertNotEqual(merged_id, different_id)
 
+    def test_exhaust_fan_page_reuse_creates_alias_template_asset(self):
+        tmp_path = _make_workspace_case_dir()
+        self.addCleanup(shutil.rmtree, tmp_path, True)
+        flows_dir = tmp_path / "flows"
+        flows_dir.mkdir()
+
+        objects = _make_flow_objects("flow_alias", EXHAUST_FAN, "subflow_a")
+        objects.extend(
+            [
+                {
+                    "id": "flow_alias_exhaust_cmd",
+                    "type": "swInput",
+                    "z": "flow_alias_extra",
+                    "name": "开排风机",
+                    "inputs": 0,
+                    "outputs": 1,
+                    "wires": [[]],
+                },
+                {
+                    "id": "flow_alias_exhaust_instance",
+                    "type": "subflow:subflow_a",
+                    "z": "flow_alias_extra",
+                    "name": "",
+                    "inputs": 3,
+                    "outputs": 2,
+                    "wires": [],
+                },
+            ]
+        )
+        _write_flow(flows_dir / "flows_20240101.json", objects)
+
+        assets = build_ahu_knowledge_assets(flows_dir=flows_dir, output_dir=None)
+        template_by_role = {template["template_role"]: template for template in assets["subflow_templates"]}
+
+        self.assertIn("supply_fan_control", template_by_role)
+        self.assertIn("exhaust_fan_control", template_by_role)
+        base_template = template_by_role["supply_fan_control"]
+        alias_template = template_by_role["exhaust_fan_control"]
+
+        self.assertNotEqual(alias_template["template_id"], base_template["template_id"])
+        self.assertEqual(alias_template["definition_id"], base_template["definition_id"])
+        self.assertEqual(alias_template["template_json"]["id"], base_template["definition_id"])
+        self.assertEqual(alias_template["source_info"]["alias_of_template_id"], base_template["template_id"])
+        self.assertEqual(alias_template["source_info"]["alias_of_template_role"], "supply_fan_control")
+        self.assertIn(EXHAUST_FAN, alias_template["template_name"])
+        self.assertIn(EXHAUST_FAN, alias_template["description"])
+        self.assertIn("开排风机", alias_template["source_info"]["alias_signal_examples"])
+        self.assertEqual(assets["manifest"]["subflow_template_count"], 2)
+
     def test_dependency_module_types_collects_functional_internal_types(self):
         tmp_path = _make_workspace_case_dir()
         self.addCleanup(shutil.rmtree, tmp_path, True)
