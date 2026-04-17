@@ -1,8 +1,10 @@
 # Phase 4 Send 并行预留设计
 
 > 日期：2026-04-11  
-> 状态：设计预留，当前不改正式主链行为  
+> 状态：设计预留 + Phase 7 独立试点已验证，当前仍不改正式主链行为  
 > 目标：为后续把 `subsystem_planning` 从顺序执行升级为 LangGraph `Send` fan-out 做好可直接落地的接口设计。
+
+> 2026-04-17 补充：`scripts/poc_phase7_send_parallel.py` 与 `tests/test_phase7_send_reducer_contract.py` 已按本设计在独立测试图中验证以下合同：`subsystem_plan_map` 按 `subsystem_id` merge、`parallel_merge_conflicts` append-only、worker 只返回局部 state update、重复 `subsystem_id` fail-fast、稳定排序遵循 `dispatch_index -> subsystem_id`。正式主链仍未切换。
 
 ## 1. 设计边界
 

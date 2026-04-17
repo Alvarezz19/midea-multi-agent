@@ -479,6 +479,33 @@ def _unsupported_state() -> dict:
 
 
 class RepairAgentTests(unittest.TestCase):
+    def test_prepare_repair_patch_plans_without_mutating_state(self):
+        state = _planning_state()
+        agent = RepairAgent()
+
+        plan = agent.prepare_repair_patch(state)
+
+        self.assertEqual(plan["result"], "patched")
+        self.assertEqual(plan["repair_scope"], "planning")
+        self.assertEqual(plan["resume_node"], "subsystem_planning")
+        self.assertEqual(plan["patch_instructions"][0], "将共享信号 supply_fan_available_flag 的 owner_subsystem_id 收敛为 supply_fan_ctrl。")
+        self.assertEqual(plan["operations"][0]["operation"], "bind_shared_signal_owner")
+        self.assertEqual(state["architecture_plan"]["shared_signal_registry"][0]["owner_subsystem_id"], "")
+        self.assertEqual(state["retry_counts_by_scope"], {"planning": 0, "assembly": 0, "compile": 0})
+        self.assertEqual(state["repair_history"], [])
+
+    def test_apply_repair_patch_consumes_prepared_plan(self):
+        state = _planning_state()
+        agent = RepairAgent()
+        plan = agent.prepare_repair_patch(state)
+
+        result = agent.apply_repair_patch(state, plan)
+
+        self.assertEqual(result["architecture_plan"]["shared_signal_registry"][0]["owner_subsystem_id"], "supply_fan_ctrl")
+        self.assertEqual(result["repair_context"]["resume_node"], "subsystem_planning")
+        self.assertEqual(result["retry_counts_by_scope"]["planning"], 1)
+        self.assertEqual(result["repair_history"][0]["result"], "patched")
+
     def test_planning_repair_rebinds_shared_signal_owner_and_invalidates_downstream(self):
         state = _planning_state()
 

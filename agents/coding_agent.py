@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import copy
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set
 
 import config
 from utils.graph_ir import CompileReport, CompiledArtifact
@@ -38,6 +38,37 @@ class CodingAgent:
         if isinstance(template_raw, dict):
             return copy.deepcopy(template_raw)
         return {}
+
+    @staticmethod
+    def _assign_stable_id(seed: str, used_ids: Set[str]) -> str:
+        return generate_short_uuid(seed, used_ids)
+
+    def _build_stable_id_map(
+        self,
+        pages: List[Dict[str, Any]],
+        subflow_definitions: List[Dict[str, Any]],
+        node_instances: List[Dict[str, Any]],
+    ) -> Dict[str, str]:
+        id_map: Dict[str, str] = {}
+        used_ids: Set[str] = set()
+
+        for page in pages:
+            page_id = page["page_id"]
+            id_map[page_id] = self._assign_stable_id(f"page::{page_id}", used_ids)
+
+        for definition in subflow_definitions:
+            definition_id = definition["definition_id"]
+            real_id = self._assign_stable_id(f"subflow::{definition_id}", used_ids)
+            id_map[definition_id] = real_id
+            template_id = definition.get("template_id")
+            if template_id:
+                id_map[template_id] = real_id
+
+        for node in node_instances:
+            instance_id = node["instance_id"]
+            id_map[instance_id] = self._assign_stable_id(f"node::{instance_id}", used_ids)
+
+        return id_map
 
     @staticmethod
     def _build_doc_map(bundle_or_context: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -155,14 +186,13 @@ class CodingAgent:
         unresolved_items = assembled_graph_ir.get("unresolved_items", []) or []
 
         flow_objects: List[Dict[str, Any]] = []
-        id_map: Dict[str, str] = {}
+        id_map = self._build_stable_id_map(pages, subflow_definitions, node_instances)
         layout_map: Dict[str, Dict[str, int]] = {}
         warnings: List[str] = []
 
         for page in pages:
             page_id = page["page_id"]
-            real_id = generate_short_uuid()
-            id_map[page_id] = real_id
+            real_id = id_map[page_id]
             flow_objects.append({
                 "id": real_id,
                 "type": "tab",
@@ -173,16 +203,11 @@ class CodingAgent:
 
         for definition in subflow_definitions:
             definition_id = definition["definition_id"]
-            real_id = generate_short_uuid()
-            id_map[definition_id] = real_id
-            template_id = definition.get("template_id")
-            if template_id:
-                id_map[template_id] = real_id
+            real_id = id_map[definition_id]
             flow_objects.append(self._compile_subflow_definition(definition, real_id))
 
         for node in node_instances:
             instance_id = node["instance_id"]
-            id_map[instance_id] = generate_short_uuid()
             layout_map[instance_id] = {
                 "x": int((node.get("position", {}) or {}).get("x", 0) or 0),
                 "y": int((node.get("position", {}) or {}).get("y", 0) or 0),

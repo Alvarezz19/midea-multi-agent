@@ -172,6 +172,7 @@ class SubsystemPlanEdge(TypedDict, total=False):
 class SubsystemPlan(TypedDict, total=False):
     subsystem_id: str
     page_id: str
+    dispatch_index: int
     implementation_mode: str
     template_binding: Dict[str, Any]
     selection_reason: str
@@ -184,6 +185,25 @@ class SubsystemPlan(TypedDict, total=False):
     constraints: List[Dict[str, Any]]
     unresolved_items: List[Dict[str, Any]]
     reasoning: str
+
+
+class ParallelMergeConflict(TypedDict, total=False):
+    type: str
+    subsystem_id: str
+    conflicting_subsystem_ids: List[str]
+    dispatch_index: int
+    signal_name: str
+    resolution: str
+    message: str
+
+
+class SubsystemPlanningDispatch(TypedDict, total=False):
+    subsystem_id: str
+    dispatch_index: int
+    page_id: str
+    subsystem_type: str
+    worker_mode: str
+    signal_name: str
 
 
 DEFAULT_RETRY_BUDGET: Dict[str, int] = {
@@ -210,6 +230,23 @@ class RepairContext(TypedDict, total=False):
     repair_strategy: str
     patch_instructions: List[str]
     resume_node: str
+
+
+class RepairPatchPlan(TypedDict, total=False):
+    repair_round: int
+    repair_scope: str
+    issue_ids: List[str]
+    target_ids: List[str]
+    target_state_keys: List[str]
+    repair_strategy: str
+    patch_instructions: List[str]
+    resume_node: str
+    decision: str
+    reason: str
+    result: str
+    retry_budget: Dict[str, int]
+    retry_counts_by_scope: Dict[str, int]
+    operations: List[Dict[str, Any]]
 
 
 class RepairHistoryEntry(TypedDict, total=False):
@@ -297,6 +334,71 @@ def empty_subsystem_plan(subsystem_id: str = "", page_id: str = "") -> Subsystem
         "unresolved_items": [],
         "reasoning": "",
     }
+
+
+def empty_parallel_merge_conflicts() -> List[ParallelMergeConflict]:
+    return []
+
+
+def _normalize_subsystem_id(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _coerce_dispatch_index(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 10**9
+
+
+def order_subsystem_plan_map(subsystem_plan_map: Dict[str, Any] | None) -> Dict[str, Any]:
+    ordered_items = sorted(
+        (subsystem_plan_map or {}).items(),
+        key=lambda item: (
+            _coerce_dispatch_index((item[1] or {}).get("dispatch_index")),
+            _normalize_subsystem_id(item[0]),
+        ),
+    )
+    return {
+        _normalize_subsystem_id(subsystem_id): dict(plan or {})
+        for subsystem_id, plan in ordered_items
+    }
+
+
+def merge_subsystem_plan_map(
+    current: Dict[str, Any] | None,
+    update: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    merged = {
+        _normalize_subsystem_id(subsystem_id): dict(plan or {})
+        for subsystem_id, plan in (current or {}).items()
+        if _normalize_subsystem_id(subsystem_id)
+    }
+
+    for raw_subsystem_id, raw_plan in (update or {}).items():
+        subsystem_id = _normalize_subsystem_id(raw_subsystem_id)
+        if not subsystem_id:
+            raise ValueError("blank_subsystem_id")
+
+        plan = dict(raw_plan or {})
+        plan_subsystem_id = _normalize_subsystem_id(plan.get("subsystem_id") or subsystem_id)
+        if plan_subsystem_id != subsystem_id:
+            raise ValueError(f"subsystem_id_mismatch:{subsystem_id}:{plan_subsystem_id}")
+
+        if subsystem_id in merged:
+            raise ValueError(f"duplicate_subsystem_id:{subsystem_id}")
+
+        plan["subsystem_id"] = subsystem_id
+        merged[subsystem_id] = plan
+
+    return order_subsystem_plan_map(merged)
+
+
+def merge_parallel_conflicts(
+    current: List[ParallelMergeConflict] | None,
+    update: List[ParallelMergeConflict] | None,
+) -> List[ParallelMergeConflict]:
+    return list(current or []) + list(update or [])
 
 
 def default_retry_budget() -> Dict[str, int]:

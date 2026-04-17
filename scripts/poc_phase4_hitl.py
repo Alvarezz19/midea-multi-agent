@@ -10,6 +10,7 @@ from typing_extensions import TypedDict
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
+from utils.workflow_runtime import build_configurable_thread
 
 
 class PocState(TypedDict, total=False):
@@ -117,7 +118,7 @@ def build_graph():
 
 def run_poc(thread_id: str, resume_value: bool) -> None:
     graph = build_graph()
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {"configurable": build_configurable_thread(thread_id)}
     initial_input: PocState = {
         "request": "repair compile wire port overflow",
         "events": [],

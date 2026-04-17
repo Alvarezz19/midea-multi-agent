@@ -140,12 +140,15 @@ class WorkflowPhase1Tests(unittest.TestCase):
     def test_compiler_emits_deterministic_artifact(self):
         graph_ir = self.assembly_agent.assemble(self.execution_plan, self.retrieval_context)
         artifact = self.coding_agent.compile_graph(graph_ir, self.retrieval_context)
+        artifact_recompiled = self.coding_agent.compile_graph(graph_ir, self.retrieval_context)
 
         flow_objects = artifact["flow_objects"]
         self.assertEqual(len(flow_objects), 4)
         self.assertEqual(artifact["compile_report"]["page_count"], 1)
         self.assertEqual(artifact["compile_report"]["node_count"], 3)
         self.assertEqual(artifact["compile_report"]["subflow_count"], 0)
+        self.assertEqual(artifact["id_map"], artifact_recompiled["id_map"])
+        self.assertEqual(artifact["json_text"], artifact_recompiled["json_text"])
 
         parsed = json.loads(artifact["json_text"])
         self.assertEqual(len(parsed), len(flow_objects))

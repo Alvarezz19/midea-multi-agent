@@ -601,8 +601,14 @@ class Phase4WorkflowRepairLoopTests(unittest.TestCase):
     def test_workflow_trace_records_repair_router_and_repair_agent(self):
         captured_records: dict[str, list[dict]] = {}
 
-        def _capture_trace(user_query: str, node_io_records: list[dict], final_state: dict, total_elapsed_seconds: float) -> dict:
-            del user_query, final_state, total_elapsed_seconds
+        def _capture_trace(
+            user_query: str,
+            node_io_records: list[dict],
+            final_state: dict,
+            total_elapsed_seconds: float,
+            **kwargs,
+        ) -> dict:
+            del user_query, final_state, total_elapsed_seconds, kwargs
             captured_records["nodes"] = list(node_io_records)
             return {"trace_dir": "mock-trace"}
 

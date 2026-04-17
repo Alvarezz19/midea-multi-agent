@@ -49,13 +49,15 @@ class Phase6ReadinessContractTests(unittest.TestCase):
         workflow_trace_text = (PROJECT_ROOT / "workflow_trace.py").read_text(encoding="utf-8")
         poc_text = (PROJECT_ROOT / "scripts" / "poc_phase4_hitl.py").read_text(encoding="utf-8")
 
-        self.assertIn("app = workflow.compile()", workflow_text)
-        self.assertIn("app = workflow.compile()", workflow_trace_text)
-        self.assertNotIn("configurable\": {\"thread_id\"", workflow_text)
-        self.assertNotIn("configurable\": {\"thread_id\"", workflow_trace_text)
-
+        self.assertIn("repair_router", workflow_text)
+        self.assertIn("repair_agent", workflow_text)
+        self.assertIn("populate_phase4_workflow", workflow_trace_text)
+        self.assertNotIn("Send(", workflow_text)
+        self.assertNotIn("Send(", workflow_trace_text)
+        self.assertNotIn("interrupt(", workflow_text)
+        self.assertNotIn("interrupt(", workflow_trace_text)
         self.assertIn("compile(checkpointer=InMemorySaver())", poc_text)
-        self.assertIn('config = {"configurable": {"thread_id": thread_id}}', poc_text)
+        self.assertIn('config = {"configurable": build_configurable_thread(thread_id)}', poc_text)
         self.assertIn("interrupt(", poc_text)
         self.assertIn("Command(resume=", poc_text)
 

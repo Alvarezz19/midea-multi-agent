@@ -2,14 +2,32 @@
 编码智能体辅助工具
 包含 ID 生成、拓扑布局、输入端口解析等功能
 """
+import hashlib
 import re
-import uuid
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Optional, Set, Tuple
 
 
-def generate_short_uuid() -> str:
-    """生成类似 'b45d2af' 的短ID（7位）"""
-    return str(uuid.uuid4()).replace('-', '')[:7]
+def generate_short_uuid(seed: str, used_ids: Optional[Set[str]] = None) -> str:
+    """基于稳定 seed 生成短 ID，并在极少数碰撞时可确定性消解。"""
+    digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()
+
+    if used_ids is None:
+        return digest[:10]
+
+    for length in range(10, len(digest) + 1):
+        candidate = digest[:length]
+        if candidate not in used_ids:
+            used_ids.add(candidate)
+            return candidate
+
+    suffix = 1
+    while True:
+        collision_digest = hashlib.sha1(f"{seed}::{suffix}".encode("utf-8")).hexdigest()
+        candidate = collision_digest[:10]
+        if candidate not in used_ids:
+            used_ids.add(candidate)
+            return candidate
+        suffix += 1
 
 
 def _extract_placeholder_name(value: str) -> str:

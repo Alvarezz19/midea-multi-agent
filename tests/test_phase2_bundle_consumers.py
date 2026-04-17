@@ -208,6 +208,7 @@ class Phase2BundleConsumerTests(unittest.TestCase):
 
         result = agent.__call__(state)
         artifact = result["compiled_artifact"]
+        artifact_recompiled = agent.compile_graph(assembled, bundle)
         flow_types = [obj.get("type") for obj in artifact["flow_objects"]]
 
         self.assertEqual(result["current_step"], "coding_completed")
@@ -217,6 +218,8 @@ class Phase2BundleConsumerTests(unittest.TestCase):
         self.assertEqual(artifact["compile_report"]["page_count"], 1)
         self.assertEqual(artifact["compile_report"]["subflow_count"], 1)
         self.assertEqual(artifact["compile_report"]["node_count"], 1)
+        self.assertEqual(artifact["id_map"], artifact_recompiled["id_map"])
+        self.assertEqual(artifact["json_text"], artifact_recompiled["json_text"])
         self.assertIn('"type": "subflow"', result["generated_code"])
 
 

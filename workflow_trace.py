@@ -31,6 +31,8 @@ from workflow import (
     populate_phase4_workflow,
 )
 from utils.phase6_diagnostics import derive_failure_bucket, ordered_subsystem_ids
+from utils.trace_index import generate_attempt_id, register_trace_attempt
+from utils.workflow_runtime import build_runtime_invoke_config, compile_state_graph
 
 try:
     from agents.retrieval_agent import RetrievalAgent
@@ -206,6 +208,9 @@ def _build_trace_summary(
     node_io_records: list[dict],
     final_state: dict,
     total_elapsed_seconds: float,
+    *,
+    thread_id: str | None = None,
+    attempt_id: str | None = None,
 ) -> dict:
     retrieval_metadata = ((final_state or {}).get("retrieval_bundle", {}) or {}).get("metadata", {}) or {}
     subsystem_plan_map = (final_state or {}).get("subsystem_plan_map", {}) or {}
@@ -306,6 +311,8 @@ def _build_trace_summary(
     return {
         "execution_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "user_query": user_query,
+        "thread_id": str(thread_id or "").strip(),
+        "attempt_id": str(attempt_id or "").strip(),
         "total_elapsed_seconds": round(total_elapsed_seconds, 2),
         "node_count": len(node_io_records),
         "workflow_status": workflow_status,
@@ -401,9 +408,17 @@ def _wrap_node(node_name: str, node_callable: Callable[[dict], dict], node_io_re
     return wrapped
 
 
-def _save_workflow_trace(user_query: str, node_io_records: list[dict], final_state: dict, total_elapsed_seconds: float) -> dict:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    trace_dir = os.path.join(TRACE_OUTPUT_ROOT, f"workflow_trace_{timestamp}")
+def _save_workflow_trace(
+    user_query: str,
+    node_io_records: list[dict],
+    final_state: dict,
+    total_elapsed_seconds: float,
+    *,
+    thread_id: str | None = None,
+    attempt_id: str | None = None,
+) -> dict:
+    attempt_token = str(attempt_id or "").strip() or generate_attempt_id()
+    trace_dir = os.path.join(TRACE_OUTPUT_ROOT, f"workflow_trace_{attempt_token}")
     os.makedirs(trace_dir, exist_ok=True)
 
     trace_summary = _build_trace_summary(
@@ -411,6 +426,8 @@ def _save_workflow_trace(user_query: str, node_io_records: list[dict], final_sta
         node_io_records=node_io_records,
         final_state=final_state,
         total_elapsed_seconds=total_elapsed_seconds,
+        thread_id=thread_id,
+        attempt_id=attempt_token,
     )
     summary = dict(trace_summary)
     summary["nodes"] = node_io_records
@@ -427,6 +444,8 @@ def _save_workflow_trace(user_query: str, node_io_records: list[dict], final_sta
         "# 工作流节点输入输出记录\n",
         f"**执行时间**: {summary['execution_time']}\n",
         f"**用户需求**: {user_query}\n",
+        f"**thread_id**: {summary['thread_id'] or 'N/A'}\n",
+        f"**attempt_id**: {summary['attempt_id'] or 'N/A'}\n",
         f"**总耗时**: {summary['total_elapsed_seconds']}s\n",
         f"**节点数量**: {len(node_io_records)}\n",
         f"**工作流状态**: {summary['workflow_status']}\n",
@@ -546,16 +565,33 @@ def _save_workflow_trace(user_query: str, node_io_records: list[dict], final_sta
     with open(summary_md_path, "w", encoding="utf-8") as file:
         file.write("\n".join(markdown_lines))
 
-    return {
+    trace_files = {
+        "thread_id": str(thread_id or "").strip(),
+        "attempt_id": attempt_token,
         "trace_dir": os.path.abspath(trace_dir),
         "summary_json": os.path.abspath(summary_json_path),
         "summary_md": os.path.abspath(summary_md_path),
         "final_state_json": os.path.abspath(final_state_path),
     }
+    normalized_thread_id = str(thread_id or "").strip()
+    if normalized_thread_id:
+        trace_files.update(
+            register_trace_attempt(
+                trace_output_root=TRACE_OUTPUT_ROOT,
+                thread_id=normalized_thread_id,
+                attempt_id=attempt_token,
+                trace_files=trace_files,
+            )
+        )
+    return trace_files
 
 
 @traceable(name="create_workflow_trace", tags=["workflow", "langgraph", "trace"])
-def create_workflow(node_io_records: list[dict] | None = None) -> StateGraph:
+def create_workflow(
+    *,
+    checkpointer: Any | None = None,
+    node_io_records: list[dict] | None = None,
+) -> StateGraph:
     if RetrievalAgent is None:
         raise ImportError("RetrievalAgent 依赖未安装，无法创建正式工作流。")
 
@@ -591,21 +627,32 @@ def create_workflow(node_io_records: list[dict] | None = None) -> StateGraph:
 
 
 @traceable(name="run_workflow_trace", tags=["workflow", "langgraph", "trace"])
-def run_workflow(user_query: str) -> dict:
+def run_workflow(
+    user_query: str,
+    *,
+    thread_id: str | None = None,
+    checkpointer: Any | None = None,
+    runtime_metadata: dict[str, Any] | None = None,
+) -> dict:
     node_io_records: list[dict] = []
     started_at = time.time()
+    attempt_id = generate_attempt_id()
 
-    workflow = create_workflow(node_io_records=node_io_records)
-    app = workflow.compile()
+    workflow = create_workflow(checkpointer=checkpointer, node_io_records=node_io_records)
+    app = compile_state_graph(workflow, checkpointer=checkpointer)
 
     initial_state = build_initial_state(user_query)
 
-    invoke_config = {
-        "run_name": "MideaWorkflowTrace",
-        "tags": ["workflow", "langgraph", "phase3-layered-planning", "trace"],
-        "metadata": {"user_query": user_query},
-        "recursion_limit": PHASE4_RECURSION_LIMIT,
-    }
+    invoke_config = build_runtime_invoke_config(
+        user_query=user_query,
+        run_name="MideaWorkflowTrace",
+        tags=["workflow", "langgraph", "phase3-layered-planning", "trace"],
+        recursion_limit=PHASE4_RECURSION_LIMIT,
+        thread_id=thread_id,
+        checkpointer=checkpointer,
+        extra_metadata=runtime_metadata,
+    )
+    invoke_config["metadata"]["attempt_id"] = attempt_id
 
     result = None
     try:
@@ -618,6 +665,8 @@ def run_workflow(user_query: str) -> dict:
             node_io_records=node_io_records,
             final_state=final_state,
             total_elapsed_seconds=time.time() - started_at,
+            thread_id=thread_id,
+            attempt_id=attempt_id,
         )
 
         if result is not None:

@@ -1,9 +1,10 @@
 """Deterministic repair agent for the Phase 4 repair loop."""
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Dict, Iterable, List
 
-from utils.phase3_contracts import default_retry_budget, default_retry_counts_by_scope
+from utils.phase3_contracts import RepairPatchPlan, default_retry_budget, default_retry_counts_by_scope
 from utils.signal_semantics import canonicalize_signal_name
 
 
@@ -303,6 +304,37 @@ def _reclassify_signal_bindings_as_external(
     return patched_subsystems
 
 
+def _collect_external_binding_subsystems(
+    decomposition_result: Dict[str, Any],
+    canonical_signal_key: str,
+) -> List[str]:
+    patched_subsystems: List[str] = []
+    for descriptor in decomposition_result.get("subsystem_descriptors", []) or []:
+        if not isinstance(descriptor, dict):
+            continue
+        subsystem_id = str(descriptor.get("subsystem_id", "")).strip()
+        bindings = descriptor.get("interface_bindings", [])
+        if isinstance(bindings, list):
+            for binding in bindings:
+                if not isinstance(binding, dict):
+                    continue
+                binding_key = canonicalize_signal_name(
+                    binding.get("canonical_signal_key")
+                    or binding.get("signal_key")
+                    or binding.get("signal_name")
+                )
+                if str(binding.get("direction", "")).strip() == "input" and binding_key == canonical_signal_key:
+                    if subsystem_id and subsystem_id not in patched_subsystems:
+                        patched_subsystems.append(subsystem_id)
+                    break
+            else:
+                for item in descriptor.get("imports", []) or []:
+                    if canonicalize_signal_name(item) == canonical_signal_key and subsystem_id and subsystem_id not in patched_subsystems:
+                        patched_subsystems.append(subsystem_id)
+                        break
+    return patched_subsystems
+
+
 def _build_instance_lookup(assembled_graph_ir: Dict[str, Any], id_map: Dict[str, str]) -> Dict[str, str]:
     node_instance_ids = {
         str(node.get("instance_id", "")).strip()
@@ -453,12 +485,40 @@ class RepairAgent:
         _upsert_shared_signal_constraint(architecture_plan, signal_name, owner_subsystem_id)
         return f"将共享信号 {signal_name} 的 owner_subsystem_id 收敛为 {owner_subsystem_id}。"
 
-    def _apply_planning_repair(self, state: Dict[str, Any], issues: List[Dict[str, Any]]) -> tuple[List[str], List[str]]:
+    def _prepare_reject_plan(
+        self,
+        *,
+        repair_scope: str,
+        issue_ids: List[str],
+        repair_round: int,
+        retry_budget: Dict[str, int],
+        retry_counts_by_scope: Dict[str, int],
+        reason: str,
+        actions: List[str],
+    ) -> RepairPatchPlan:
+        return {
+            "repair_round": repair_round,
+            "repair_scope": repair_scope,
+            "issue_ids": issue_ids,
+            "target_ids": [],
+            "target_state_keys": TARGET_STATE_KEYS_BY_SCOPE.get(repair_scope, []),
+            "repair_strategy": "reject",
+            "patch_instructions": actions,
+            "resume_node": "",
+            "decision": "reject",
+            "reason": reason,
+            "result": "rejected",
+            "retry_budget": deepcopy(retry_budget),
+            "retry_counts_by_scope": deepcopy(retry_counts_by_scope),
+            "operations": [],
+        }
+
+    def _prepare_planning_repair(self, state: Dict[str, Any], issues: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], List[str], List[str]]:
         requirement_spec = state.get("requirement_spec", {}) or {}
-        architecture_plan = state.get("architecture_plan", {}) or {}
         decomposition_result = state.get("decomposition_result", {}) or {}
         external_signal_keys = _collect_external_signal_keys(requirement_spec)
 
+        operations: List[Dict[str, Any]] = []
         actions: List[str] = []
         target_ids: List[str] = []
 
@@ -486,16 +546,18 @@ class RepairAgent:
                     strict_candidates=True,
                 )
                 if inferred_owner:
+                    operations.append(
+                        {
+                            "operation": "bind_shared_signal_owner",
+                            "signal_name": signal_name,
+                            "owner_subsystem_id": inferred_owner,
+                            "candidate_exporters": filtered_candidates,
+                            "resolution_status": "resolved_unique_exporter",
+                            "resolution_evidence": "RepairAgent narrowed ambiguous candidate exporters to a single owner.",
+                        }
+                    )
                     actions.append(
-                        self._bind_shared_signal_owner(
-                            state,
-                            architecture_plan,
-                            signal_name=signal_name,
-                            owner_subsystem_id=inferred_owner,
-                            candidate_exporters=filtered_candidates,
-                            resolution_status="resolved_unique_exporter",
-                            resolution_evidence="RepairAgent narrowed ambiguous candidate exporters to a single owner.",
-                        )
+                        f"将共享信号 {signal_name} 的 owner_subsystem_id 收敛为 {inferred_owner}。"
                     )
                     target_ids.append(signal_name)
                     continue
@@ -509,15 +571,20 @@ class RepairAgent:
                 )
 
             if allowed_external and suggested_binding_kind != "shared_signal":
+                patched_subsystems = _collect_external_binding_subsystems(decomposition_result, signal_key)
+                action = f"将共享信号 {signal_name} 重分类为 {suggested_binding_kind}。"
+                if patched_subsystems:
+                    action += f" 影响子系统: {', '.join(sorted(patched_subsystems))}。"
+                operations.append(
+                    {
+                        "operation": "mark_shared_signal_external",
+                        "signal_name": signal_name,
+                        "signal_key": signal_key,
+                        "binding_kind": suggested_binding_kind,
+                    }
+                )
                 actions.append(
-                    self._mark_shared_signal_as_external(
-                        state,
-                        architecture_plan,
-                        decomposition_result,
-                        signal_name=signal_name,
-                        signal_key=signal_key,
-                        binding_kind=suggested_binding_kind,
-                    )
+                    action
                 )
                 target_ids.append(signal_name)
                 continue
@@ -529,40 +596,49 @@ class RepairAgent:
                 strict_candidates=False,
             )
             if inferred_owner:
+                resolved_candidates = filtered_candidates or actual_candidates
+                operations.append(
+                    {
+                        "operation": "bind_shared_signal_owner",
+                        "signal_name": signal_name,
+                        "owner_subsystem_id": inferred_owner,
+                        "candidate_exporters": resolved_candidates,
+                        "resolution_status": "resolved_unique_exporter",
+                        "resolution_evidence": "RepairAgent rebound the signal to a unique exporter.",
+                    }
+                )
                 actions.append(
-                    self._bind_shared_signal_owner(
-                        state,
-                        architecture_plan,
-                        signal_name=signal_name,
-                        owner_subsystem_id=inferred_owner,
-                        candidate_exporters=filtered_candidates or actual_candidates,
-                        resolution_status="resolved_unique_exporter",
-                        resolution_evidence="RepairAgent rebound the signal to a unique exporter.",
-                    )
+                    f"将共享信号 {signal_name} 的 owner_subsystem_id 收敛为 {inferred_owner}。"
                 )
                 target_ids.append(signal_name)
                 continue
 
             if allowed_external:
+                patched_subsystems = _collect_external_binding_subsystems(decomposition_result, signal_key)
+                action = f"将共享信号 {signal_name} 重分类为 {suggested_binding_kind}。"
+                if patched_subsystems:
+                    action += f" 影响子系统: {', '.join(sorted(patched_subsystems))}。"
+                operations.append(
+                    {
+                        "operation": "mark_shared_signal_external",
+                        "signal_name": signal_name,
+                        "signal_key": signal_key,
+                        "binding_kind": suggested_binding_kind,
+                    }
+                )
                 actions.append(
-                    self._mark_shared_signal_as_external(
-                        state,
-                        architecture_plan,
-                        decomposition_result,
-                        signal_name=signal_name,
-                        signal_key=signal_key,
-                        binding_kind=suggested_binding_kind,
-                    )
+                    action
                 )
                 target_ids.append(signal_name)
                 continue
 
             raise ValueError(f"Unsupported planning repair target: {signal_name}")
 
-        return actions, target_ids
+        return operations, actions, target_ids
 
-    def _apply_assembly_repair(self, state: Dict[str, Any], issues: List[Dict[str, Any]]) -> tuple[List[str], List[str]]:
+    def _prepare_assembly_repair(self, state: Dict[str, Any], issues: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], List[str], List[str]]:
         subsystem_plan_map = state.get("subsystem_plan_map", {}) or {}
+        operations: List[Dict[str, Any]] = []
         actions: List[str] = []
         target_ids: List[str] = []
 
@@ -608,14 +684,12 @@ class RepairAgent:
             if removed_count <= 0:
                 raise ValueError(f"No removable invalid local edges found for subsystem {subsystem_id}.")
 
-            subsystem_plan["edges"] = [edge for edge in old_edges if edge not in matching_edges]
-            subsystem_plan.setdefault("unresolved_items", []).append(
+            operations.append(
                 {
-                    "type": "degraded_removed_invalid_local_edge",
-                    "severity": "warning",
-                    "scope": "assembly",
+                    "operation": "remove_invalid_local_edges",
                     "subsystem_id": subsystem_id,
-                    "message": f"RepairAgent removed {removed_count} invalid local edges from subsystem {subsystem_id}.",
+                    "matching_edges": deepcopy(matching_edges),
+                    "removed_count": removed_count,
                     "reason": reason or "missing_local_edge_endpoint",
                     "edge_ids": sorted(
                         {
@@ -624,7 +698,6 @@ class RepairAgent:
                             if str(edge.get("edge_id", "")).strip()
                         }
                     ),
-                    "suggested_fix": "补齐真实局部语义后再恢复被删除的边。",
                 }
             )
             actions.append(
@@ -638,9 +711,9 @@ class RepairAgent:
             if not edge_ids:
                 target_ids.append(subsystem_id)
 
-        return actions, target_ids
+        return operations, actions, target_ids
 
-    def _apply_compile_repair(self, state: Dict[str, Any], issues: List[Dict[str, Any]]) -> tuple[List[str], List[str]]:
+    def _prepare_compile_repair(self, state: Dict[str, Any], issues: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], List[str], List[str]]:
         assembled_graph_ir = state.get("assembled_graph_ir", {}) or {}
         compiled_artifact = state.get("compiled_artifact", {}) or {}
         id_map = compiled_artifact.get("id_map", {}) or {}
@@ -651,6 +724,7 @@ class RepairAgent:
             if str(node.get("instance_id", "")).strip()
         }
 
+        operations: List[Dict[str, Any]] = []
         actions: List[str] = []
         target_ids: List[str] = []
 
@@ -692,23 +766,50 @@ class RepairAgent:
             }
 
             if clamped_port in occupied_ports:
-                for edge in matching_edges:
-                    assembled_graph_ir["edges"].remove(edge)
+                operations.append(
+                    {
+                        "operation": "repair_compile_wires",
+                        "source_instance": source_instance,
+                        "target_instance": target_instance,
+                        "invalid_target_port": invalid_target_port,
+                        "target_input_count": target_input_count,
+                        "conflict_mode": "remove",
+                        "clamped_port": clamped_port,
+                    }
+                )
                 actions.append(
                     f"删除指向 {target_instance}[{invalid_target_port}] 的非法编译边，避免端口夹断后发生冲突。"
                 )
             else:
-                for edge in matching_edges:
-                    edge["to_port"] = clamped_port
+                operations.append(
+                    {
+                        "operation": "repair_compile_wires",
+                        "source_instance": source_instance,
+                        "target_instance": target_instance,
+                        "invalid_target_port": invalid_target_port,
+                        "target_input_count": target_input_count,
+                        "conflict_mode": "clamp",
+                        "clamped_port": clamped_port,
+                    }
+                )
                 actions.append(
                     f"将指向 {target_instance} 的越界端口 {invalid_target_port} 夹断为 {clamped_port}。"
                 )
 
             target_ids.append(target_instance)
 
-        return actions, target_ids
+        return operations, actions, target_ids
 
-    def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
+    def _prepare_patch_operations(self, state: Dict[str, Any], repair_scope: str, issues: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], List[str], List[str]]:
+        if repair_scope == "planning":
+            return self._prepare_planning_repair(state, issues)
+        if repair_scope == "assembly":
+            return self._prepare_assembly_repair(state, issues)
+        if repair_scope == "compile":
+            return self._prepare_compile_repair(state, issues)
+        raise ValueError(f"Unsupported repair scope: {repair_scope}")
+
+    def prepare_repair_patch(self, state: Dict[str, Any]) -> RepairPatchPlan:
         route_decision = state.get("route_decision", {}) or {}
         verification_report = state.get("verification_report", {}) or {}
         repair_scope = str(route_decision.get("repair_scope") or verification_report.get("repair_scope") or "").strip()
@@ -722,14 +823,9 @@ class RepairAgent:
         issue_ids = list(route_decision.get("issue_ids", []) or [])
         repairable_issues, unsupported_issues = self._select_scope_issues(state, repair_scope)
 
-        state["retry_budget"] = retry_budget
-        state["retry_counts_by_scope"] = retry_counts_by_scope
-        state["retry_count"] = sum(retry_counts_by_scope.values())
-
         if unsupported_issues:
             unsupported_rule_ids = sorted({str(issue.get("rule_id", "")).strip() for issue in unsupported_issues})
-            return self._reject(
-                state,
+            return self._prepare_reject_plan(
                 repair_scope=repair_scope,
                 issue_ids=issue_ids,
                 repair_round=repair_round,
@@ -740,8 +836,7 @@ class RepairAgent:
             )
 
         if not repairable_issues:
-            return self._reject(
-                state,
+            return self._prepare_reject_plan(
                 repair_scope=repair_scope,
                 issue_ids=issue_ids,
                 repair_round=repair_round,
@@ -752,17 +847,9 @@ class RepairAgent:
             )
 
         try:
-            if repair_scope == "planning":
-                actions, target_ids = self._apply_planning_repair(state, repairable_issues)
-            elif repair_scope == "assembly":
-                actions, target_ids = self._apply_assembly_repair(state, repairable_issues)
-            elif repair_scope == "compile":
-                actions, target_ids = self._apply_compile_repair(state, repairable_issues)
-            else:
-                raise ValueError(f"Unsupported repair scope: {repair_scope}")
+            operations, actions, target_ids = self._prepare_patch_operations(state, repair_scope, repairable_issues)
         except RepairIssueReject as exc:
-            return self._reject(
-                state,
+            return self._prepare_reject_plan(
                 repair_scope=repair_scope,
                 issue_ids=issue_ids,
                 repair_round=repair_round,
@@ -772,8 +859,7 @@ class RepairAgent:
                 actions=[str(exc)],
             )
         except ValueError as exc:
-            return self._reject(
-                state,
+            return self._prepare_reject_plan(
                 repair_scope=repair_scope,
                 issue_ids=issue_ids,
                 repair_round=repair_round,
@@ -783,10 +869,7 @@ class RepairAgent:
                 actions=[str(exc)],
             )
 
-        resume_node = RESUME_NODE_BY_SCOPE[repair_scope]
-        self._invalidate_downstream(state, repair_scope)
-
-        state["repair_context"] = {
+        return {
             "repair_round": repair_round,
             "repair_scope": repair_scope,
             "issue_ids": issue_ids,
@@ -794,28 +877,158 @@ class RepairAgent:
             "target_state_keys": TARGET_STATE_KEYS_BY_SCOPE[repair_scope],
             "repair_strategy": REPAIR_STRATEGY_BY_SCOPE[repair_scope],
             "patch_instructions": actions,
+            "resume_node": RESUME_NODE_BY_SCOPE[repair_scope],
+            "decision": route_decision.get("decision", f"{repair_scope}_repair"),
+            "reason": "repair_patch_applied",
+            "result": "patched",
+            "retry_budget": deepcopy(retry_budget),
+            "retry_counts_by_scope": deepcopy(retry_counts_by_scope),
+            "operations": operations,
+        }
+
+    def _apply_patch_operations(self, state: Dict[str, Any], plan: RepairPatchPlan) -> None:
+        repair_scope = str(plan.get("repair_scope", "")).strip()
+        operations = plan.get("operations", []) or []
+
+        if repair_scope == "planning":
+            architecture_plan = state.get("architecture_plan", {}) or {}
+            decomposition_result = state.get("decomposition_result", {}) or {}
+            for operation in operations:
+                op_name = str(operation.get("operation", "")).strip()
+                if op_name == "bind_shared_signal_owner":
+                    self._bind_shared_signal_owner(
+                        state,
+                        architecture_plan,
+                        signal_name=str(operation.get("signal_name", "")).strip(),
+                        owner_subsystem_id=str(operation.get("owner_subsystem_id", "")).strip(),
+                        candidate_exporters=_normalize_string_list(operation.get("candidate_exporters")),
+                        resolution_status=str(operation.get("resolution_status", "")).strip(),
+                        resolution_evidence=str(operation.get("resolution_evidence", "")).strip(),
+                    )
+                elif op_name == "mark_shared_signal_external":
+                    self._mark_shared_signal_as_external(
+                        state,
+                        architecture_plan,
+                        decomposition_result,
+                        signal_name=str(operation.get("signal_name", "")).strip(),
+                        signal_key=str(operation.get("signal_key", "")).strip(),
+                        binding_kind=str(operation.get("binding_kind", "")).strip() or "external_input",
+                    )
+                else:
+                    raise ValueError(f"Unsupported planning repair operation: {op_name or '<empty>'}")
+            return
+
+        if repair_scope == "assembly":
+            subsystem_plan_map = state.get("subsystem_plan_map", {}) or {}
+            for operation in operations:
+                if str(operation.get("operation", "")).strip() != "remove_invalid_local_edges":
+                    raise ValueError("Unsupported assembly repair operation.")
+                subsystem_id = str(operation.get("subsystem_id", "")).strip()
+                subsystem_plan = subsystem_plan_map.get(subsystem_id, {}) or {}
+                old_edges = list(subsystem_plan.get("edges", []) or [])
+                matching_edges = list(operation.get("matching_edges", []) or [])
+                removed_count = int(operation.get("removed_count", 0) or 0)
+                if removed_count <= 0:
+                    raise ValueError(f"No removable invalid local edges found for subsystem {subsystem_id}.")
+                subsystem_plan["edges"] = [edge for edge in old_edges if edge not in matching_edges]
+                subsystem_plan.setdefault("unresolved_items", []).append(
+                    {
+                        "type": "degraded_removed_invalid_local_edge",
+                        "severity": "warning",
+                        "scope": "assembly",
+                        "subsystem_id": subsystem_id,
+                        "message": f"RepairAgent removed {removed_count} invalid local edges from subsystem {subsystem_id}.",
+                        "reason": str(operation.get("reason", "")).strip() or "missing_local_edge_endpoint",
+                        "edge_ids": list(operation.get("edge_ids", []) or []),
+                        "suggested_fix": "补齐真实局部语义后再恢复被删除的边。",
+                    }
+                )
+            return
+
+        if repair_scope == "compile":
+            assembled_graph_ir = state.get("assembled_graph_ir", {}) or {}
+            for operation in operations:
+                if str(operation.get("operation", "")).strip() != "repair_compile_wires":
+                    raise ValueError("Unsupported compile repair operation.")
+                source_instance = str(operation.get("source_instance", "")).strip()
+                target_instance = str(operation.get("target_instance", "")).strip()
+                invalid_target_port = int(operation.get("invalid_target_port", 0) or 0)
+                matching_edges = [
+                    edge
+                    for edge in assembled_graph_ir.get("edges", []) or []
+                    if str(edge.get("from_instance", "")).strip() == source_instance
+                    and str(edge.get("to_instance", "")).strip() == target_instance
+                    and int(edge.get("to_port", 0) or 0) == invalid_target_port
+                ]
+                if not matching_edges:
+                    raise ValueError("Unable to locate the offending assembled edge for compile repair.")
+                if str(operation.get("conflict_mode", "")).strip() == "remove":
+                    for edge in matching_edges:
+                        assembled_graph_ir["edges"].remove(edge)
+                else:
+                    clamped_port = int(operation.get("clamped_port", 0) or 0)
+                    for edge in matching_edges:
+                        edge["to_port"] = clamped_port
+            return
+
+        raise ValueError(f"Unsupported repair scope: {repair_scope or '<empty>'}")
+
+    def apply_repair_patch(self, state: Dict[str, Any], plan: RepairPatchPlan) -> Dict[str, Any]:
+        repair_scope = str(plan.get("repair_scope", "")).strip()
+        state["retry_budget"] = deepcopy(plan.get("retry_budget", default_retry_budget()))
+        state["retry_counts_by_scope"] = deepcopy(plan.get("retry_counts_by_scope", default_retry_counts_by_scope()))
+        state["retry_count"] = sum((state.get("retry_counts_by_scope", {}) or {}).values())
+
+        if plan.get("result") == "rejected":
+            return self._reject(
+                state,
+                repair_scope=repair_scope,
+                issue_ids=list(plan.get("issue_ids", []) or []),
+                repair_round=int(plan.get("repair_round", 0) or 0),
+                retry_budget=state["retry_budget"],
+                retry_counts_by_scope=state["retry_counts_by_scope"],
+                reason=str(plan.get("reason", "")).strip(),
+                actions=list(plan.get("patch_instructions", []) or []),
+            )
+
+        self._apply_patch_operations(state, plan)
+        resume_node = str(plan.get("resume_node", "")).strip()
+        self._invalidate_downstream(state, repair_scope)
+
+        state["repair_context"] = {
+            "repair_round": int(plan.get("repair_round", 0) or 0),
+            "repair_scope": repair_scope,
+            "issue_ids": list(plan.get("issue_ids", []) or []),
+            "target_ids": list(plan.get("target_ids", []) or []),
+            "target_state_keys": list(plan.get("target_state_keys", []) or []),
+            "repair_strategy": str(plan.get("repair_strategy", "")).strip(),
+            "patch_instructions": list(plan.get("patch_instructions", []) or []),
             "resume_node": resume_node,
         }
         state.setdefault("repair_history", []).append(
             {
-                "round": repair_round,
+                "round": int(plan.get("repair_round", 0) or 0),
                 "scope": repair_scope,
-                "issue_ids": issue_ids,
-                "target_state_keys": TARGET_STATE_KEYS_BY_SCOPE[repair_scope],
-                "actions": actions,
+                "issue_ids": list(plan.get("issue_ids", []) or []),
+                "target_state_keys": list(plan.get("target_state_keys", []) or []),
+                "actions": list(plan.get("patch_instructions", []) or []),
                 "result": "patched",
                 "next_node": resume_node,
             }
         )
         state["route_decision"] = {
-            "decision": route_decision.get("decision", f"{repair_scope}_repair"),
+            "decision": str(plan.get("decision", "")).strip() or f"{repair_scope}_repair",
             "repair_scope": repair_scope,
             "next_node": resume_node,
-            "reason": "repair_patch_applied",
-            "issue_ids": issue_ids,
+            "reason": str(plan.get("reason", "")).strip() or "repair_patch_applied",
+            "issue_ids": list(plan.get("issue_ids", []) or []),
             "retry_exhausted": False,
-            "retry_count_for_scope": retry_counts_by_scope.get(repair_scope, 0),
-            "retry_budget_for_scope": retry_budget.get(repair_scope, 0),
+            "retry_count_for_scope": state["retry_counts_by_scope"].get(repair_scope, 0),
+            "retry_budget_for_scope": state["retry_budget"].get(repair_scope, 0),
         }
         state["current_step"] = "repair_completed"
         return state
+
+    def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        plan = self.prepare_repair_patch(state)
+        return self.apply_repair_patch(state, plan)

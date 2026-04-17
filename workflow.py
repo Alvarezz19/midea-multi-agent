@@ -29,6 +29,7 @@ from utils.phase3_contracts import (
     default_retry_budget,
     default_retry_counts_by_scope,
 )
+from utils.workflow_runtime import build_runtime_invoke_config, compile_state_graph
 
 try:
     from agents.retrieval_agent import RetrievalAgent
@@ -235,7 +236,7 @@ def build_initial_state(user_query: str) -> dict:
 
 
 @traceable(name="create_workflow", tags=["workflow", "langgraph"])
-def create_workflow() -> StateGraph:
+def create_workflow(*, checkpointer: Any | None = None) -> StateGraph:
     """Create the Phase 4 workflow graph."""
     if RetrievalAgent is None:
         raise ImportError("RetrievalAgent 依赖未安装，无法创建正式工作流。")
@@ -269,19 +270,28 @@ def create_workflow() -> StateGraph:
 
 
 @traceable(name="run_workflow", tags=["workflow", "langgraph"])
-def run_workflow(user_query: str) -> dict:
+def run_workflow(
+    user_query: str,
+    *,
+    thread_id: str | None = None,
+    checkpointer: Any | None = None,
+    runtime_metadata: dict[str, Any] | None = None,
+) -> dict:
     """Run the end-to-end workflow and return the final state."""
-    workflow = create_workflow()
-    app = workflow.compile()
+    workflow = create_workflow(checkpointer=checkpointer)
+    app = compile_state_graph(workflow, checkpointer=checkpointer)
 
     initial_state = build_initial_state(user_query)
 
-    invoke_config = {
-        "run_name": "MideaWorkflow",
-        "tags": ["workflow", "langgraph", "phase3-layered-planning"],
-        "metadata": {"user_query": user_query},
-        "recursion_limit": PHASE4_RECURSION_LIMIT,
-    }
+    invoke_config = build_runtime_invoke_config(
+        user_query=user_query,
+        run_name="MideaWorkflow",
+        tags=["workflow", "langgraph", "phase3-layered-planning"],
+        recursion_limit=PHASE4_RECURSION_LIMIT,
+        thread_id=thread_id,
+        checkpointer=checkpointer,
+        extra_metadata=runtime_metadata,
+    )
 
     return app.invoke(initial_state, config=invoke_config)
 
