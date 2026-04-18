@@ -1,6 +1,7 @@
-"""Phase 3/4 contract types and empty payload factories."""
+"""Phase 3/4/8 contract types and empty payload factories."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, List, TypedDict
 
 
@@ -212,12 +213,70 @@ DEFAULT_RETRY_BUDGET: Dict[str, int] = {
     "compile": 2,
 }
 VALID_REPAIR_SCOPES = tuple(DEFAULT_RETRY_BUDGET.keys())
+VALID_HITL_STAGES = (
+    "none",
+    "clarification_review",
+    "architecture_review",
+    "repair_review",
+)
+VALID_REVIEW_DECISIONS = (
+    "approve",
+    "feedback",
+    "reject",
+    "clarify",
+)
+VALID_REVIEW_STATUS = (
+    "none",
+    "not_required",
+    "pending",
+    "interrupted",
+    "assumed",
+    "answered",
+    "applied",
+    "rejected",
+)
 VALID_ROUTE_DECISIONS = (
     "accept",
     "planning_repair",
     "assembly_repair",
     "compile_repair",
     "reject",
+)
+CLARIFICATION_ALLOWED_REQUIREMENT_KEYS = (
+    "system_type",
+    "scenario_summary",
+    "subsystems",
+    "signals",
+    "required_pages",
+    "global_modes",
+    "ambiguities",
+    "assumptions",
+    "acceptance_criteria",
+    "warnings",
+    "confidence",
+)
+ARCHITECTURE_FEEDBACK_ALLOWED_REQUIREMENT_KEYS = (
+    "system_type",
+    "scenario_summary",
+    "subsystems",
+    "signals",
+    "required_pages",
+    "global_modes",
+    "ambiguities",
+    "assumptions",
+    "acceptance_criteria",
+    "warnings",
+    "confidence",
+)
+REVIEW_BLOCKED_STATE_KEYS = (
+    "retrieval_bundle",
+    "decomposition_result",
+    "architecture_plan",
+    "subsystem_plan_map",
+    "assembled_graph_ir",
+    "compiled_artifact",
+    "verification_report",
+    "final_output",
 )
 
 
@@ -259,6 +318,33 @@ class RepairHistoryEntry(TypedDict, total=False):
     next_node: str
 
 
+class ReviewRequest(TypedDict, total=False):
+    review_id: str
+    stage: str
+    question: str
+    options: List[Dict[str, Any]]
+    context_summary: str
+    created_at: str
+
+
+class ReviewResponse(TypedDict, total=False):
+    decision: str
+    answers: List[Any]
+    feedback: str
+    updated_constraints: Dict[str, Any]
+    review_id: str
+
+
+class ReviewHistoryEntry(TypedDict, total=False):
+    review_id: str
+    stage: str
+    status: str
+    request: ReviewRequest
+    response: ReviewResponse
+    created_at: str
+    updated_at: str
+
+
 class RouteDecision(TypedDict, total=False):
     decision: str
     repair_scope: str
@@ -290,6 +376,83 @@ def empty_requirement_spec() -> RequirementSpec:
         "confidence": 0.0,
         "warnings": [],
     }
+
+
+def empty_review_request() -> ReviewRequest:
+    return {
+        "review_id": "",
+        "stage": "none",
+        "question": "",
+        "options": [],
+        "context_summary": "",
+        "created_at": "",
+    }
+
+
+def empty_review_response() -> ReviewResponse:
+    return {
+        "decision": "",
+        "answers": [],
+        "feedback": "",
+        "updated_constraints": {},
+        "review_id": "",
+    }
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def make_review_id(stage: str, review_history: list[dict[str, Any]] | None = None) -> str:
+    stage_name = str(stage or "").strip()
+    prefix_map = {
+        "clarification_review": "clarification",
+        "architecture_review": "architecture",
+        "repair_review": "repair",
+    }
+    prefix = prefix_map.get(stage_name, stage_name or "review")
+    existing_count = sum(
+        1
+        for entry in (review_history or [])
+        if str((entry or {}).get("stage", "")).strip() == stage_name
+    )
+    return f"{prefix}-{existing_count + 1:03d}"
+
+
+def upsert_review_history_entry(
+    history: list[dict[str, Any]] | None,
+    *,
+    stage: str,
+    review_id: str,
+    status: str,
+    request: dict[str, Any],
+    response: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    timestamp = utc_now_iso()
+    next_history = [dict(entry or {}) for entry in (history or [])]
+    for entry in next_history:
+        if str(entry.get("review_id", "")).strip() != review_id:
+            continue
+        entry["stage"] = stage
+        entry["status"] = status
+        entry["request"] = dict(request or {})
+        if response is not None:
+            entry["response"] = dict(response or {})
+        entry["updated_at"] = timestamp
+        return next_history
+
+    next_history.append(
+        {
+            "review_id": review_id,
+            "stage": stage,
+            "status": status,
+            "request": dict(request or {}),
+            "response": dict(response or empty_review_response()),
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        }
+    )
+    return next_history
 
 
 def empty_decomposition_result() -> DecompositionResult:
@@ -407,3 +570,54 @@ def default_retry_budget() -> Dict[str, int]:
 
 def default_retry_counts_by_scope() -> Dict[str, int]:
     return {scope: 0 for scope in VALID_REPAIR_SCOPES}
+
+
+def normalize_review_response(payload: Any, *, review_id: str = "") -> ReviewResponse:
+    if not isinstance(payload, dict):
+        raise ValueError("resume payload 必须是 dict。")
+
+    decision = str(payload.get("decision", "")).strip()
+    if decision not in VALID_REVIEW_DECISIONS:
+        raise ValueError(f"unsupported_review_decision:{decision or '<empty>'}")
+
+    answers = payload.get("answers", [])
+    if not isinstance(answers, list):
+        raise ValueError("resume payload.answers 必须是 list。")
+
+    feedback = str(payload.get("feedback", "") or "").strip()
+    updated_constraints = payload.get("updated_constraints", {})
+    if not isinstance(updated_constraints, dict):
+        raise ValueError("resume payload.updated_constraints 必须是 dict。")
+
+    normalized_review_id = str(payload.get("review_id", "") or "").strip() or str(review_id or "").strip()
+    if review_id and normalized_review_id != review_id:
+        raise ValueError(f"review_id_mismatch:{review_id}:{normalized_review_id or '<empty>'}")
+
+    return {
+        "decision": decision,
+        "answers": list(answers),
+        "feedback": feedback,
+        "updated_constraints": dict(updated_constraints),
+        "review_id": normalized_review_id,
+    }
+
+
+def merge_requirement_side_patch(
+    requirement_spec: Dict[str, Any] | None,
+    patch: Dict[str, Any] | None,
+    *,
+    allowed_keys: tuple[str, ...],
+) -> Dict[str, Any]:
+    merged = dict(requirement_spec or {})
+    patch_dict = dict(patch or {})
+
+    for blocked_key in REVIEW_BLOCKED_STATE_KEYS:
+        if blocked_key in patch_dict:
+            raise ValueError(f"review_patch_forbidden:{blocked_key}")
+
+    for key, value in patch_dict.items():
+        if key not in allowed_keys:
+            raise ValueError(f"review_patch_unsupported:{key}")
+        merged[key] = value
+
+    return merged

@@ -7,14 +7,19 @@ layer into:
 analysis -> retrieval -> architecture_planning -> subsystem_planning
 -> global_assembly -> coding -> verification -> END
 """
-from typing import Any, TypedDict
+from typing import Any, Callable, TypedDict
 import os
 
 from langgraph.graph import END, StateGraph
 from langsmith import traceable
 
 from agents.analysis_agent import AnalysisAgent
+from agents.ambiguity_router import AmbiguityRouter
+from agents.architecture_feedback_apply_agent import ArchitectureFeedbackApplyAgent
 from agents.architecture_planner import ArchitecturePlanner
+from agents.architecture_review_agent import ArchitectureReviewAgent
+from agents.clarification_apply_agent import ClarificationApplyAgent
+from agents.clarification_review_agent import ClarificationReviewAgent
 from agents.coding_agent import CodingAgent
 from agents.global_assembler import GlobalAssembler
 from agents.repair_agent import RepairAgent
@@ -25,9 +30,14 @@ from utils.phase3_contracts import (
     DEFAULT_RETRY_BUDGET,
     RepairContext,
     RepairHistoryEntry,
+    ReviewHistoryEntry,
+    ReviewRequest,
+    ReviewResponse,
     RouteDecision,
     default_retry_budget,
     default_retry_counts_by_scope,
+    empty_review_request,
+    empty_review_response,
 )
 from utils.workflow_runtime import build_runtime_invoke_config, compile_state_graph
 
@@ -71,6 +81,18 @@ class WorkflowState(TypedDict):
     retry_count: int
     retry_budget: dict[str, int]
     retry_counts_by_scope: dict[str, int]
+    hitl_stage: str
+    review_request: ReviewRequest
+    review_response: ReviewResponse
+    review_history: list[ReviewHistoryEntry]
+    review_enabled: bool
+    review_required: bool
+    review_status: str
+    review_id: str
+    clarification_round: int
+    architecture_feedback_patch: dict
+    enable_hitl_clarification: bool
+    enable_hitl_architecture_review: bool
     current_step: str
     next_step: str
 
@@ -83,6 +105,13 @@ PHASE3_NODE_ORDER = [
     "global_assembly",
     "coding",
     "verification",
+]
+PHASE8_REVIEW_NODE_ORDER = [
+    "ambiguity_router",
+    "clarification_review",
+    "clarification_apply",
+    "architecture_review",
+    "architecture_feedback_apply",
 ]
 REPAIR_ROUTER_NODE = "repair_router"
 REPAIR_AGENT_NODE = "repair_agent"
@@ -155,6 +184,60 @@ def get_repair_agent_branch(state: dict[str, Any]) -> str:
     return get_repair_resume_branch(state)
 
 
+def get_ambiguity_branch(state: dict[str, Any]) -> str:
+    return "clarification_review" if bool((state or {}).get("review_required", False)) else "retrieval"
+
+
+def get_clarification_review_branch(state: dict[str, Any]) -> str:
+    review_required = bool((state or {}).get("review_required", False))
+    review_enabled = bool((state or {}).get("review_enabled", False))
+    review_status = str((state or {}).get("review_status", "")).strip()
+    review_response = (state or {}).get("review_response", {}) or {}
+    decision = str(review_response.get("decision", "")).strip()
+    if review_required and review_enabled and review_status == "pending":
+        return "clarification_review"
+    if review_status in {"answered", "applied", "rejected"}:
+        return "clarification_apply"
+    if decision:
+        return "clarification_apply"
+    return "retrieval"
+
+
+def get_clarification_apply_branch(state: dict[str, Any]) -> str:
+    decision = str((((state or {}).get("review_response", {}) or {}).get("decision", ""))).strip()
+    return "END" if decision == "reject" else "retrieval"
+
+
+def get_architecture_review_branch(state: dict[str, Any]) -> str:
+    review_required = bool((state or {}).get("review_required", False))
+    review_enabled = bool((state or {}).get("review_enabled", False))
+    review_status = str((state or {}).get("review_status", "")).strip()
+    review_response = (state or {}).get("review_response", {}) or {}
+    decision = str(review_response.get("decision", "")).strip()
+    if review_required and review_enabled and review_status == "pending":
+        return "architecture_review"
+    if review_status in {"answered", "applied", "rejected"}:
+        return "architecture_feedback_apply"
+    if decision:
+        return "architecture_feedback_apply"
+    return "subsystem_planning"
+
+
+def get_architecture_feedback_apply_branch(state: dict[str, Any]) -> str:
+    decision = str((((state or {}).get("review_response", {}) or {}).get("decision", ""))).strip()
+    if not decision:
+        decision = str((((state or {}).get("architecture_feedback_patch", {}) or {}).get("decision", ""))).strip()
+    if decision == "reject":
+        return "END"
+    if decision in {"feedback", "clarify"}:
+        return "architecture_planning"
+    return "subsystem_planning"
+
+
+def _passthrough_node(state: dict[str, Any]) -> dict[str, Any]:
+    return state
+
+
 def populate_phase3_workflow(workflow: StateGraph, nodes: dict[str, object]) -> StateGraph:
     """Register the shared Phase 3 linear topology."""
     return populate_phase4_workflow(workflow, nodes, enable_repair_loop=False)
@@ -169,6 +252,8 @@ def populate_phase4_workflow(
     """Register the shared Phase 4-capable topology."""
     for node_name in PHASE3_NODE_ORDER:
         workflow.add_node(node_name, nodes[node_name])
+    for node_name in PHASE8_REVIEW_NODE_ORDER:
+        workflow.add_node(node_name, nodes.get(node_name, _passthrough_node))
 
     if enable_repair_loop:
         missing_nodes = {REPAIR_ROUTER_NODE, REPAIR_AGENT_NODE} - set(nodes)
@@ -179,7 +264,53 @@ def populate_phase4_workflow(
         workflow.add_node(REPAIR_AGENT_NODE, nodes[REPAIR_AGENT_NODE])
 
     workflow.set_entry_point(PHASE3_NODE_ORDER[0])
-    for source, target in zip(PHASE3_NODE_ORDER, PHASE3_NODE_ORDER[1:]):
+    workflow.add_edge("analysis", "ambiguity_router")
+    workflow.add_conditional_edges(
+        "ambiguity_router",
+        get_ambiguity_branch,
+        {
+            "clarification_review": "clarification_review",
+            "retrieval": "retrieval",
+        },
+    )
+    workflow.add_conditional_edges(
+        "clarification_review",
+        get_clarification_review_branch,
+        {
+            "clarification_review": "clarification_review",
+            "clarification_apply": "clarification_apply",
+            "retrieval": "retrieval",
+        },
+    )
+    workflow.add_conditional_edges(
+        "clarification_apply",
+        get_clarification_apply_branch,
+        {
+            "retrieval": "retrieval",
+            "END": END,
+        },
+    )
+    workflow.add_edge("retrieval", "architecture_planning")
+    workflow.add_edge("architecture_planning", "architecture_review")
+    workflow.add_conditional_edges(
+        "architecture_review",
+        get_architecture_review_branch,
+        {
+            "architecture_review": "architecture_review",
+            "architecture_feedback_apply": "architecture_feedback_apply",
+            "subsystem_planning": "subsystem_planning",
+        },
+    )
+    workflow.add_conditional_edges(
+        "architecture_feedback_apply",
+        get_architecture_feedback_apply_branch,
+        {
+            "architecture_planning": "architecture_planning",
+            "subsystem_planning": "subsystem_planning",
+            "END": END,
+        },
+    )
+    for source, target in zip(PHASE3_NODE_ORDER[3:], PHASE3_NODE_ORDER[4:]):
         workflow.add_edge(source, target)
 
     if enable_repair_loop:
@@ -199,7 +330,12 @@ def populate_phase4_workflow(
     return workflow
 
 
-def build_initial_state(user_query: str) -> dict:
+def build_initial_state(
+    user_query: str,
+    *,
+    enable_hitl_clarification: bool = False,
+    enable_hitl_architecture_review: bool = False,
+) -> dict:
     """Create the canonical initial state shared by both entrypoints."""
     retry_budget = default_retry_budget()
     retry_counts_by_scope = default_retry_counts_by_scope()
@@ -230,6 +366,18 @@ def build_initial_state(user_query: str) -> dict:
         "retry_budget": retry_budget,
         "retry_counts_by_scope": retry_counts_by_scope,
         "retry_count": aggregate_retry_count(retry_counts_by_scope),
+        "hitl_stage": "none",
+        "review_request": empty_review_request(),
+        "review_response": empty_review_response(),
+        "review_history": [],
+        "review_enabled": False,
+        "review_required": False,
+        "review_status": "none",
+        "review_id": "",
+        "clarification_round": 0,
+        "architecture_feedback_patch": {},
+        "enable_hitl_clarification": bool(enable_hitl_clarification),
+        "enable_hitl_architecture_review": bool(enable_hitl_architecture_review),
         "current_step": "start",
         "next_step": "",
     }
@@ -242,8 +390,13 @@ def create_workflow(*, checkpointer: Any | None = None) -> StateGraph:
         raise ImportError("RetrievalAgent 依赖未安装，无法创建正式工作流。")
 
     analysis_agent = AnalysisAgent()
+    ambiguity_router = AmbiguityRouter()
     retrieval_agent = RetrievalAgent()
+    clarification_review = ClarificationReviewAgent()
+    clarification_apply = ClarificationApplyAgent()
     architecture_planner = ArchitecturePlanner()
+    architecture_review = ArchitectureReviewAgent()
+    architecture_feedback_apply = ArchitectureFeedbackApplyAgent()
     subsystem_planner = SubsystemPlanner()
     global_assembler = GlobalAssembler()
     coding_agent = CodingAgent()
@@ -256,8 +409,13 @@ def create_workflow(*, checkpointer: Any | None = None) -> StateGraph:
         workflow,
         {
             "analysis": analysis_agent,
+            "ambiguity_router": ambiguity_router,
+            "clarification_review": clarification_review,
+            "clarification_apply": clarification_apply,
             "retrieval": retrieval_agent,
             "architecture_planning": architecture_planner,
+            "architecture_review": architecture_review,
+            "architecture_feedback_apply": architecture_feedback_apply,
             "subsystem_planning": subsystem_planner,
             "global_assembly": global_assembler,
             "coding": coding_agent,
@@ -276,12 +434,22 @@ def run_workflow(
     thread_id: str | None = None,
     checkpointer: Any | None = None,
     runtime_metadata: dict[str, Any] | None = None,
+    enable_hitl_clarification: bool = False,
+    enable_hitl_architecture_review: bool = False,
 ) -> dict:
     """Run the end-to-end workflow and return the final state."""
     workflow = create_workflow(checkpointer=checkpointer)
     app = compile_state_graph(workflow, checkpointer=checkpointer)
 
-    initial_state = build_initial_state(user_query)
+    initial_state = build_initial_state(
+        user_query,
+        enable_hitl_clarification=bool(
+            enable_hitl_clarification and checkpointer is not None and str(thread_id or "").strip()
+        ),
+        enable_hitl_architecture_review=bool(
+            enable_hitl_architecture_review and checkpointer is not None and str(thread_id or "").strip()
+        ),
+    )
 
     invoke_config = build_runtime_invoke_config(
         user_query=user_query,

@@ -2,29 +2,35 @@
 
 基于 LangGraph 的多智能体工作流，用于把自然语言需求转换为 KONG CUBE 可导入的组态 JSON。
 
-> 最后核对时间：2026-04-09  
+> 最后核对时间：2026-04-17  
 > 当前真实主链、状态契约与测试事实以 [工作流总结文档](工作流总结文档.md) 为准；变更时间线见 [工作流演进记录](工作流演进记录.md)。
 
 ## 当前结论
 
-- 当前系统已经完成 `Phase 3` 首版分层规划主链接入，并完成前三阶段遗留问题整改的文档/环境口径收口。
+- 当前系统已经完成 `Phase 6` 质量收口、`Phase 7` 工程准备冻结，以及 `Phase 8` 的前置澄清与架构评审主链接入。
 - 当前正式主链为：
 
 ```text
 user_query
   -> analysis
+  -> ambiguity_router
+  -> (clarification_review -> clarification_apply -> retrieval) | retrieval
   -> retrieval
   -> architecture_planning
+  -> architecture_review
+  -> (architecture_feedback_apply -> architecture_planning) | subsystem_planning
   -> subsystem_planning
   -> global_assembly
   -> coding
   -> verification
-  -> END
+  -> repair_router
+  -> (accept -> END) / (repair_agent -> subsystem_planning | global_assembly | coding)
 ```
 
 - 当前真实主产物是 `compiled_artifact`；`generated_code` 只是兼容字段，等于 `compiled_artifact["json_text"]`。
 - 当前真实编译输入是 `assembled_graph_ir`；`execution_plan` 仅作为兼容投影保留。
-- 当前未接入：`RepairRouter / RepairAgent`、人工澄清 / 中断节点、`Send` 并行派发、reducer fan-in、完整 `internal_flow_objects` body 编译。
+- 当前未接入：`Send` 并行派发、reducer fan-in、`repair_review` 后置审核、完整 `internal_flow_objects` body 编译。
+- `workflow_trace.py` 现在会把 review 暂停记为 `interrupted`，并在 trace 目录中补 `review_records.json`、`approval_record.json` 与 review 索引路径。
 
 ## 环境准备
 
@@ -66,7 +72,7 @@ conda activate midea
 python workflow_trace.py
 ```
 
-`workflow_trace.py` 与 `workflow.py` 使用同一套 Phase 3 拓扑，只额外落盘 trace 文件，并在 `final_output.workflow_trace` 回写产物路径。
+`workflow_trace.py` 与 `workflow.py` 使用同一套正式主链拓扑，只额外落盘 trace 文件，并在 `final_output.workflow_trace` 回写产物路径；当存在 review 历史时，还会补充 `review_records_json`、`approval_record_json` 与 thread/attempt 级 review 索引。
 
 ## 关键状态字段
 

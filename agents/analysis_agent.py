@@ -66,6 +66,79 @@ class AnalysisResult(BaseModel):
 	metadata: AnalysisMetadata = Field(default_factory=AnalysisMetadata)
 
 
+def derive_clarification_signals(analysis_result: Dict[str, Any], requirement_spec: Dict[str, Any]) -> Dict[str, Any]:
+	"""提取用于条件式澄清的稳定信号。"""
+
+	scenario = analysis_result.get("scenario_analysis", {}) if isinstance(analysis_result, dict) else {}
+	if not isinstance(scenario, dict):
+		scenario = {}
+
+	requirement_spec = requirement_spec if isinstance(requirement_spec, dict) else {}
+	signals: List[Dict[str, str]] = []
+
+	def add_signal(code: str, severity: str, message: str) -> None:
+		signals.append(
+			{
+				"code": code,
+				"severity": severity,
+				"message": message,
+			}
+		)
+
+	ambiguities = requirement_spec.get("ambiguities", [])
+	if isinstance(ambiguities, list):
+		for ambiguity in ambiguities[:3]:
+			text = str(ambiguity or "").strip()
+			if text:
+				add_signal("requirement_ambiguity", "high", text)
+
+	warnings = requirement_spec.get("warnings", [])
+	if isinstance(warnings, list):
+		for warning in warnings[:3]:
+			text = str(warning or "").strip()
+			if text:
+				severity = "high" if "冲突" in text or "缺少" in text else "medium"
+				add_signal("requirement_warning", severity, text)
+
+	subsystems = requirement_spec.get("subsystems", [])
+	if not isinstance(subsystems, list) or not subsystems:
+		add_signal("missing_key_subsystems", "high", "未识别出稳定的子系统边界。")
+
+	required_pages = requirement_spec.get("required_pages", [])
+	if not isinstance(required_pages, list) or not required_pages:
+		add_signal("missing_required_pages", "medium", "未识别出稳定的必需页面。")
+
+	signals_payload = requirement_spec.get("signals", {})
+	if not isinstance(signals_payload, dict):
+		signals_payload = {}
+	input_signals = signals_payload.get("inputs", [])
+	output_signals = signals_payload.get("outputs", [])
+	if (
+		(not isinstance(input_signals, list) or not input_signals)
+		and (not isinstance(output_signals, list) or not output_signals)
+	):
+		add_signal("missing_explicit_signals", "medium", "缺少显式输入/输出信号，后续规划可能依赖保守假设。")
+
+	confidence = requirement_spec.get("confidence", scenario.get("confidence", 0.0))
+	try:
+		confidence = float(confidence)
+	except (TypeError, ValueError):
+		confidence = 0.0
+	if confidence < 0.5:
+		add_signal("low_confidence", "high", f"当前分析置信度偏低（{confidence:.2f}）。")
+
+	system_type = str(requirement_spec.get("system_type", "") or "").strip()
+	if not system_type:
+		add_signal("missing_system_type", "high", "系统类型未明确。")
+
+	should_clarify = any(signal["severity"] == "high" for signal in signals)
+	return {
+		"should_clarify": should_clarify,
+		"signals": signals,
+		"signal_count": len(signals),
+	}
+
+
 class AnalysisAgent:
 	"""分析智能体。"""
 
@@ -415,7 +488,10 @@ class AnalysisAgent:
 	def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
 		user_query = state.get("user_query", "")
 		analysis_result = self.analyze(user_query)
+		requirement_spec = build_requirement_spec(analysis_result)
+		analysis_result = dict(analysis_result)
+		analysis_result["clarification_signals"] = derive_clarification_signals(analysis_result, requirement_spec)
 		state["analysis_result"] = analysis_result
-		state["requirement_spec"] = build_requirement_spec(analysis_result)
+		state["requirement_spec"] = requirement_spec
 		state["current_step"] = "analysis_completed"
 		return state

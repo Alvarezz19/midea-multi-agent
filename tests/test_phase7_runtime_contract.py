@@ -43,6 +43,7 @@ class Phase7RuntimeContractTests(unittest.TestCase):
 
         class FakeApp:
             def invoke(self, initial_state, config=None):
+                captured["initial_state"] = initial_state
                 captured["config"] = config
                 return initial_state
 
@@ -58,6 +59,7 @@ class Phase7RuntimeContractTests(unittest.TestCase):
         self.assertEqual(captured["config"]["metadata"]["thread_id"], "phase7-thread")
         self.assertFalse(captured["config"]["metadata"]["persistence_enabled"])
         self.assertNotIn("configurable", captured["config"])
+        self.assertFalse(captured["config"]["metadata"].get("enable_hitl_clarification", False))
 
     def test_workflow_checkpointer_requires_thread_id_and_propagates_to_configurable(self):
         captured: dict[str, object] = {}
@@ -65,6 +67,7 @@ class Phase7RuntimeContractTests(unittest.TestCase):
 
         class FakeApp:
             def invoke(self, initial_state, config=None):
+                captured["initial_state"] = initial_state
                 captured["config"] = config
                 return initial_state
 
@@ -78,6 +81,7 @@ class Phase7RuntimeContractTests(unittest.TestCase):
                 "fan control",
                 thread_id="phase7-thread",
                 checkpointer=fake_checkpointer,
+                enable_hitl_architecture_review=True,
             )
 
         self.assertIs(captured["compile_kwargs"]["checkpointer"], fake_checkpointer)
@@ -86,10 +90,34 @@ class Phase7RuntimeContractTests(unittest.TestCase):
             {"thread_id": "phase7-thread"},
         )
         self.assertTrue(captured["config"]["metadata"]["persistence_enabled"])
+        self.assertTrue(captured["initial_state"]["enable_hitl_architecture_review"])
 
         with patch.object(workflow, "create_workflow", return_value=FakeWorkflow()):
             with self.assertRaises(ValueError):
                 workflow.run_workflow("fan control", checkpointer=fake_checkpointer)
+
+    def test_workflow_hitl_flags_require_checkpointer_and_thread_id_to_activate(self):
+        captured: dict[str, object] = {}
+
+        class FakeApp:
+            def invoke(self, initial_state, config=None):
+                captured["initial_state"] = initial_state
+                return initial_state
+
+        class FakeWorkflow:
+            def compile(self, **kwargs):
+                return FakeApp()
+
+        with patch.object(workflow, "create_workflow", return_value=FakeWorkflow()):
+            workflow.run_workflow(
+                "fan control",
+                thread_id="phase7-thread",
+                enable_hitl_clarification=True,
+                enable_hitl_architecture_review=True,
+            )
+
+        self.assertFalse(captured["initial_state"]["enable_hitl_clarification"])
+        self.assertFalse(captured["initial_state"]["enable_hitl_architecture_review"])
 
     def test_trace_workflow_runtime_config_includes_thread_id_and_attempt_id(self):
         captured: dict[str, object] = {}
@@ -115,6 +143,36 @@ class Phase7RuntimeContractTests(unittest.TestCase):
         self.assertEqual(captured["config"]["metadata"]["thread_id"], "phase7-thread")
         self.assertIn("attempt_id", captured["config"]["metadata"])
         self.assertEqual(result["final_output"]["workflow_trace"]["thread_id"], "phase7-thread")
+
+    def test_trace_workflow_architecture_hitl_flag_activates_only_with_persistence(self):
+        captured: dict[str, object] = {}
+        fake_checkpointer = object()
+
+        class FakeApp:
+            def invoke(self, initial_state, config=None):
+                captured["initial_state"] = initial_state
+                captured["config"] = config
+                return initial_state
+
+        class FakeWorkflow:
+            def compile(self, **kwargs):
+                captured["compile_kwargs"] = kwargs
+                return FakeApp()
+
+        with patch.object(workflow_trace, "create_workflow", return_value=FakeWorkflow()), patch.object(
+            workflow_trace,
+            "_save_workflow_trace",
+            return_value={"trace_dir": "mock-trace", "thread_id": "phase7-thread", "attempt_id": "attempt-1"},
+        ):
+            workflow_trace.run_workflow(
+                "fan control",
+                thread_id="phase7-thread",
+                checkpointer=fake_checkpointer,
+                enable_hitl_architecture_review=True,
+            )
+
+        self.assertIs(captured["compile_kwargs"]["checkpointer"], fake_checkpointer)
+        self.assertTrue(captured["initial_state"]["enable_hitl_architecture_review"])
 
 
 if __name__ == "__main__":

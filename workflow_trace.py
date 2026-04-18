@@ -13,11 +13,17 @@ import json
 import os
 import time
 
+from langgraph.errors import GraphInterrupt
 from langgraph.graph import StateGraph
 from langsmith import traceable
 
 from agents.analysis_agent import AnalysisAgent
+from agents.ambiguity_router import AmbiguityRouter
+from agents.architecture_feedback_apply_agent import ArchitectureFeedbackApplyAgent
 from agents.architecture_planner import ArchitecturePlanner
+from agents.architecture_review_agent import ArchitectureReviewAgent
+from agents.clarification_apply_agent import ClarificationApplyAgent
+from agents.clarification_review_agent import ClarificationReviewAgent
 from agents.coding_agent import CodingAgent
 from agents.global_assembler import GlobalAssembler
 from agents.repair_agent import RepairAgent
@@ -31,6 +37,7 @@ from workflow import (
     populate_phase4_workflow,
 )
 from utils.phase6_diagnostics import derive_failure_bucket, ordered_subsystem_ids
+from utils.review_index import save_review_artifacts
 from utils.trace_index import generate_attempt_id, register_trace_attempt
 from utils.workflow_runtime import build_runtime_invoke_config, compile_state_graph
 
@@ -211,6 +218,7 @@ def _build_trace_summary(
     *,
     thread_id: str | None = None,
     attempt_id: str | None = None,
+    approval_record_json: str = "",
 ) -> dict:
     retrieval_metadata = ((final_state or {}).get("retrieval_bundle", {}) or {}).get("metadata", {}) or {}
     subsystem_plan_map = (final_state or {}).get("subsystem_plan_map", {}) or {}
@@ -221,6 +229,26 @@ def _build_trace_summary(
     repair_history = list((final_state or {}).get("repair_history", []) or [])
     route_decision = (final_state or {}).get("route_decision", {}) or {}
     retry_counts_by_scope = _normalize_retry_counts_by_scope((final_state or {}).get("retry_counts_by_scope"))
+    review_request = (final_state or {}).get("review_request", {}) or {}
+    review_response = (final_state or {}).get("review_response", {}) or {}
+    review_history = list((final_state or {}).get("review_history", []) or [])
+    hitl_stage = str((final_state or {}).get("hitl_stage", "") or "none").strip() or "none"
+    review_enabled = bool((final_state or {}).get("review_enabled", False))
+    review_required = bool((final_state or {}).get("review_required", False))
+    review_status = str((final_state or {}).get("review_status", "") or "none").strip() or "none"
+    review_id = str((final_state or {}).get("review_id", "") or "").strip()
+    interrupted_record = next(
+        (record for record in reversed(node_io_records) if record.get("status") == "interrupted"),
+        {},
+    )
+    interrupted = bool(interrupted_record) or bool((final_state or {}).get("__interrupt__"))
+    request_stage = str(review_request.get("stage", "") or "").strip()
+    if interrupted:
+        workflow_status = "interrupted"
+        if hitl_stage == "none" and request_stage:
+            hitl_stage = request_stage
+        if review_status in {"none", "pending"} and review_required:
+            review_status = "interrupted"
 
     unresolved_items = list(assembled_graph_ir.get("unresolved_items", []) or [])
     unresolved_error_count = sum(
@@ -250,7 +278,9 @@ def _build_trace_summary(
     failed_output = failed_record.get("output", {}) if isinstance(failed_record, dict) else {}
 
     verification_status = str(verification_report.get("status", "")).strip()
-    if failed_record:
+    if interrupted:
+        workflow_status = "interrupted"
+    elif failed_record:
         workflow_status = "failed"
     elif verification_status:
         workflow_status = verification_status
@@ -364,6 +394,13 @@ def _build_trace_summary(
         "reject_reason": reject_reason,
         "repair_reject_category": repair_reject_category,
         "failure_bucket": failure_bucket,
+        "hitl_stage": hitl_stage,
+        "review_enabled": review_enabled,
+        "review_required": review_required,
+        "review_status": review_status,
+        "review_id": review_id or str(review_request.get("review_id", "") or str(review_response.get("review_id", "") or "")).strip(),
+        "review_history_count": len(review_history),
+        "approval_record_json": str(approval_record_json or "").strip(),
         "compile_report_summary": {
             "page_count": _to_int(compile_report.get("page_count", 0)),
             "subflow_count": _to_int(compile_report.get("subflow_count", 0)),
@@ -378,11 +415,20 @@ def _wrap_node(node_name: str, node_callable: Callable[[dict], dict], node_io_re
         input_snapshot = _make_serializable(copy.deepcopy(state))
         started_at = datetime.now()
         start_time = time.time()
+        status = "success"
+        result = state
 
         try:
             result = node_callable(state)
             output_snapshot = _make_serializable(copy.deepcopy(result))
-            status = "success"
+        except GraphInterrupt:
+            output_snapshot = {
+                "interrupt_type": "GraphInterrupt",
+                "hitl_stage": str((state or {}).get("hitl_stage", "") or "").strip(),
+                "review_id": str((state or {}).get("review_id", "") or "").strip(),
+            }
+            status = "interrupted"
+            raise
         except Exception as exc:
             output_snapshot = {
                 "error_type": type(exc).__name__,
@@ -420,6 +466,23 @@ def _save_workflow_trace(
     attempt_token = str(attempt_id or "").strip() or generate_attempt_id()
     trace_dir = os.path.join(TRACE_OUTPUT_ROOT, f"workflow_trace_{attempt_token}")
     os.makedirs(trace_dir, exist_ok=True)
+    summary_json_path = os.path.join(trace_dir, "workflow_node_io_record.json")
+    summary_md_path = os.path.join(trace_dir, "workflow_node_io_record.md")
+    final_state_path = os.path.join(trace_dir, "final_state.json")
+
+    review_files = save_review_artifacts(
+        trace_output_root=TRACE_OUTPUT_ROOT,
+        trace_dir=trace_dir,
+        thread_id=thread_id,
+        attempt_id=attempt_token,
+        review_history=list((final_state or {}).get("review_history", []) or []),
+        trace_files={
+            "trace_dir": os.path.abspath(trace_dir),
+            "summary_json": os.path.abspath(summary_json_path),
+            "summary_md": os.path.abspath(summary_md_path),
+            "final_state_json": os.path.abspath(final_state_path),
+        },
+    )
 
     trace_summary = _build_trace_summary(
         user_query=user_query,
@@ -428,15 +491,14 @@ def _save_workflow_trace(
         total_elapsed_seconds=total_elapsed_seconds,
         thread_id=thread_id,
         attempt_id=attempt_token,
+        approval_record_json=str(review_files.get("approval_record_json", "") or "").strip(),
     )
     summary = dict(trace_summary)
     summary["nodes"] = node_io_records
 
-    summary_json_path = os.path.join(trace_dir, "workflow_node_io_record.json")
     with open(summary_json_path, "w", encoding="utf-8") as file:
         json.dump(summary, file, ensure_ascii=False, indent=2)
 
-    final_state_path = os.path.join(trace_dir, "final_state.json")
     with open(final_state_path, "w", encoding="utf-8") as file:
         json.dump(_make_serializable(final_state), file, ensure_ascii=False, indent=2)
 
@@ -520,6 +582,14 @@ def _save_workflow_trace(
             f"**错误信息**: {summary['error_message'] or 'N/A'}\n",
         ])
 
+    markdown_lines.append(
+        f"**Review 摘要**: stage={summary['hitl_stage']} / enabled={summary['review_enabled']} / "
+        f"required={summary['review_required']} / status={summary['review_status']} / "
+        f"review_id={summary['review_id'] or 'N/A'} / history={summary['review_history_count']}\n"
+    )
+    if summary["approval_record_json"]:
+        markdown_lines.append(f"**Review 记录**: {summary['approval_record_json']}\n")
+
     if summary["last_repair_issue_ids"]:
         markdown_lines.append(f"**最近修复问题**: {', '.join(summary['last_repair_issue_ids'])}\n")
 
@@ -561,7 +631,6 @@ def _save_workflow_trace(
         markdown_lines.append("```\n")
         markdown_lines.append("---\n")
 
-    summary_md_path = os.path.join(trace_dir, "workflow_node_io_record.md")
     with open(summary_md_path, "w", encoding="utf-8") as file:
         file.write("\n".join(markdown_lines))
 
@@ -572,6 +641,8 @@ def _save_workflow_trace(
         "summary_json": os.path.abspath(summary_json_path),
         "summary_md": os.path.abspath(summary_md_path),
         "final_state_json": os.path.abspath(final_state_path),
+        "review_records_json": str(review_files.get("review_records_json", "") or "").strip(),
+        "approval_record_json": str(review_files.get("approval_record_json", "") or "").strip(),
     }
     normalized_thread_id = str(thread_id or "").strip()
     if normalized_thread_id:
@@ -583,6 +654,10 @@ def _save_workflow_trace(
                 trace_files=trace_files,
             )
         )
+        trace_files["review_attempt_index_json"] = str(review_files.get("review_attempt_index_json", "") or "").strip()
+        trace_files["review_thread_index_json"] = str(review_files.get("review_thread_index_json", "") or "").strip()
+        if review_files.get("review_record_jsons"):
+            trace_files["review_record_jsons"] = list(review_files.get("review_record_jsons", []) or [])
     return trace_files
 
 
@@ -596,8 +671,13 @@ def create_workflow(
         raise ImportError("RetrievalAgent 依赖未安装，无法创建正式工作流。")
 
     analysis_agent = AnalysisAgent()
+    ambiguity_router = AmbiguityRouter()
     retrieval_agent = RetrievalAgent()
+    clarification_review = ClarificationReviewAgent()
+    clarification_apply = ClarificationApplyAgent()
     architecture_planner = ArchitecturePlanner()
+    architecture_review = ArchitectureReviewAgent()
+    architecture_feedback_apply = ArchitectureFeedbackApplyAgent()
     subsystem_planner = SubsystemPlanner()
     global_assembler = GlobalAssembler()
     coding_agent = CodingAgent()
@@ -613,8 +693,17 @@ def create_workflow(
         workflow,
         {
             "analysis": _wrap_node("analysis", analysis_agent, node_io_records),
+            "ambiguity_router": _wrap_node("ambiguity_router", ambiguity_router, node_io_records),
+            "clarification_review": _wrap_node("clarification_review", clarification_review, node_io_records),
+            "clarification_apply": _wrap_node("clarification_apply", clarification_apply, node_io_records),
             "retrieval": _wrap_node("retrieval", retrieval_agent, node_io_records),
             "architecture_planning": _wrap_node("architecture_planning", architecture_planner, node_io_records),
+            "architecture_review": _wrap_node("architecture_review", architecture_review, node_io_records),
+            "architecture_feedback_apply": _wrap_node(
+                "architecture_feedback_apply",
+                architecture_feedback_apply,
+                node_io_records,
+            ),
             "subsystem_planning": _wrap_node("subsystem_planning", subsystem_planner, node_io_records),
             "global_assembly": _wrap_node("global_assembly", global_assembler, node_io_records),
             "coding": _wrap_node("coding", coding_agent, node_io_records),
@@ -633,6 +722,8 @@ def run_workflow(
     thread_id: str | None = None,
     checkpointer: Any | None = None,
     runtime_metadata: dict[str, Any] | None = None,
+    enable_hitl_clarification: bool = False,
+    enable_hitl_architecture_review: bool = False,
 ) -> dict:
     node_io_records: list[dict] = []
     started_at = time.time()
@@ -641,7 +732,15 @@ def run_workflow(
     workflow = create_workflow(checkpointer=checkpointer, node_io_records=node_io_records)
     app = compile_state_graph(workflow, checkpointer=checkpointer)
 
-    initial_state = build_initial_state(user_query)
+    initial_state = build_initial_state(
+        user_query,
+        enable_hitl_clarification=bool(
+            enable_hitl_clarification and checkpointer is not None and str(thread_id or "").strip()
+        ),
+        enable_hitl_architecture_review=bool(
+            enable_hitl_architecture_review and checkpointer is not None and str(thread_id or "").strip()
+        ),
+    )
 
     invoke_config = build_runtime_invoke_config(
         user_query=user_query,

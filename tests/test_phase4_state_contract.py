@@ -22,6 +22,18 @@ class Phase4StateContractTests(unittest.TestCase):
             "route_decision",
             "retry_budget",
             "retry_counts_by_scope",
+            "hitl_stage",
+            "review_request",
+            "review_response",
+            "review_history",
+            "review_enabled",
+            "review_required",
+            "review_status",
+            "review_id",
+            "clarification_round",
+            "architecture_feedback_patch",
+            "enable_hitl_clarification",
+            "enable_hitl_architecture_review",
         }
 
         self.assertTrue(expected_fields.issubset(set(workflow.WorkflowState.__annotations__)))
@@ -43,6 +55,18 @@ class Phase4StateContractTests(unittest.TestCase):
         )
         self.assertEqual(state["retry_count"], 0)
         self.assertEqual(state["retry_count"], sum(state["retry_counts_by_scope"].values()))
+        self.assertEqual(state["hitl_stage"], "none")
+        self.assertEqual(state["review_request"]["stage"], "none")
+        self.assertEqual(state["review_response"]["decision"], "")
+        self.assertEqual(state["review_history"], [])
+        self.assertFalse(state["review_enabled"])
+        self.assertFalse(state["review_required"])
+        self.assertEqual(state["review_status"], "none")
+        self.assertEqual(state["review_id"], "")
+        self.assertEqual(state["clarification_round"], 0)
+        self.assertEqual(state["architecture_feedback_patch"], {})
+        self.assertFalse(state["enable_hitl_clarification"])
+        self.assertFalse(state["enable_hitl_architecture_review"])
 
     def test_run_workflow_passes_recursion_limit_and_preserves_repair_defaults(self):
         captured: dict[str, object] = {}
