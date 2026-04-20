@@ -10,7 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import config
-from agents.planning_agent import PlanIR, PlanningAgent
+from agents.legacy.planning_agent import PlanIR, PlanningAgent
 
 
 def make_bundle(include_subflow: bool = True) -> dict:
@@ -203,7 +203,7 @@ class Phase2PlanningBundleTests(unittest.TestCase):
     def test_plan_true_path_prefers_subflow_template_when_bundle_exposes_phase2_hints(self):
         fake_llm = _BundleAwareFakeLLM()
 
-        with patch("agents.planning_agent.LLMManager.get_llm", return_value=fake_llm), patch.object(
+        with patch("agents.legacy.planning_agent.LLMManager.get_llm", return_value=fake_llm), patch.object(
             config, "DEBUG", False
         ):
             agent = PlanningAgent()
@@ -224,7 +224,7 @@ class Phase2PlanningBundleTests(unittest.TestCase):
     def test_plan_true_path_falls_back_to_atomic_when_bundle_has_no_subflow_templates(self):
         fake_llm = _BundleAwareFakeLLM()
 
-        with patch("agents.planning_agent.LLMManager.get_llm", return_value=fake_llm), patch.object(
+        with patch("agents.legacy.planning_agent.LLMManager.get_llm", return_value=fake_llm), patch.object(
             config, "DEBUG", False
         ):
             agent = PlanningAgent()

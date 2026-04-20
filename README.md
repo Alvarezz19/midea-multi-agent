@@ -155,15 +155,12 @@ python scripts/build_phase2_retrieval_indexes.py --output-dir AHU程序/pattern_
 
 | 模块 | 当前状态 | 说明 |
 |:---|:---|:---|
-| `agents/planning_agent.py` | legacy 兼容包装 | 真实实现已迁移到 `agents/legacy/planning_agent.py`；仍有 Phase 2 回归测试覆盖，但不在 Phase 3 正式主链中 |
-| `agents/assembly_agent.py` | legacy 兼容包装 | 真实实现已迁移到 `agents/legacy/assembly_agent.py`；Phase 3 正式共享 helper 已抽到 `agents/assembly_shared.py` |
-| `agents/validation_agent.py` | legacy 兼容包装 | 真实实现已迁移到 `agents/legacy/validation_agent.py` |
-| `agents/debugging_agent.py` | legacy 兼容包装 | 真实实现已迁移到 `agents/legacy/debugging_agent.py` |
-| `agents/retrieval_agent_old.py` | legacy 兼容包装 | 真实实现已迁移到 `agents/legacy/retrieval_agent_old.py`；当前正式入口是 `agents/retrieval_agent.py` |
+| `agents/legacy/planning_agent.py` | legacy 实现 | 仍有 Phase 2 legacy 回归测试覆盖，但不在 Phase 3 正式主链中 |
+| `agents/legacy/assembly_agent.py` | legacy 实现 | 正式共享 helper 已抽到 `agents/assembly_shared.py`；formal 代码不再复用该类 |
 
-其中 `planning_agent.py`、`assembly_agent.py`、`validation_agent.py`、`debugging_agent.py`、`retrieval_agent_old.py` 已完成目录收口；`GlobalAssembler` 已不再继承 legacy `AssemblyAgent`，而是复用 `agents/assembly_shared.py` 中的共享 helper。
+其中 root wrapper `planning_agent.py`、`assembly_agent.py`、`validation_agent.py`、`debugging_agent.py`、`retrieval_agent_old.py` 已删除；另外仓内 `0` 调用的 `agents/legacy/validation_agent.py`、`agents/legacy/debugging_agent.py`、`agents/legacy/retrieval_agent_old.py` 也已清退。`GlobalAssembler` 已不再继承 legacy `AssemblyAgent`，而是复用 `agents/assembly_shared.py` 中的共享 helper。
 
-兼容测试也开始分层：`tests/test_legacy_agent_imports.py`、`tests/test_legacy_execution_plan.py`、`tests/test_phase1_workflow.py`、`tests/test_phase2_bundle_consumers.py`、`tests/test_phase2_planning_bundle.py`、`tests/test_phase2_retrieval_bundle.py`、`tests/test_phase2_retrieval_agent.py`、`tests/test_phase6_retrieval_eval_contract.py`、`tests/test_phase7_coding_determinism.py` 目前仅保留兼容入口或混合入口，真实测试实现已下沉到 `tests/legacy/` / `tests/contracts/`，以便在不破坏现有命令的前提下逐步剥离 legacy 回归集。
+兼容测试也开始分层：`tests/test_legacy_execution_plan.py`、`tests/test_phase2_planning_bundle.py`、`tests/test_phase2_retrieval_bundle.py`、`tests/test_phase2_retrieval_agent.py`、`tests/test_phase6_retrieval_eval_contract.py` 目前仍保留兼容入口或混合入口，真实测试实现已下沉到 `tests/legacy/` / `tests/contracts/`，以便在不破坏现有命令的前提下逐步剥离 legacy 回归集。`tests/test_legacy_agent_imports.py` 已随 root wrapper 删除一并清退。
 
 ## 已验证环境基线
 

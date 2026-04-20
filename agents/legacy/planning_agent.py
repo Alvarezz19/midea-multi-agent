@@ -6,7 +6,7 @@
   ArchitecturePlanner -> SubsystemPlanner -> GlobalAssembler。
 - 当前用途: 保留为旧 execution_plan compat planner，仍被 Phase 2 bundle
   consumers / compat 回归测试直接覆盖。
-- 迁移计划: 已迁移到 agents/legacy/；agents/planning_agent.py 仅保留兼容 wrapper。
+- 迁移计划: 已迁移到 agents/legacy/；原 agents/planning_agent.py root wrapper 已删除。
 """
 import json
 import re

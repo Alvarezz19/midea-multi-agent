@@ -5,7 +5,7 @@ Assembly agent for phase 1 workflow refactor.
 - 正式主链: 否。Phase 3 main chain uses GlobalAssembler instead.
 - 当前用途: 保留为 legacy execution_plan -> Graph IR assembler。
 - 迁移说明: 共享装配 helper 已抽到 agents/assembly_shared.py；
-  agents/assembly_agent.py 仅保留兼容 wrapper。
+  原 agents/assembly_agent.py root wrapper 已删除。
 """
 from __future__ import annotations
 
