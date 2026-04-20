@@ -7,15 +7,14 @@ import config
 from utils.graph_ir import AssembledGraphIR, EdgeIR, NodeInstanceIR, PageIR, SignalIR
 from utils.phase3_adapters import normalize_signal_name
 from utils.signal_semantics import canonicalize_signal_name
-from .assembly_agent import AssemblyAgent
+from .assembly_shared import AssemblySharedMixin
 from .coding_utils import resolve_input_count, resolve_output_count
 
 
-class GlobalAssembler(AssemblyAgent):
-    """Assemble subsystem-local IR into the existing Graph IR contract."""
+class GlobalAssembler(AssemblySharedMixin):
+    """Formal assembler for Phase 3, decoupled from the legacy AssemblyAgent."""
 
     def __init__(self):
-        super().__init__()
         if config.DEBUG:
             print("[GlobalAssembler] initialized")
 
@@ -39,7 +38,7 @@ class GlobalAssembler(AssemblyAgent):
             return input_count, output_count
 
         template_json = node.get("template_json", {}) or module_doc.get("template_json", {})
-        template = AssemblyAgent._normalize_template(template_json)
+        template = AssemblySharedMixin._normalize_template(template_json)
         ports_definition = module_doc.get("ports_definition", {}) if isinstance(module_doc, dict) else {}
         if template.get("type") == "subflow":
             return (
