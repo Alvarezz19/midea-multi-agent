@@ -173,9 +173,6 @@ def _collect_descriptor_exporters(decomposition_result: Dict[str, Any], signal_k
             )
             if binding_key == signal_key and subsystem_id not in exporters:
                 exporters.append(subsystem_id)
-        for signal_name in descriptor.get("exports", []) or []:
-            if canonicalize_signal_name(signal_name) == signal_key and subsystem_id not in exporters:
-                exporters.append(subsystem_id)
     return exporters
 
 
@@ -293,14 +290,8 @@ def _reclassify_signal_bindings_as_external(
                 binding["canonical_signal_key"] = canonical_signal_key
                 binding.setdefault("evidence", []).append("Reclassified as external by RepairAgent.")
                 patched_here = True
-        if patched_here:
-            if subsystem_id and subsystem_id not in patched_subsystems:
-                patched_subsystems.append(subsystem_id)
-            continue
-        for signal_list_key in ("imports",):
-            for item in descriptor.get(signal_list_key, []) or []:
-                if canonicalize_signal_name(item) == canonical_signal_key and subsystem_id and subsystem_id not in patched_subsystems:
-                    patched_subsystems.append(subsystem_id)
+        if patched_here and subsystem_id and subsystem_id not in patched_subsystems:
+            patched_subsystems.append(subsystem_id)
     return patched_subsystems
 
 
@@ -327,11 +318,6 @@ def _collect_external_binding_subsystems(
                     if subsystem_id and subsystem_id not in patched_subsystems:
                         patched_subsystems.append(subsystem_id)
                     break
-            else:
-                for item in descriptor.get("imports", []) or []:
-                    if canonicalize_signal_name(item) == canonical_signal_key and subsystem_id and subsystem_id not in patched_subsystems:
-                        patched_subsystems.append(subsystem_id)
-                        break
     return patched_subsystems
 
 

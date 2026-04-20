@@ -124,7 +124,6 @@ class SharedSignalRegistryEntry(TypedDict, total=False):
     allowed_external: bool
     required_exporter_count: int
     consumers: List[str]
-    exporter_candidates: List[str]
     candidate_exporters: List[str]
     resolution_status: str
     resolution_evidence: List[str]

@@ -231,11 +231,6 @@ def _passthrough_node(state: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
-def populate_phase3_workflow(workflow: StateGraph, nodes: dict[str, object]) -> StateGraph:
-    """Register the legacy Phase 3 linear topology shim."""
-    return populate_phase4_workflow(workflow, nodes, enable_repair_loop=False)
-
-
 def populate_phase4_workflow(
     workflow: StateGraph,
     nodes: dict[str, object],

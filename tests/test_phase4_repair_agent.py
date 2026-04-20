@@ -386,6 +386,17 @@ def _planning_ambiguous_unresolved_state() -> dict:
     return state
 
 
+def _planning_ambiguous_compat_exports_only_state() -> dict:
+    state = _planning_ambiguous_converge_state()
+    state["decomposition_result"]["subsystem_descriptors"][-1] = {
+        "subsystem_id": "backup_ctrl",
+        "interface_bindings": [],
+        "imports": [],
+        "exports": ["supply_fan_available_flag"],
+    }
+    return state
+
+
 def _compile_state() -> dict:
     state = workflow.build_initial_state("compile repair")
     state["assembled_graph_ir"] = {
@@ -593,6 +604,16 @@ class RepairAgentTests(unittest.TestCase):
         self.assertEqual(result["repair_history"][0]["result"], "rejected")
         self.assertIn("无法收敛唯一 exporter", result["repair_history"][0]["actions"][0])
         self.assertEqual(result["current_step"], "repair_rejected")
+
+    def test_planning_repair_ignores_compat_descriptor_exports_when_filtering_candidates(self):
+        state = _planning_ambiguous_compat_exports_only_state()
+
+        result = RepairAgent()(state)
+
+        signal_entry = result["architecture_plan"]["shared_signal_registry"][0]
+        self.assertEqual(signal_entry["owner_subsystem_id"], "supply_fan_ctrl")
+        self.assertEqual(signal_entry["candidate_exporters"], ["supply_fan_ctrl"])
+        self.assertEqual(result["route_decision"]["reason"], "repair_patch_applied")
 
     def test_issue_id_filtering_can_trigger_no_repairable_issue(self):
         state = _planning_state()

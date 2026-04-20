@@ -523,6 +523,7 @@ class Phase3ArchitecturePlannerTests(unittest.TestCase):
 
         for entry in architecture_plan["shared_signal_registry"]:
             self.assertIn("candidate_exporters", entry)
+            self.assertNotIn("exporter_candidates", entry)
             self.assertIn("resolution_status", entry)
 
 

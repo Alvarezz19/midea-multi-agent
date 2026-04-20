@@ -159,7 +159,7 @@ class GlobalAssembler(AssemblySharedMixin):
 
     @staticmethod
     def _policy_candidate_exporters(signal_policy: Dict[str, Any]) -> List[str]:
-        values = signal_policy.get("candidate_exporters", []) or signal_policy.get("exporter_candidates", []) or []
+        values = signal_policy.get("candidate_exporters", []) or []
         return sorted({str(item).strip() for item in values if str(item).strip()})
 
     @staticmethod

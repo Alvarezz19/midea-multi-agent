@@ -238,7 +238,6 @@ class SubsystemPlanner:
                         "candidate_exporters": list(
                             binding.get("candidate_exporters", [])
                             or registry_entry.get("candidate_exporters", [])
-                            or registry_entry.get("exporter_candidates", [])
                             or []
                         ),
                         "resolution_evidence": list(
@@ -256,38 +255,7 @@ class SubsystemPlanner:
                 normalized_bindings,
                 key=lambda item: (0 if item.get("direction") == "input" else 1, int(item.get("port_index", 0) or 0)),
             )
-
-        fallback_bindings: List[Dict[str, Any]] = []
-        for direction, signal_names, default_kind in (
-            ("input", list(descriptor.get("imports", []) or []), "external_input"),
-            ("output", list(descriptor.get("exports", []) or []), "subsystem_output"),
-        ):
-            for port_index, signal_name in enumerate(self._dedupe_signal_names(signal_names)):
-                canonical_signal_key = canonicalize_signal_name(signal_name)
-                registry_entry = shared_signal_registry.get(canonical_signal_key, {})
-                binding_kind = "shared_signal" if registry_entry else default_kind
-                fallback_bindings.append(
-                    {
-                        "signal_name": signal_name,
-                        "signal_key": normalize_signal_name(signal_name),
-                        "canonical_signal_key": canonical_signal_key,
-                        "direction": direction,
-                        "binding_kind": binding_kind,
-                        "allowed_external": bool(registry_entry.get("allowed_external", direction == "input" and binding_kind != "shared_signal")),
-                        "owner_subsystem_id": str(registry_entry.get("owner_subsystem_id", "")).strip(),
-                        "resolution_status": str(registry_entry.get("resolution_status", "")).strip(),
-                        "candidate_exporters": list(
-                            registry_entry.get("candidate_exporters", [])
-                            or registry_entry.get("exporter_candidates", [])
-                            or []
-                        ),
-                        "resolution_evidence": list(registry_entry.get("resolution_evidence", []) or []),
-                        "port_index": port_index,
-                        "evidence": ["Synthesized from compat imports/exports."],
-                        "confidence": 0.5,
-                    }
-                )
-        return fallback_bindings
+        return []
 
     @staticmethod
     def _bindings_for_direction(interface_bindings: List[Dict[str, Any]], direction: str) -> List[Dict[str, Any]]:

@@ -683,7 +683,6 @@ class ArchitecturePlanner:
                     "allowed_external": signal_key in external_signal_keys,
                     "required_exporter_count": 0 if signal_key in external_signal_keys else 1,
                     "consumers": [],
-                    "exporter_candidates": [],
                     "candidate_exporters": [],
                     "resolution_status": "",
                     "resolution_evidence": [],
@@ -721,13 +720,13 @@ class ArchitecturePlanner:
                         entry["consumers"].append(subsystem_id)
                 elif direction == "output":
                     entry["signal_name"] = signal_name or entry["signal_name"]
-                    if subsystem_id not in entry["exporter_candidates"]:
-                        entry["exporter_candidates"].append(subsystem_id)
+                    if subsystem_id not in entry["candidate_exporters"]:
+                        entry["candidate_exporters"].append(subsystem_id)
 
         registry: List[Dict[str, Any]] = []
         for signal_key in sorted(registry_by_key):
             entry = registry_by_key[signal_key]
-            exporters = list(entry.get("exporter_candidates", []) or [])
+            exporters = list(entry.get("candidate_exporters", []) or [])
             consumers = list(entry.get("consumers", []) or [])
             resolution_evidence: List[str] = []
             if consumers:

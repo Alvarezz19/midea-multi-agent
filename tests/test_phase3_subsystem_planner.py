@@ -412,6 +412,21 @@ class Phase3SubsystemPlannerTests(unittest.TestCase):
         self.assertEqual(plan["template_binding"]["template_id"], "fan_template")
         self.assertIn("template_output_interface_mismatch", plan["degrade_reason"])
 
+    def test_subsystem_planner_no_longer_synthesizes_bindings_from_compat_imports_exports(self):
+        decomposition_result, architecture_plan = make_decomposition_and_architecture(prefer_template=True)
+        descriptor = decomposition_result["subsystem_descriptors"][0]
+        descriptor["interface_bindings"] = []
+
+        with patch.object(config, "DEBUG", False):
+            planner = SubsystemPlanner()
+            subsystem_plan_map = planner.plan({}, decomposition_result, architecture_plan, make_bundle(include_template=True))
+
+        plan = subsystem_plan_map["supply_fan_ctrl"]
+        self.assertEqual(plan["implementation_mode"], "reuse_template")
+        self.assertEqual(plan["template_interface_bindings"], [])
+        self.assertEqual(plan["imported_signals"], [])
+        self.assertEqual(plan["exported_signals"], [])
+
     def test_subsystem_planner_uses_shared_signal_registry_for_cross_subsystem_interfaces(self):
         decomposition_result, architecture_plan = make_multi_subsystem_inputs()
 
