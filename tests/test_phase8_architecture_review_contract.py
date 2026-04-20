@@ -81,7 +81,6 @@ class _StubAnalysis:
 class _StubRetrieval:
     def __call__(self, state):
         state["retrieval_bundle"] = {"source": "stub"}
-        state["retrieval_context"] = {"source": "stub"}
         state["current_step"] = "retrieval_completed"
         return state
 
@@ -204,6 +203,15 @@ class _StubRepairAgent:
         return state
 
 
+def _assert_no_compat_fields(state: dict) -> None:
+    assert "retrieval_context" not in state
+    assert "execution_plan" not in state
+    assert "generated_code" not in state
+    assert "execution_result" not in state
+    assert "validation_result" not in state
+    assert "next_step" not in state
+
+
 def _build_architecture_review_graph():
     nodes = {
         "analysis": _StubAnalysis(),
@@ -287,6 +295,7 @@ class Phase8ArchitectureReviewContractTests(unittest.TestCase):
 
         self.assertIn("__interrupt__", first_result)
         paused_state = app.get_state(config).values
+        _assert_no_compat_fields(paused_state)
         self.assertEqual(paused_state["debug_history"], ["architecture_run_1"])
         self.assertEqual(paused_state["review_request"]["stage"], "architecture_review")
         self.assertIn("页面列表：控制", paused_state["review_request"]["context_summary"])
@@ -309,6 +318,7 @@ class Phase8ArchitectureReviewContractTests(unittest.TestCase):
 
         self.assertIn("__interrupt__", second_pause)
         second_state = app.get_state(config).values
+        _assert_no_compat_fields(second_state)
         self.assertEqual(
             second_state["debug_history"],
             ["architecture_run_1", "architecture_run_2"],
@@ -334,6 +344,7 @@ class Phase8ArchitectureReviewContractTests(unittest.TestCase):
             config,
         )
 
+        _assert_no_compat_fields(final_result)
         self.assertEqual(
             final_result["debug_history"],
             ["architecture_run_1", "architecture_run_2", "subsystem_after_控制+总览"],

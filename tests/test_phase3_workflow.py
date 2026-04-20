@@ -27,6 +27,15 @@ from utils.ahu_knowledge_builder import build_ahu_knowledge_assets, write_assets
 from utils.model_manager import EmbeddingManager, LLMManager
 
 
+def _assert_no_compat_fields(state: dict) -> None:
+    assert "retrieval_context" not in state
+    assert "execution_plan" not in state
+    assert "generated_code" not in state
+    assert "execution_result" not in state
+    assert "validation_result" not in state
+    assert "next_step" not in state
+
+
 def make_requirement_spec() -> dict:
     return {
         "schema_version": "3.0",
@@ -435,10 +444,8 @@ class Phase3WorkflowTests(unittest.TestCase):
         self.assertIn("architecture_plan", result)
         self.assertIn("subsystem_plan_map", result)
         self.assertIn("assembled_graph_ir", result)
+        _assert_no_compat_fields(result)
         self.assertNotIn("source_execution_plan", result["assembled_graph_ir"])
-        self.assertNotIn("execution_plan", result)
-        self.assertNotIn("generated_code", result)
-        self.assertNotIn("retrieval_context", result)
         self.assertEqual(result["verification_report"]["status"], "passed")
         self.assertEqual(result["final_output"]["verification_report"]["status"], "passed")
 
@@ -453,6 +460,7 @@ class Phase3WorkflowTests(unittest.TestCase):
         self.assertEqual(result["final_output"]["workflow_trace"]["trace_dir"], "mock-trace")
         self.assertIn("architecture_plan", result)
         self.assertIn("subsystem_plan_map", result)
+        _assert_no_compat_fields(result)
 
 
 class Phase3WorkflowTraceSummaryTests(unittest.TestCase):
@@ -608,9 +616,8 @@ class Phase3WorkflowRealIntegrationTests(unittest.TestCase):
             result["subsystem_plan_map"]["supply_fan_ctrl"]["template_binding"]["template_id"].startswith("ahu_subflow__")
         )
         self.assertTrue(result["compiled_artifact"]["flow_objects"])
+        _assert_no_compat_fields(result)
         self.assertNotIn("source_execution_plan", result["assembled_graph_ir"])
-        self.assertNotIn("execution_plan", result)
-        self.assertNotIn("generated_code", result)
 
     def test_workflow_runs_multi_subsystem_cases_with_real_phase2_assets(self):
         cases = {
@@ -653,6 +660,7 @@ class Phase3WorkflowRealIntegrationTests(unittest.TestCase):
             self.assertEqual(result["verification_report"]["status"], "passed")
             self.assertEqual(result["route_decision"]["decision"], "accept")
             self.assertTrue(expectation["subsystems"].issubset(set(result["subsystem_plan_map"].keys())))
+            _assert_no_compat_fields(result)
             for subsystem_id in expectation["expected_reuse_subsystems"]:
                 self.assertEqual(result["subsystem_plan_map"][subsystem_id]["implementation_mode"], "reuse_template")
                 self.assertFalse(result["subsystem_plan_map"][subsystem_id]["degrade_reason"])

@@ -1,10 +1,16 @@
 # PlanningAgent 当前状态说明
 
-> 最后更新：2026-04-09
+> 最后更新：2026-04-20
 
 ## 1. 先说结论
 
-`agents/planning_agent.py` 已经不是当前正式主链里的规划节点。
+`agents/planning_agent.py` 已经不是当前正式主链里的规划节点，而且当前文件只剩 compat wrapper。
+
+真实实现已迁移到：
+
+```text
+agents/legacy/planning_agent.py
+```
 
 当前正式主链使用的是：
 
@@ -29,7 +35,7 @@ analysis
 1. Phase 2 / compat 回归测试，验证旧 `execution_plan` 语义没有完全失效
 2. 仍消费 legacy `retrieval_context` 或 `execution_plan` 的历史调用方
 
-因此它不是“死代码”，但也不是“正式主链节点”。
+因此它不是“死代码”，但也不是“正式主链节点”；现在更准确地说，它是“已经显式归档到 legacy 目录、但仍有 compat 测试覆盖的旧 planner”。
 
 ## 3. 当前输入输出
 
@@ -74,11 +80,11 @@ Phase 3 把原来的单体规划链拆成三层：
 
 当前最合适的定位是：
 
-- 继续保留
-- 明确标记为 compat
+- 继续保留 legacy 实现
+- 旧路径仅保留兼容 wrapper
 - 不再把它写成正式主链节点
-- 等 compat 调用方清退后，再评估是否迁移到 `legacy/` 目录
+- 等 compat 调用方与 compat 测试进一步收缩后，再决定是否彻底删除 wrapper
 
 ## 7. 一句话结论
 
-`PlanningAgent` 现在是“仍有测试覆盖的旧主链 compat planner”，不是当前 Phase 3 正式规划节点。
+`PlanningAgent` 现在是“真实实现已迁移到 `agents/legacy/`、旧路径仅保留 wrapper 的 compat planner”，不是当前 Phase 3 正式规划节点。

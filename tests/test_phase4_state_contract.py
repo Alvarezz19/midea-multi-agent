@@ -38,11 +38,13 @@ class Phase4StateContractTests(unittest.TestCase):
 
         self.assertTrue(expected_fields.issubset(set(workflow.WorkflowState.__annotations__)))
         self.assertTrue(expected_fields.issubset(set(workflow_trace.WorkflowState.__annotations__)))
+        self.assertNotIn("retrieval_context", workflow.WorkflowState.__annotations__)
         self.assertNotIn("execution_plan", workflow.WorkflowState.__annotations__)
         self.assertNotIn("generated_code", workflow.WorkflowState.__annotations__)
         self.assertNotIn("execution_result", workflow.WorkflowState.__annotations__)
         self.assertNotIn("validation_result", workflow.WorkflowState.__annotations__)
         self.assertNotIn("next_step", workflow.WorkflowState.__annotations__)
+        self.assertNotIn("retrieval_context", workflow_trace.WorkflowState.__annotations__)
         self.assertNotIn("execution_plan", workflow_trace.WorkflowState.__annotations__)
         self.assertNotIn("generated_code", workflow_trace.WorkflowState.__annotations__)
         self.assertNotIn("execution_result", workflow_trace.WorkflowState.__annotations__)
@@ -77,6 +79,7 @@ class Phase4StateContractTests(unittest.TestCase):
         self.assertEqual(state["architecture_feedback_patch"], {})
         self.assertFalse(state["enable_hitl_clarification"])
         self.assertFalse(state["enable_hitl_architecture_review"])
+        self.assertNotIn("retrieval_context", state)
         self.assertNotIn("execution_plan", state)
         self.assertNotIn("generated_code", state)
         self.assertNotIn("execution_result", state)
@@ -103,6 +106,10 @@ class Phase4StateContractTests(unittest.TestCase):
         invoke_config = captured["config"]
 
         self.assertEqual(invoke_config["recursion_limit"], workflow.PHASE4_RECURSION_LIMIT)
+        self.assertNotIn("retrieval_context", initial_state)
+        self.assertNotIn("execution_result", initial_state)
+        self.assertNotIn("validation_result", initial_state)
+        self.assertNotIn("next_step", initial_state)
         self.assertEqual(initial_state["route_decision"], {})
         self.assertEqual(initial_state["retry_count"], sum(initial_state["retry_counts_by_scope"].values()))
         self.assertEqual(result["repair_history"], [])
@@ -131,6 +138,10 @@ class Phase4StateContractTests(unittest.TestCase):
         invoke_config = captured["config"]
 
         self.assertEqual(invoke_config["recursion_limit"], workflow.PHASE4_RECURSION_LIMIT)
+        self.assertNotIn("retrieval_context", initial_state)
+        self.assertNotIn("execution_result", initial_state)
+        self.assertNotIn("validation_result", initial_state)
+        self.assertNotIn("next_step", initial_state)
         self.assertEqual(initial_state["repair_context"], {})
         self.assertEqual(initial_state["retry_count"], sum(initial_state["retry_counts_by_scope"].values()))
         self.assertEqual(result["final_output"]["workflow_trace"]["trace_dir"], "mock-trace")

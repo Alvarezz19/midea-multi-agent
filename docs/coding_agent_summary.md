@@ -1,6 +1,6 @@
 # 编码智能体 (Coding Agent) 当前工作流总结
 
-> 最后更新：2026-04-07
+> 最后更新：2026-04-20
 
 ## 1. 当前定位
 
@@ -9,7 +9,7 @@
 在 Phase 3 主链里，它的真实职责是：
 
 1. 消费 `GlobalAssembler` 产出的 `assembled_graph_ir`
-2. 结合 `retrieval_bundle` / `retrieval_context` 中的模板定义
+2. 结合 `retrieval_bundle` 中的模板定义
 3. 以确定性方式编译出平台 JSON 与 `compiled_artifact`
 
 也就是说，它本质上是确定性编译器，而不是规划器或生成式智能体。
@@ -37,18 +37,17 @@ user_query
 `CodingAgent` 从共享状态中读取：
 
 - `assembled_graph_ir`
-- `retrieval_bundle`（优先）或 `retrieval_context`（兼容）
+- `retrieval_bundle`
 
 它写回：
 
 - `compiled_artifact`
-- `generated_code`
 - `current_step = "coding_completed"`
 
 其中：
 
 - `compiled_artifact` 是真实主产物
-- `generated_code` 只是兼容字段，值等于 `compiled_artifact["json_text"]`
+- 正式顶层状态不再回填 `generated_code`
 
 ## 4. 当前边界
 
@@ -75,7 +74,7 @@ Phase 3 引入了 `ArchitecturePlanner`、`SubsystemPlanner`、`GlobalAssembler`
 
 - `execution_plan` 不再是 `CodingAgent` 的正式输入
 - `assembled_graph_ir` 仍然是 `CodingAgent` 的唯一真实编译输入
-- `GlobalAssembler` 会回填兼容 `execution_plan`，供旧接口、历史观察与 compat 路径继续使用
+- `GlobalAssembler` 不再回填顶层 `execution_plan`；正式 `assembled_graph_ir` 也已不再携带 `source_execution_plan`
 - `VerifierAgent` 已可直接消费 `Phase 3` 原生产物，不再把 `execution_plan` 当作验收硬依赖
 
 ## 6. 当前结论

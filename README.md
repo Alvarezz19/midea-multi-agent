@@ -163,7 +163,7 @@ python scripts/build_phase2_retrieval_indexes.py --output-dir AHU程序/pattern_
 
 其中 `planning_agent.py`、`assembly_agent.py`、`validation_agent.py`、`debugging_agent.py`、`retrieval_agent_old.py` 已完成目录收口；`GlobalAssembler` 已不再继承 legacy `AssemblyAgent`，而是复用 `agents/assembly_shared.py` 中的共享 helper。
 
-兼容测试也开始分层：`tests/test_legacy_execution_plan.py`、`tests/test_phase1_workflow.py`、`tests/test_phase2_bundle_consumers.py`、`tests/test_phase2_planning_bundle.py`、`tests/test_phase2_retrieval_bundle.py`、`tests/test_phase7_coding_determinism.py` 目前仅保留兼容入口或混合入口，真实测试实现已下沉到 `tests/legacy/` / `tests/contracts/`，以便在不破坏现有命令的前提下逐步剥离 legacy 回归集。
+兼容测试也开始分层：`tests/test_legacy_agent_imports.py`、`tests/test_legacy_execution_plan.py`、`tests/test_phase1_workflow.py`、`tests/test_phase2_bundle_consumers.py`、`tests/test_phase2_planning_bundle.py`、`tests/test_phase2_retrieval_bundle.py`、`tests/test_phase2_retrieval_agent.py`、`tests/test_phase6_retrieval_eval_contract.py`、`tests/test_phase7_coding_determinism.py` 目前仅保留兼容入口或混合入口，真实测试实现已下沉到 `tests/legacy/` / `tests/contracts/`，以便在不破坏现有命令的前提下逐步剥离 legacy 回归集。
 
 ## 已验证环境基线
 

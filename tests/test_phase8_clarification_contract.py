@@ -79,7 +79,6 @@ class _StubAnalysis:
 class _StubRetrieval:
     def __call__(self, state):
         state["retrieval_bundle"] = {"source": "stub"}
-        state["retrieval_context"] = {"source": "stub"}
         state["current_step"] = "retrieval_completed"
         return state
 
@@ -146,6 +145,15 @@ class _StubRepairRouter:
 class _StubRepairAgent:
     def __call__(self, state):
         return state
+
+
+def _assert_no_compat_fields(state: dict) -> None:
+    assert "retrieval_context" not in state
+    assert "execution_plan" not in state
+    assert "generated_code" not in state
+    assert "execution_result" not in state
+    assert "validation_result" not in state
+    assert "next_step" not in state
 
 
 def _build_clarification_graph():
@@ -244,6 +252,7 @@ class Phase8ClarificationContractTests(unittest.TestCase):
 
         self.assertIn("__interrupt__", first_result)
         paused_state = app.get_state(config).values
+        _assert_no_compat_fields(paused_state)
         self.assertEqual(paused_state["debug_history"], ["analysis_run"])
         self.assertEqual(paused_state["review_request"]["stage"], "clarification_review")
         self.assertEqual(paused_state["retrieval_bundle"], {})
@@ -265,6 +274,7 @@ class Phase8ClarificationContractTests(unittest.TestCase):
             config,
         )
 
+        _assert_no_compat_fields(final_result)
         self.assertEqual(final_result["debug_history"], ["analysis_run"])
         self.assertEqual(final_result["clarification_round"], 1)
         self.assertEqual(final_result["requirement_spec"]["system_type"], "AHU")

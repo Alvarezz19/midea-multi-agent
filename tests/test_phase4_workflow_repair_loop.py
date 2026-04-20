@@ -36,7 +36,6 @@ class StubAnalysis:
 class StubRetrieval:
     def __call__(self, state):
         state["retrieval_bundle"] = {}
-        state["retrieval_context"] = {}
         state["current_step"] = "retrieval_completed"
         return state
 
@@ -510,6 +509,15 @@ class StubVerifierExternalAfterRepair:
         return state
 
 
+def _assert_no_compat_fields(state: dict) -> None:
+    assert "retrieval_context" not in state
+    assert "execution_plan" not in state
+    assert "generated_code" not in state
+    assert "execution_result" not in state
+    assert "validation_result" not in state
+    assert "next_step" not in state
+
+
 class Phase4WorkflowRepairLoopTests(unittest.TestCase):
     def test_workflow_repairs_planning_issue_and_reaches_passed(self):
         with patch.object(workflow, "AnalysisAgent", StubAnalysis), \
@@ -521,6 +529,7 @@ class Phase4WorkflowRepairLoopTests(unittest.TestCase):
              patch.object(workflow, "VerifierAgent", StubVerifierSuccessAfterRepair):
             result = workflow.run_workflow("fan heater")
 
+        _assert_no_compat_fields(result)
         self.assertEqual(result["verification_report"]["status"], "passed")
         self.assertEqual(result["route_decision"]["decision"], "accept")
         self.assertEqual(result["retry_counts_by_scope"]["planning"], 1)
@@ -538,6 +547,7 @@ class Phase4WorkflowRepairLoopTests(unittest.TestCase):
              patch.object(workflow, "VerifierAgent", StubVerifierReject):
             result = workflow.run_workflow("fan heater")
 
+        _assert_no_compat_fields(result)
         self.assertEqual(result["verification_report"]["status"], "retryable_error")
         self.assertEqual(result["route_decision"]["decision"], "reject")
         self.assertEqual(result["route_decision"]["reason"], "unsupported_repair_issue")
@@ -555,6 +565,7 @@ class Phase4WorkflowRepairLoopTests(unittest.TestCase):
              patch.object(workflow, "VerifierAgent", StubVerifierExternalAfterRepair):
             result = workflow.run_workflow("fan external")
 
+        _assert_no_compat_fields(result)
         self.assertEqual(result["verification_report"]["status"], "passed")
         self.assertEqual(result["route_decision"]["decision"], "accept")
         self.assertEqual(result["retry_counts_by_scope"]["planning"], 1)
@@ -573,6 +584,7 @@ class Phase4WorkflowRepairLoopTests(unittest.TestCase):
              patch.object(workflow, "VerifierAgent", StubVerifierAmbiguousSuccessAfterRepair):
             result = workflow.run_workflow("fan heater ambiguous unique")
 
+        _assert_no_compat_fields(result)
         self.assertEqual(result["verification_report"]["status"], "passed")
         self.assertEqual(result["route_decision"]["decision"], "accept")
         self.assertEqual(result["retry_counts_by_scope"]["planning"], 1)
@@ -588,6 +600,7 @@ class Phase4WorkflowRepairLoopTests(unittest.TestCase):
              patch.object(workflow, "VerifierAgent", StubVerifierAmbiguousReject):
             result = workflow.run_workflow("fan heater ambiguous reject")
 
+        _assert_no_compat_fields(result)
         self.assertEqual(result["verification_report"]["status"], "retryable_error")
         self.assertEqual(result["route_decision"]["decision"], "reject")
         self.assertEqual(result["route_decision"]["reason"], "ambiguous_shared_signal_unresolved")
@@ -619,6 +632,7 @@ class Phase4WorkflowRepairLoopTests(unittest.TestCase):
              patch.object(workflow_trace, "_save_workflow_trace", side_effect=_capture_trace):
             result = workflow_trace.run_workflow("fan heater")
 
+        _assert_no_compat_fields(result)
         node_names = [record["node_name"] for record in captured_records["nodes"]]
         self.assertIn("repair_router", node_names)
         self.assertIn("repair_agent", node_names)
