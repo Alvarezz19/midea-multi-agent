@@ -7,10 +7,13 @@ import json
 from typing import Any, Dict, List
 
 from utils.retrieval_bundle_utils import (
-    build_compilable_doc_map,
-    get_atomic_modules,
-    get_subflow_templates,
-    get_system_patterns,
+    build_bundle_doc_map,
+    build_legacy_doc_map,
+    get_bundle_atomic_modules,
+    get_bundle_subflow_templates,
+    get_bundle_system_patterns,
+    get_legacy_atomic_modules,
+    get_legacy_subflow_templates,
     is_retrieval_bundle,
 )
 
@@ -96,9 +99,14 @@ def format_docs_for_planner(
     max_modules: int = 8,
 ) -> str:
     """Format retrieval_bundle / retrieval_context for PlanningAgent."""
-    atomic_modules = get_atomic_modules(bundle_or_context)
-    subflow_templates = get_subflow_templates(bundle_or_context)
-    system_patterns = get_system_patterns(bundle_or_context)
+    if is_retrieval_bundle(bundle_or_context):
+        atomic_modules = get_bundle_atomic_modules(bundle_or_context)
+        subflow_templates = get_bundle_subflow_templates(bundle_or_context)
+        system_patterns = get_bundle_system_patterns(bundle_or_context)
+    else:
+        atomic_modules = get_legacy_atomic_modules(bundle_or_context)
+        subflow_templates = get_legacy_subflow_templates(bundle_or_context)
+        system_patterns = []
 
     if not atomic_modules and not subflow_templates and not system_patterns:
         return "No retrieval candidates found."
@@ -204,7 +212,10 @@ def format_docs_for_planner(
 
 def format_docs_for_coding(bundle_or_context: Dict[str, Any], selected_modules: List[str]) -> str:
     """Prepare detailed module information for CodingAgent."""
-    doc_map = build_compilable_doc_map(bundle_or_context)
+    if is_retrieval_bundle(bundle_or_context):
+        doc_map = build_bundle_doc_map(bundle_or_context)
+    else:
+        doc_map = build_legacy_doc_map(bundle_or_context)
     if not doc_map:
         return "No relevant module information found."
 
@@ -290,7 +301,10 @@ def format_docs_for_coding(bundle_or_context: Dict[str, Any], selected_modules: 
 
 def get_module_summary(bundle_or_context: Dict[str, Any]) -> Dict[str, Any]:
     """Extract a structured summary from retrieval results."""
-    relevant_nodes = get_atomic_modules(bundle_or_context)
+    if is_retrieval_bundle(bundle_or_context):
+        relevant_nodes = get_bundle_atomic_modules(bundle_or_context)
+    else:
+        relevant_nodes = get_legacy_atomic_modules(bundle_or_context)
     metadata = bundle_or_context.get("metadata", {}) if isinstance(bundle_or_context, dict) else {}
     if not isinstance(metadata, dict):
         metadata = {}

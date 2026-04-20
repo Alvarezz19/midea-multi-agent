@@ -109,34 +109,95 @@ def _normalize_compilable_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
-def get_atomic_modules(bundle_or_context: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Return atomic module docs from bundle or legacy context."""
-    if is_retrieval_bundle(bundle_or_context):
-        return _as_list(bundle_or_context.get("atomic_modules", []))
-    return [node for node in _as_list(bundle_or_context.get("relevant_nodes", [])) if not _is_subflow_template_doc(node)]
+def _ensure_bundle_payload(retrieval_bundle: Dict[str, Any] | None) -> Dict[str, Any]:
+    if retrieval_bundle is None:
+        return {}
+    if not isinstance(retrieval_bundle, dict):
+        raise ValueError("retrieval_bundle must be a dict.")
+    if not retrieval_bundle:
+        return {}
+    if not is_retrieval_bundle(retrieval_bundle):
+        raise ValueError("Formal retrieval helpers require a retrieval_bundle payload.")
+    return retrieval_bundle
 
 
-def get_subflow_templates(bundle_or_context: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _ensure_legacy_context_payload(retrieval_context: Dict[str, Any] | None) -> Dict[str, Any]:
+    if retrieval_context is None:
+        return {}
+    if not isinstance(retrieval_context, dict):
+        raise ValueError("retrieval_context must be a dict.")
+    if not retrieval_context:
+        return {}
+    if is_retrieval_bundle(retrieval_context):
+        raise ValueError("Legacy retrieval helpers require a retrieval_context payload.")
+    return retrieval_context
+
+
+def get_bundle_atomic_modules(retrieval_bundle: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return atomic module docs from formal retrieval_bundle only."""
+    bundle = _ensure_bundle_payload(retrieval_bundle)
+    return _as_list(bundle.get("atomic_modules", []))
+
+
+def get_bundle_subflow_templates(retrieval_bundle: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return subflow template docs from formal retrieval_bundle only."""
+    bundle = _ensure_bundle_payload(retrieval_bundle)
+    return _as_list(bundle.get("subflow_templates", []))
+
+
+def get_bundle_system_patterns(retrieval_bundle: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return system pattern docs from formal retrieval_bundle only."""
+    bundle = _ensure_bundle_payload(retrieval_bundle)
+    return _as_list(bundle.get("system_patterns", []))
+
+
+def get_bundle_style_guides(retrieval_bundle: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return style guide docs from formal retrieval_bundle only."""
+    bundle = _ensure_bundle_payload(retrieval_bundle)
+    return _as_list(bundle.get("style_guides", []))
+
+
+def get_legacy_atomic_modules(retrieval_context: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return atomic module docs from legacy retrieval_context only."""
+    context = _ensure_legacy_context_payload(retrieval_context)
+    return [node for node in _as_list(context.get("relevant_nodes", [])) if not _is_subflow_template_doc(node)]
+
+
+def get_legacy_subflow_templates(retrieval_context: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    Return subflow template docs from bundle or mixed legacy context.
+    Return subflow template docs from legacy retrieval_context only.
 
     The legacy branch intentionally tolerates historical mixed relevant_nodes.
     """
-    if is_retrieval_bundle(bundle_or_context):
-        return _as_list(bundle_or_context.get("subflow_templates", []))
+    context = _ensure_legacy_context_payload(retrieval_context)
+    return [node for node in _as_list(context.get("relevant_nodes", [])) if _is_subflow_template_doc(node)]
 
-    return [node for node in _as_list(bundle_or_context.get("relevant_nodes", [])) if _is_subflow_template_doc(node)]
+
+def get_atomic_modules(bundle_or_context: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Compatibility dispatcher for retrieval_bundle / retrieval_context callers."""
+    if is_retrieval_bundle(bundle_or_context):
+        return get_bundle_atomic_modules(bundle_or_context)
+    return get_legacy_atomic_modules(bundle_or_context)
+
+
+def get_subflow_templates(bundle_or_context: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Compatibility dispatcher for retrieval_bundle / retrieval_context callers."""
+    if is_retrieval_bundle(bundle_or_context):
+        return get_bundle_subflow_templates(bundle_or_context)
+    return get_legacy_subflow_templates(bundle_or_context)
 
 
 def get_system_patterns(bundle_or_context: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Compatibility dispatcher for retrieval_bundle / retrieval_context callers."""
     if is_retrieval_bundle(bundle_or_context):
-        return _as_list(bundle_or_context.get("system_patterns", []))
+        return get_bundle_system_patterns(bundle_or_context)
     return []
 
 
 def get_style_guides(bundle_or_context: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Compatibility dispatcher for retrieval_bundle / retrieval_context callers."""
     if is_retrieval_bundle(bundle_or_context):
-        return _as_list(bundle_or_context.get("style_guides", []))
+        return get_bundle_style_guides(bundle_or_context)
     return []
 
 
@@ -161,7 +222,7 @@ def build_legacy_retrieval_context(bundle: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "query": metadata.get("query_text", ""),
-        "relevant_nodes": _as_list(bundle.get("atomic_modules", [])),
+        "relevant_nodes": get_bundle_atomic_modules(bundle),
         "similar_cases": [],
         "metadata": {
             "retrieved_count": int(metadata.get("retrieved_atomic_count", 0) or 0),
@@ -173,20 +234,12 @@ def build_legacy_retrieval_context(bundle: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def build_compilable_doc_map(bundle_or_context: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-    """
-    Build the shared compilable doc map.
-
-    Bundle mode aggregates atomic_modules + subflow_templates.
-    Legacy mode keeps compatibility with historical mixed relevant_nodes.
-    """
+def build_bundle_doc_map(retrieval_bundle: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Build the formal compilable doc map from retrieval_bundle only."""
+    bundle = _ensure_bundle_payload(retrieval_bundle)
     doc_map: Dict[str, Dict[str, Any]] = {}
 
-    if is_retrieval_bundle(bundle_or_context):
-        candidate_docs = get_atomic_modules(bundle_or_context) + get_subflow_templates(bundle_or_context)
-    else:
-        candidate_docs = _as_list(bundle_or_context.get("relevant_nodes", []))
-
+    candidate_docs = get_bundle_atomic_modules(bundle) + get_bundle_subflow_templates(bundle)
     for doc in candidate_docs:
         normalized = _normalize_compilable_doc(doc)
         module_type = normalized.get("module_type", "")
@@ -196,6 +249,41 @@ def build_compilable_doc_map(bundle_or_context: Dict[str, Any]) -> Dict[str, Dic
     return doc_map
 
 
+def build_legacy_doc_map(retrieval_context: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Build the legacy compilable doc map from retrieval_context only."""
+    context = _ensure_legacy_context_payload(retrieval_context)
+    doc_map: Dict[str, Dict[str, Any]] = {}
+
+    for doc in _as_list(context.get("relevant_nodes", [])):
+        normalized = _normalize_compilable_doc(doc)
+        module_type = normalized.get("module_type", "")
+        if module_type:
+            doc_map[module_type] = normalized
+
+    return doc_map
+
+
+def build_compilable_doc_map(bundle_or_context: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """
+    Compatibility dispatcher for retrieval_bundle / retrieval_context callers.
+    """
+    if is_retrieval_bundle(bundle_or_context):
+        return build_bundle_doc_map(bundle_or_context)
+    return build_legacy_doc_map(bundle_or_context)
+
+
+def build_bundle_allowed_module_types(retrieval_bundle: Dict[str, Any]) -> Set[str]:
+    """Return the formal module_type whitelist from retrieval_bundle only."""
+    return set(build_bundle_doc_map(retrieval_bundle).keys())
+
+
+def build_legacy_allowed_module_types(retrieval_context: Dict[str, Any]) -> Set[str]:
+    """Return the legacy module_type whitelist from retrieval_context only."""
+    return set(build_legacy_doc_map(retrieval_context).keys())
+
+
 def build_allowed_module_types(bundle_or_context: Dict[str, Any]) -> Set[str]:
-    """Return the module_type whitelist for Planning validation."""
-    return set(build_compilable_doc_map(bundle_or_context).keys())
+    """Compatibility dispatcher for retrieval_bundle / retrieval_context callers."""
+    if is_retrieval_bundle(bundle_or_context):
+        return build_bundle_allowed_module_types(bundle_or_context)
+    return build_legacy_allowed_module_types(bundle_or_context)

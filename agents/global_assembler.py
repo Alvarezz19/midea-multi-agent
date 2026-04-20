@@ -210,11 +210,11 @@ class GlobalAssembler(AssemblySharedMixin):
         self,
         architecture_plan: Dict[str, Any],
         subsystem_plan_map: Dict[str, Dict[str, Any]],
-        bundle_or_context: Dict[str, Any],
+        retrieval_bundle: Dict[str, Any],
         requirement_spec: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         requirement_spec = requirement_spec or {}
-        doc_map = self._build_doc_map(bundle_or_context)
+        doc_map = self._build_formal_doc_map(retrieval_bundle)
         external_signal_keys = self._external_signal_keys(requirement_spec)
         shared_signal_policy_map = self._shared_signal_policy_map(architecture_plan)
         pages = [
@@ -653,7 +653,7 @@ class GlobalAssembler(AssemblySharedMixin):
         state["assembled_graph_ir"] = self.assemble(
             architecture_plan=architecture_plan,
             subsystem_plan_map=subsystem_plan_map,
-            bundle_or_context=retrieval_bundle,
+            retrieval_bundle=retrieval_bundle,
             requirement_spec=requirement_spec,
         )
         state["current_step"] = "global_assembly_completed"

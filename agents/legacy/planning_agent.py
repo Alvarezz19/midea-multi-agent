@@ -16,7 +16,11 @@ from langchain_core.prompts import ChatPromptTemplate
 import config
 from utils.console_utils import safe_print as print
 from utils.context_formatter import format_docs_for_planner
-from utils.retrieval_bundle_utils import build_allowed_module_types
+from utils.retrieval_bundle_utils import (
+    build_bundle_allowed_module_types,
+    build_legacy_allowed_module_types,
+    is_retrieval_bundle,
+)
 from utils.model_manager import LLMManager
 
 
@@ -307,7 +311,7 @@ class PlanningAgent:
     def plan(
         self,
         user_query: str,
-        bundle_or_context: Dict[str, Any],
+        retrieval_input: Dict[str, Any],
         analysis_result: Optional[Dict[str, Any]] = None,
     ) -> PlanIR:
         """
@@ -325,11 +329,14 @@ class PlanningAgent:
             print(f"   用户需求: {user_query}")
 
         # 提取可用 module_type 白名单（用于后续校验）
-        self._available_module_types = build_allowed_module_types(bundle_or_context)
+        if is_retrieval_bundle(retrieval_input):
+            self._available_module_types = build_bundle_allowed_module_types(retrieval_input)
+        else:
+            self._available_module_types = build_legacy_allowed_module_types(retrieval_input)
 
         # 清洗检索上下文为轻量级文本
         slim_context = format_docs_for_planner(
-            bundle_or_context,
+            retrieval_input,
             detail_top_n=config.PLANNING_CONTEXT_DETAIL_TOP_N,
             max_modules=config.PLANNING_CONTEXT_MAX_MODULES,
         )
@@ -442,11 +449,11 @@ class PlanningAgent:
             更新后的状态
         """
         user_query = state.get("user_query", "")
-        bundle_or_context = state.get("retrieval_bundle") or state.get("retrieval_context", {})
+        retrieval_input = state.get("retrieval_bundle") or state.get("retrieval_context", {})
         analysis_result = state.get("analysis_result", {})
 
         # 生成规划
-        plan_ir = self.plan(user_query, bundle_or_context, analysis_result)
+        plan_ir = self.plan(user_query, retrieval_input, analysis_result)
 
         # 将 PlanIR 转换为字典存入状态
         state["execution_plan"] = plan_ir.model_dump()

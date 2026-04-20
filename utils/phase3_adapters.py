@@ -5,7 +5,6 @@ import re
 import unicodedata
 from typing import Any, Dict, Iterable, List, Tuple
 
-from utils.legacy_execution_plan import build_legacy_execution_plan
 from utils.phase3_contracts import RequirementSubsystem, empty_requirement_spec
 
 

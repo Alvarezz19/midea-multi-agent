@@ -10,9 +10,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from utils.retrieval_bundle_utils import (
+    build_legacy_doc_map,
     build_legacy_retrieval_context,
-    get_atomic_modules,
-    get_subflow_templates,
+    get_legacy_atomic_modules,
+    get_legacy_subflow_templates,
     is_retrieval_bundle,
     load_structured_payload,
 )
@@ -119,11 +120,13 @@ class RetrievalBundlePhase2CompatTests(unittest.TestCase):
     def test_mixed_legacy_context_stays_compatible(self):
         context = make_mixed_legacy_context()
 
-        atomic_modules = get_atomic_modules(context)
-        subflow_templates = get_subflow_templates(context)
+        atomic_modules = get_legacy_atomic_modules(context)
+        subflow_templates = get_legacy_subflow_templates(context)
+        doc_map = build_legacy_doc_map(context)
 
         self.assertEqual([node['module_type'] for node in atomic_modules], ['constInput'])
         self.assertEqual([node['module_type'] for node in subflow_templates], ['fan_template'])
+        self.assertEqual(sorted(doc_map.keys()), ['constInput', 'fan_template'])
 
     def test_load_structured_payload(self):
         payload = load_structured_payload({'payload_json': '{"name":"fan"}', 'json_schema': '{"name":"legacy"}'})

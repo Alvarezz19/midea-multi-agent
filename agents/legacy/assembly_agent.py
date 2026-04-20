@@ -34,11 +34,11 @@ class AssemblyAgent(AssemblySharedMixin):
     def assemble(
         self,
         execution_plan: Dict[str, Any],
-        bundle_or_context: Dict[str, Any],
+        retrieval_input: Dict[str, Any],
     ) -> Dict[str, Any]:
         plan_nodes = execution_plan.get("nodes", []) or []
         plan_connections = execution_plan.get("connections", []) or []
-        doc_map = self._build_doc_map(bundle_or_context)
+        doc_map = self._build_compat_doc_map(retrieval_input)
         coords_map = topological_layout(plan_nodes, plan_connections)
 
         pages = [
@@ -158,8 +158,8 @@ class AssemblyAgent(AssemblySharedMixin):
 
     def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
         execution_plan = state.get("execution_plan", {})
-        bundle_or_context = state.get("retrieval_bundle") or state.get("retrieval_context", {})
-        state["assembled_graph_ir"] = self.assemble(execution_plan, bundle_or_context)
+        retrieval_input = state.get("retrieval_bundle") or state.get("retrieval_context", {})
+        state["assembled_graph_ir"] = self.assemble(execution_plan, retrieval_input)
         state["current_step"] = "assembly_completed"
         return state
 

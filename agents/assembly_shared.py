@@ -5,7 +5,7 @@ import copy
 from typing import Any, Dict, Optional
 
 from utils.graph_ir import SubflowDefinitionIR, SubflowPortIR
-from utils.retrieval_bundle_utils import build_compilable_doc_map
+from utils.retrieval_bundle_utils import build_bundle_doc_map, build_legacy_doc_map, is_retrieval_bundle
 
 
 class AssemblySharedMixin:
@@ -25,8 +25,14 @@ class AssemblySharedMixin:
         return {}
 
     @staticmethod
-    def _build_doc_map(bundle_or_context: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-        return build_compilable_doc_map(bundle_or_context)
+    def _build_formal_doc_map(retrieval_bundle: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        return build_bundle_doc_map(retrieval_bundle)
+
+    @staticmethod
+    def _build_compat_doc_map(retrieval_input: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        if is_retrieval_bundle(retrieval_input):
+            return build_bundle_doc_map(retrieval_input)
+        return build_legacy_doc_map(retrieval_input)
 
     def _build_subflow_definition(
         self,

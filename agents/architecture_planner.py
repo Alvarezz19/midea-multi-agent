@@ -7,7 +7,11 @@ import config
 from utils.console_utils import safe_print as print
 from utils.phase3_adapters import make_page_id, make_page_key, normalize_signal_name
 from utils.phase3_contracts import empty_architecture_plan, empty_decomposition_result
-from utils.retrieval_bundle_utils import get_style_guides, get_subflow_templates, get_system_patterns
+from utils.retrieval_bundle_utils import (
+    get_bundle_style_guides,
+    get_bundle_subflow_templates,
+    get_bundle_system_patterns,
+)
 from utils.signal_semantics import (
     KNOWN_SHARED_SIGNAL_KEYS,
     canonicalize_signal_name,
@@ -236,7 +240,7 @@ class ArchitecturePlanner:
         requirement_spec: Dict[str, Any],
         retrieval_bundle: Dict[str, Any],
     ) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
-        patterns = get_system_patterns(retrieval_bundle)
+        patterns = get_bundle_system_patterns(retrieval_bundle)
         metadata = retrieval_bundle.get("metadata", {}) if isinstance(retrieval_bundle, dict) else {}
         selected_pattern_id = ""
         if isinstance(metadata, dict):
@@ -899,8 +903,8 @@ class ArchitecturePlanner:
         architecture_plan = empty_architecture_plan()
 
         selected_pattern, pattern_score_cards = self._select_system_pattern(requirement_spec, retrieval_bundle)
-        subflow_templates = get_subflow_templates(retrieval_bundle)
-        style_guides = get_style_guides(retrieval_bundle)
+        subflow_templates = get_bundle_subflow_templates(retrieval_bundle)
+        style_guides = get_bundle_style_guides(retrieval_bundle)
         pages = self._build_pages(requirement_spec, selected_pattern)
         subsystem_descriptors: List[Dict[str, Any]] = []
         subsystem_slots: List[Dict[str, Any]] = []

@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Set
 
 import config
 from utils.graph_ir import CompileReport, CompiledArtifact
-from utils.retrieval_bundle_utils import build_compilable_doc_map
+from utils.retrieval_bundle_utils import build_bundle_doc_map, build_legacy_doc_map, is_retrieval_bundle
 from .coding_utils import (
     fill_template,
     generate_short_uuid,
@@ -71,8 +71,14 @@ class CodingAgent:
         return id_map
 
     @staticmethod
-    def _build_doc_map(bundle_or_context: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-        return build_compilable_doc_map(bundle_or_context)
+    def _build_formal_doc_map(retrieval_bundle: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        return build_bundle_doc_map(retrieval_bundle)
+
+    @staticmethod
+    def _build_compat_doc_map(retrieval_input: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        if is_retrieval_bundle(retrieval_input):
+            return build_bundle_doc_map(retrieval_input)
+        return build_legacy_doc_map(retrieval_input)
 
     @staticmethod
     def _build_reverse_edge_map(
@@ -173,12 +179,11 @@ class CodingAgent:
             "outputs": int(node.get("output_count", 0) or 0),
         }
 
-    def compile_graph(
+    def _compile_graph_with_doc_map(
         self,
         assembled_graph_ir: Dict[str, Any],
-        bundle_or_context: Dict[str, Any],
+        doc_map: Dict[str, Dict[str, Any]],
     ) -> Dict[str, Any]:
-        doc_map = self._build_doc_map(bundle_or_context)
         pages = assembled_graph_ir.get("pages", []) or []
         subflow_definitions = assembled_graph_ir.get("subflow_definitions", []) or []
         node_instances = assembled_graph_ir.get("node_instances", []) or []
@@ -323,15 +328,33 @@ class CodingAgent:
 
         return artifact.model_dump()
 
-    def generate_json(self, assembled_graph_ir: Dict[str, Any], bundle_or_context: Dict[str, Any]) -> str:
+    def compile_graph(
+        self,
+        assembled_graph_ir: Dict[str, Any],
+        retrieval_input: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Compatibility compiler entrypoint for retrieval_bundle / retrieval_context callers."""
+        doc_map = self._build_compat_doc_map(retrieval_input)
+        return self._compile_graph_with_doc_map(assembled_graph_ir, doc_map)
+
+    def compile_graph_from_bundle(
+        self,
+        assembled_graph_ir: Dict[str, Any],
+        retrieval_bundle: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Formal compiler entrypoint used by the main workflow."""
+        doc_map = self._build_formal_doc_map(retrieval_bundle)
+        return self._compile_graph_with_doc_map(assembled_graph_ir, doc_map)
+
+    def generate_json(self, assembled_graph_ir: Dict[str, Any], retrieval_input: Dict[str, Any]) -> str:
         """Backwards-compatible wrapper returning only the JSON text."""
-        artifact = self.compile_graph(assembled_graph_ir, bundle_or_context)
+        artifact = self.compile_graph(assembled_graph_ir, retrieval_input)
         return artifact["json_text"]
 
     def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
         assembled_graph_ir = state.get("assembled_graph_ir", {})
         retrieval_bundle = state.get("retrieval_bundle", {}) or {}
-        compiled_artifact = self.compile_graph(assembled_graph_ir, retrieval_bundle)
+        compiled_artifact = self.compile_graph_from_bundle(assembled_graph_ir, retrieval_bundle)
 
         state["compiled_artifact"] = compiled_artifact
         state["current_step"] = "coding_completed"

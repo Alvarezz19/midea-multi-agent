@@ -1,7 +1,7 @@
 """
 Trace-enabled workflow entrypoint.
 
-This mirrors the Phase 3 main workflow while recording per-node IO snapshots,
+This mirrors the formal workflow graph while recording per-node IO snapshots,
 timing, and changed top-level state fields.
 """
 from __future__ import annotations

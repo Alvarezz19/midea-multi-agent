@@ -13,8 +13,8 @@ if str(PROJECT_ROOT) not in sys.path:
 import workflow
 import workflow_trace
 from utils.retrieval_bundle_utils import (
-    build_allowed_module_types,
-    build_compilable_doc_map,
+    build_bundle_allowed_module_types,
+    build_bundle_doc_map,
 )
 
 
@@ -78,6 +78,21 @@ def make_bundle():
     }
 
 
+def make_legacy_context():
+    return {
+        "query": "fan control",
+        "relevant_nodes": [
+            {
+                "module_type": "constInput",
+                "name": "Constant Input",
+                "category": "logic/basic",
+                "template_json": {"type": "constInput", "inputs": 0, "outputs": 1},
+            }
+        ],
+        "metadata": {"retrieved_count": 1},
+    }
+
+
 class RetrievalBundlePhase2ContractTests(unittest.TestCase):
     def test_workflow_state_includes_retrieval_bundle(self):
         self.assertIn('retrieval_bundle', workflow.WorkflowState.__annotations__)
@@ -127,11 +142,20 @@ class RetrievalBundlePhase2ContractTests(unittest.TestCase):
 
     def test_compilable_doc_map_and_allowed_types(self):
         bundle = make_bundle()
-        doc_map = build_compilable_doc_map(bundle)
-        allowed_types = build_allowed_module_types(bundle)
+        doc_map = build_bundle_doc_map(bundle)
+        allowed_types = build_bundle_allowed_module_types(bundle)
 
         self.assertIn('constInput', doc_map)
         self.assertIn('fan_template', doc_map)
         self.assertEqual(doc_map['fan_template']['asset_type'], 'subflow_template')
         self.assertEqual(doc_map['fan_template']['template_json']['id'], 'fan_template')
         self.assertEqual(allowed_types, {'constInput', 'fan_template'})
+
+    def test_formal_bundle_helpers_reject_legacy_context_payload(self):
+        legacy_context = make_legacy_context()
+
+        with self.assertRaises(ValueError):
+            build_bundle_doc_map(legacy_context)
+
+        with self.assertRaises(ValueError):
+            build_bundle_allowed_module_types(legacy_context)

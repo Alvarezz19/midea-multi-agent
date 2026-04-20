@@ -7,7 +7,7 @@ import config
 from utils.console_utils import safe_print as print
 from utils.phase3_adapters import normalize_signal_name
 from utils.phase3_contracts import empty_subsystem_plan
-from utils.retrieval_bundle_utils import get_atomic_modules, build_compilable_doc_map
+from utils.retrieval_bundle_utils import build_bundle_doc_map, get_bundle_atomic_modules
 from utils.signal_semantics import canonicalize_signal_name
 from .coding_utils import resolve_input_count, resolve_output_count
 
@@ -635,8 +635,8 @@ class SubsystemPlanner:
         architecture_plan: Dict[str, Any],
         retrieval_bundle: Dict[str, Any],
     ) -> Dict[str, Dict[str, Any]]:
-        doc_map = build_compilable_doc_map(retrieval_bundle)
-        atomic_modules = get_atomic_modules(retrieval_bundle)
+        doc_map = build_bundle_doc_map(retrieval_bundle)
+        atomic_modules = get_bundle_atomic_modules(retrieval_bundle)
         shared_signal_registry = self._shared_signal_registry(
             requirement_spec,
             decomposition_result,

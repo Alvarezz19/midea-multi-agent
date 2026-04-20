@@ -1,11 +1,12 @@
 """
 LangGraph workflow orchestration.
 
-Phase 3 keeps the workflow linear for stability, but upgrades the planning
-layer into:
+The formal workflow keeps the Phase 3 layered-planning backbone, and now
+mounts Phase 8 review branches plus the Phase 4 repair loop:
 
-analysis -> retrieval -> architecture_planning -> subsystem_planning
--> global_assembly -> coding -> verification -> END
+analysis -> ambiguity_router -> retrieval -> architecture_planning
+-> architecture_review -> subsystem_planning -> global_assembly
+-> coding -> verification -> repair_router -> END/repair_agent
 """
 from typing import Any, Callable, TypedDict
 import os
@@ -54,7 +55,7 @@ class WorkflowState(TypedDict):
 
     user_query: str
 
-    # Phase 3 formal fields
+    # Formal mainline fields
     analysis_result: dict
     requirement_spec: dict
     retrieval_bundle: dict
@@ -66,7 +67,7 @@ class WorkflowState(TypedDict):
     verification_report: dict
     final_output: dict
 
-    # Historical / reserved fields
+    # Control / reserved fields
     debug_history: list
     repair_context: RepairContext
     repair_history: list[RepairHistoryEntry]
@@ -231,7 +232,7 @@ def _passthrough_node(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def populate_phase3_workflow(workflow: StateGraph, nodes: dict[str, object]) -> StateGraph:
-    """Register the shared Phase 3 linear topology."""
+    """Register the legacy Phase 3 linear topology shim."""
     return populate_phase4_workflow(workflow, nodes, enable_repair_loop=False)
 
 
@@ -370,7 +371,7 @@ def build_initial_state(
 
 @traceable(name="create_workflow", tags=["workflow", "langgraph"])
 def create_workflow(*, checkpointer: Any | None = None) -> StateGraph:
-    """Create the Phase 4 workflow graph."""
+    """Create the formal workflow graph with review and repair branches."""
     if RetrievalAgent is None:
         raise ImportError("RetrievalAgent 依赖未安装，无法创建正式工作流。")
 

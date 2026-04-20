@@ -239,7 +239,7 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
             graph_ir = assembler.assemble(
                 architecture_plan=make_architecture_plan(),
                 subsystem_plan_map=make_subsystem_plan_map(),
-                bundle_or_context=make_bundle(),
+                retrieval_bundle=make_bundle(),
                 requirement_spec=make_requirement_spec(),
             )
 
@@ -264,7 +264,7 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
             graph_ir = assembler.assemble(
                 architecture_plan=make_architecture_plan(),
                 subsystem_plan_map=subsystem_plan_map,
-                bundle_or_context=make_bundle(),
+                retrieval_bundle=make_bundle(),
                 requirement_spec=make_requirement_spec(),
             )
 
@@ -306,7 +306,7 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
             graph_ir = assembler.assemble(
                 architecture_plan=make_architecture_plan(),
                 subsystem_plan_map=subsystem_plan_map,
-                bundle_or_context=make_bundle(),
+                retrieval_bundle=make_bundle(),
                 requirement_spec=make_requirement_spec(),
             )
 
@@ -370,7 +370,7 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
             graph_ir = assembler.assemble(
                 architecture_plan=architecture_plan,
                 subsystem_plan_map=subsystem_plan_map,
-                bundle_or_context=make_bundle(),
+                retrieval_bundle=make_bundle(),
                 requirement_spec=make_requirement_spec(),
             )
 
@@ -417,7 +417,7 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
             graph_ir = assembler.assemble(
                 architecture_plan=make_architecture_plan(),
                 subsystem_plan_map=subsystem_plan_map,
-                bundle_or_context=make_bundle(),
+                retrieval_bundle=make_bundle(),
                 requirement_spec=make_requirement_spec(),
             )
 
@@ -483,7 +483,7 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
             graph_ir = assembler.assemble(
                 architecture_plan=make_architecture_plan(),
                 subsystem_plan_map=subsystem_plan_map,
-                bundle_or_context=make_bundle(),
+                retrieval_bundle=make_bundle(),
                 requirement_spec=make_requirement_spec(),
             )
 

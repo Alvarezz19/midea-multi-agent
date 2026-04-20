@@ -10,7 +10,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from utils.legacy_execution_plan import build_legacy_execution_plan as build_legacy_execution_plan_canonical
-from utils.phase3_adapters import build_legacy_execution_plan as build_legacy_execution_plan_compat
 
 
 def make_requirement_spec() -> dict:
@@ -76,20 +75,6 @@ class LegacyExecutionPlanTests(unittest.TestCase):
         self.assertEqual(len(result["connections"]), 1)
         self.assertEqual(result["connections"][0]["from_node"], "heater_main")
         self.assertEqual(result["connections"][0]["to_port_index"], 1)
-
-    def test_phase3_adapters_keeps_compat_reexport(self):
-        canonical = build_legacy_execution_plan_canonical(
-            make_requirement_spec(),
-            make_architecture_plan(),
-            make_subsystem_plan_map(),
-        )
-        compat = build_legacy_execution_plan_compat(
-            make_requirement_spec(),
-            make_architecture_plan(),
-            make_subsystem_plan_map(),
-        )
-
-        self.assertEqual(compat, canonical)
 
     def test_legacy_helper_reports_empty_projection_as_planning_failure(self):
         result = build_legacy_execution_plan_canonical(
