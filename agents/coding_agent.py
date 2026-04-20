@@ -12,8 +12,9 @@ import json
 from typing import Any, Dict, List, Set
 
 import config
+from agents.legacy.coding_compat import compile_graph_compat, generate_json_compat
 from utils.graph_ir import CompileReport, CompiledArtifact
-from utils.retrieval_bundle_utils import build_bundle_doc_map, build_legacy_doc_map, is_retrieval_bundle
+from utils.retrieval_bundle_utils import build_bundle_doc_map
 from .coding_utils import (
     fill_template,
     generate_short_uuid,
@@ -73,12 +74,6 @@ class CodingAgent:
     @staticmethod
     def _build_formal_doc_map(retrieval_bundle: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         return build_bundle_doc_map(retrieval_bundle)
-
-    @staticmethod
-    def _build_compat_doc_map(retrieval_input: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-        if is_retrieval_bundle(retrieval_input):
-            return build_bundle_doc_map(retrieval_input)
-        return build_legacy_doc_map(retrieval_input)
 
     @staticmethod
     def _build_reverse_edge_map(
@@ -334,8 +329,11 @@ class CodingAgent:
         retrieval_input: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Compatibility compiler entrypoint for retrieval_bundle / retrieval_context callers."""
-        doc_map = self._build_compat_doc_map(retrieval_input)
-        return self._compile_graph_with_doc_map(assembled_graph_ir, doc_map)
+        return compile_graph_compat(
+            self._compile_graph_with_doc_map,
+            assembled_graph_ir=assembled_graph_ir,
+            retrieval_input=retrieval_input,
+        )
 
     def compile_graph_from_bundle(
         self,
@@ -348,8 +346,11 @@ class CodingAgent:
 
     def generate_json(self, assembled_graph_ir: Dict[str, Any], retrieval_input: Dict[str, Any]) -> str:
         """Backwards-compatible wrapper returning only the JSON text."""
-        artifact = self.compile_graph(assembled_graph_ir, retrieval_input)
-        return artifact["json_text"]
+        return generate_json_compat(
+            self._compile_graph_with_doc_map,
+            assembled_graph_ir=assembled_graph_ir,
+            retrieval_input=retrieval_input,
+        )
 
     def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
         assembled_graph_ir = state.get("assembled_graph_ir", {})

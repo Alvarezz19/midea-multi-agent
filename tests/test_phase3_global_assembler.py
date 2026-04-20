@@ -251,7 +251,7 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
         self.assertEqual(graph_ir["edges"][0]["to_instance"], "node::heater_ctrl::heater_main")
         self.assertNotIn("source_execution_plan", graph_ir)
 
-        artifact = CodingAgent().compile_graph(graph_ir, make_bundle())
+        artifact = CodingAgent().compile_graph_from_bundle(graph_ir, make_bundle())
         report = VerifierAgent().verify(graph_ir, artifact)
         self.assertEqual(report["status"], "passed")
 
@@ -278,7 +278,7 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
         self.assertEqual(unresolved["resolution_status"], "missing_exporter")
         self.assertEqual(unresolved["consumer_subsystem_ids"], ["heater_ctrl"])
 
-        artifact = CodingAgent().compile_graph(graph_ir, make_bundle())
+        artifact = CodingAgent().compile_graph_from_bundle(graph_ir, make_bundle())
         report = VerifierAgent().verify(graph_ir, artifact)
         self.assertEqual(report["status"], "retryable_error")
         self.assertTrue(
@@ -392,7 +392,7 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
             )
         )
 
-        artifact = CodingAgent().compile_graph(graph_ir, make_bundle())
+        artifact = CodingAgent().compile_graph_from_bundle(graph_ir, make_bundle())
         report = VerifierAgent().verify(graph_ir, artifact)
         self.assertEqual(report["status"], "retryable_error")
         self.assertTrue(

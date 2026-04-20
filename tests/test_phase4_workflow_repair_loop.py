@@ -45,16 +45,63 @@ class StubArchitecturePlanning:
         state["decomposition_result"] = {
             "pages": [],
             "subsystem_descriptors": [
-                {"subsystem_id": "supply_fan_ctrl", "imports": [], "exports": ["supply_fan_available_flag"]},
-                {"subsystem_id": "heater_ctrl", "imports": ["supply_fan_available_flag"], "exports": ["heater_enable"]},
+                {
+                    "subsystem_id": "supply_fan_ctrl",
+                    "interface_bindings": [
+                        {
+                            "signal_name": "supply_fan_available_flag",
+                            "signal_key": "supply_fan_available_flag",
+                            "canonical_signal_key": "supply_fan_available",
+                            "direction": "output",
+                            "binding_kind": "shared_signal",
+                            "allowed_external": False,
+                            "owner_subsystem_id": "",
+                            "port_index": 0,
+                            "candidate_exporters": ["supply_fan_ctrl"],
+                        }
+                    ],
+                    "imports": [],
+                    "exports": ["supply_fan_available_flag"],
+                },
+                {
+                    "subsystem_id": "heater_ctrl",
+                    "interface_bindings": [
+                        {
+                            "signal_name": "supply_fan_available_flag",
+                            "signal_key": "supply_fan_available_flag",
+                            "canonical_signal_key": "supply_fan_available",
+                            "direction": "input",
+                            "binding_kind": "shared_signal",
+                            "allowed_external": False,
+                            "owner_subsystem_id": "",
+                            "port_index": 0,
+                            "candidate_exporters": ["supply_fan_ctrl"],
+                        },
+                        {
+                            "signal_name": "heater_enable",
+                            "signal_key": "heater_enable",
+                            "canonical_signal_key": "heater_enable",
+                            "direction": "output",
+                            "binding_kind": "subsystem_output",
+                            "allowed_external": False,
+                            "owner_subsystem_id": "",
+                            "port_index": 1,
+                            "candidate_exporters": [],
+                        },
+                    ],
+                    "imports": ["supply_fan_available_flag"],
+                    "exports": ["heater_enable"],
+                },
             ],
             "shared_signal_registry": [
                 {
                     "signal_name": "supply_fan_available_flag",
                     "signal_key": "supply_fan_available_flag",
+                    "canonical_signal_key": "supply_fan_available",
                     "owner_subsystem_id": "",
                     "allowed_external": False,
                     "required_exporter_count": 1,
+                    "candidate_exporters": ["supply_fan_ctrl"],
                     "consumers": ["heater_ctrl"],
                     "source_reason": "projected without owner",
                 }
@@ -245,9 +292,59 @@ class StubArchitecturePlanningAmbiguous:
         state["decomposition_result"] = {
             "pages": [],
             "subsystem_descriptors": [
-                {"subsystem_id": "supply_fan_ctrl", "imports": [], "exports": ["supply_fan_available_flag"]},
-                {"subsystem_id": "heater_ctrl", "imports": ["supply_fan_available_flag"], "exports": ["heater_enable"]},
-                {"subsystem_id": "backup_ctrl", "imports": [], "exports": []},
+                {
+                    "subsystem_id": "supply_fan_ctrl",
+                    "interface_bindings": [
+                        {
+                            "signal_name": "supply_fan_available_flag",
+                            "signal_key": "supply_fan_available_flag",
+                            "canonical_signal_key": "supply_fan_available",
+                            "direction": "output",
+                            "binding_kind": "shared_signal",
+                            "allowed_external": False,
+                            "owner_subsystem_id": "",
+                            "port_index": 0,
+                            "candidate_exporters": ["supply_fan_ctrl", "backup_ctrl"],
+                        }
+                    ],
+                    "imports": [],
+                    "exports": ["supply_fan_available_flag"],
+                },
+                {
+                    "subsystem_id": "heater_ctrl",
+                    "interface_bindings": [
+                        {
+                            "signal_name": "supply_fan_available_flag",
+                            "signal_key": "supply_fan_available_flag",
+                            "canonical_signal_key": "supply_fan_available",
+                            "direction": "input",
+                            "binding_kind": "shared_signal",
+                            "allowed_external": False,
+                            "owner_subsystem_id": "",
+                            "port_index": 0,
+                            "candidate_exporters": ["supply_fan_ctrl", "backup_ctrl"],
+                        },
+                        {
+                            "signal_name": "heater_enable",
+                            "signal_key": "heater_enable",
+                            "canonical_signal_key": "heater_enable",
+                            "direction": "output",
+                            "binding_kind": "subsystem_output",
+                            "allowed_external": False,
+                            "owner_subsystem_id": "",
+                            "port_index": 1,
+                            "candidate_exporters": [],
+                        },
+                    ],
+                    "imports": ["supply_fan_available_flag"],
+                    "exports": ["heater_enable"],
+                },
+                {
+                    "subsystem_id": "backup_ctrl",
+                    "interface_bindings": [],
+                    "imports": [],
+                    "exports": [],
+                },
             ],
             "shared_signal_registry": [
                 {

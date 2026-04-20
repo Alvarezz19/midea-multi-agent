@@ -9,8 +9,8 @@ import chromadb
 import config
 from utils.console_utils import safe_print as print
 from utils.model_manager import EmbeddingManager
+from agents.legacy.retrieval_compat import retrieve_legacy_context
 from utils.retrieval_bundle_utils import (
-    build_legacy_retrieval_context,
     load_structured_payload,
 )
 
@@ -634,18 +634,14 @@ class RetrievalAgent:
         analysis_result: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """保持兼容的 legacy 检索接口。"""
-        bundle = self.retrieve_bundle(
+        return retrieve_legacy_context(
+            self.retrieve_bundle,
             query=query,
             top_k=top_k,
             category_filter=category_filter,
             similarity_threshold=similarity_threshold,
             analysis_result=analysis_result,
         )
-        context = build_legacy_retrieval_context(bundle)
-        meta = dict(context.get("metadata", {}))
-        meta["category_filter"] = category_filter
-        context["metadata"] = meta
-        return context
 
     # ==================== 单查询检索 ====================
 

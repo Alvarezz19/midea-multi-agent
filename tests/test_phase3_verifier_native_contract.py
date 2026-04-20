@@ -166,7 +166,7 @@ class Phase3VerifierNativeContractTests(unittest.TestCase):
         graph_ir = make_graph_ir()
 
         with patch.object(config, "DEBUG", False):
-            artifact = CodingAgent().compile_graph(graph_ir, make_bundle())
+            artifact = CodingAgent().compile_graph_from_bundle(graph_ir, make_bundle())
             report = VerifierAgent().verify(
                 graph_ir,
                 artifact,
@@ -227,7 +227,7 @@ class Phase3VerifierNativeContractTests(unittest.TestCase):
         ]
 
         with patch.object(config, "DEBUG", False):
-            artifact = CodingAgent().compile_graph(graph_ir, make_bundle())
+            artifact = CodingAgent().compile_graph_from_bundle(graph_ir, make_bundle())
             report = VerifierAgent().verify(
                 graph_ir,
                 artifact,
@@ -261,7 +261,7 @@ class Phase3VerifierNativeContractTests(unittest.TestCase):
         ]
 
         with patch.object(config, "DEBUG", False):
-            artifact = CodingAgent().compile_graph(graph_ir, make_bundle())
+            artifact = CodingAgent().compile_graph_from_bundle(graph_ir, make_bundle())
             report = VerifierAgent().verify(
                 graph_ir,
                 artifact,

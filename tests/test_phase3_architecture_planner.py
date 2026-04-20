@@ -506,6 +506,25 @@ class Phase3ArchitecturePlannerTests(unittest.TestCase):
         self.assertFalse(registry_entry["owner_subsystem_id"])
         self.assertTrue(registry_entry["resolution_evidence"])
 
+    def test_architecture_planner_emits_native_interface_bindings_and_candidate_exporters(self):
+        bundle = make_real_bundle()
+
+        with patch.object(config, "DEBUG", False):
+            planner = ArchitecturePlanner()
+            decomposition_result, architecture_plan = planner.plan(make_requirement_spec(), bundle)
+
+        for descriptor in decomposition_result["subsystem_descriptors"]:
+            self.assertIn("interface_bindings", descriptor)
+            self.assertTrue(descriptor["interface_bindings"])
+            for binding in descriptor["interface_bindings"]:
+                self.assertIn("direction", binding)
+                self.assertIn("binding_kind", binding)
+                self.assertIn("canonical_signal_key", binding)
+
+        for entry in architecture_plan["shared_signal_registry"]:
+            self.assertIn("candidate_exporters", entry)
+            self.assertIn("resolution_status", entry)
+
 
 if __name__ == "__main__":
     unittest.main()

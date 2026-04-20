@@ -105,6 +105,30 @@ class _StubArchitecturePlanning:
             "subsystem_descriptors": [
                 {
                     "subsystem_id": "supply_fan_ctrl",
+                    "interface_bindings": [
+                        {
+                            "signal_name": "schedule_enable",
+                            "signal_key": "schedule_enable",
+                            "canonical_signal_key": "schedule_enable",
+                            "direction": "input",
+                            "binding_kind": "external_input",
+                            "allowed_external": True,
+                            "owner_subsystem_id": "",
+                            "port_index": 0,
+                            "candidate_exporters": [],
+                        },
+                        {
+                            "signal_name": "supply_fan_available_flag",
+                            "signal_key": "supply_fan_available_flag",
+                            "canonical_signal_key": "supply_fan_available",
+                            "direction": "output",
+                            "binding_kind": "shared_signal",
+                            "allowed_external": False,
+                            "owner_subsystem_id": "supply_fan_ctrl",
+                            "port_index": 1,
+                            "candidate_exporters": ["supply_fan_ctrl"],
+                        },
+                    ],
                     "imports": ["schedule_enable"],
                     "exports": ["supply_fan_available_flag"],
                 }
@@ -113,7 +137,9 @@ class _StubArchitecturePlanning:
                 {
                     "signal_name": "supply_fan_available_flag",
                     "signal_key": "supply_fan_available_flag",
+                    "canonical_signal_key": "supply_fan_available",
                     "owner_subsystem_id": "supply_fan_ctrl",
+                    "candidate_exporters": ["supply_fan_ctrl"],
                     "consumers": [],
                 }
             ],
@@ -129,7 +155,9 @@ class _StubArchitecturePlanning:
                 {
                     "signal_name": "supply_fan_available_flag",
                     "signal_key": "supply_fan_available_flag",
+                    "canonical_signal_key": "supply_fan_available",
                     "owner_subsystem_id": "supply_fan_ctrl",
+                    "candidate_exporters": ["supply_fan_ctrl"],
                     "consumers": [],
                 }
             ],
