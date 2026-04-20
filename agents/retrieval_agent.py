@@ -9,7 +9,6 @@ import chromadb
 import config
 from utils.console_utils import safe_print as print
 from utils.model_manager import EmbeddingManager
-from agents.legacy.retrieval_compat import retrieve_legacy_context
 from utils.retrieval_bundle_utils import (
     load_structured_payload,
 )
@@ -624,24 +623,6 @@ class RetrievalAgent:
                 "query_bundle_version": "phase2-v1",
             },
         }
-
-    def retrieve(
-        self,
-        query: str,
-        top_k: int = 10,
-        category_filter: Optional[str] = None,
-        similarity_threshold: float = 0.3,
-        analysis_result: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """保持兼容的 legacy 检索接口。"""
-        return retrieve_legacy_context(
-            self.retrieve_bundle,
-            query=query,
-            top_k=top_k,
-            category_filter=category_filter,
-            similarity_threshold=similarity_threshold,
-            analysis_result=analysis_result,
-        )
 
     # ==================== 单查询检索 ====================
 

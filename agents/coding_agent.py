@@ -12,7 +12,6 @@ import json
 from typing import Any, Dict, List, Set
 
 import config
-from agents.legacy.coding_compat import compile_graph_compat, generate_json_compat
 from utils.graph_ir import CompileReport, CompiledArtifact
 from utils.retrieval_bundle_utils import build_bundle_doc_map
 from .coding_utils import (
@@ -323,18 +322,6 @@ class CodingAgent:
 
         return artifact.model_dump()
 
-    def compile_graph(
-        self,
-        assembled_graph_ir: Dict[str, Any],
-        retrieval_input: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        """Compatibility compiler entrypoint for retrieval_bundle / retrieval_context callers."""
-        return compile_graph_compat(
-            self._compile_graph_with_doc_map,
-            assembled_graph_ir=assembled_graph_ir,
-            retrieval_input=retrieval_input,
-        )
-
     def compile_graph_from_bundle(
         self,
         assembled_graph_ir: Dict[str, Any],
@@ -343,14 +330,6 @@ class CodingAgent:
         """Formal compiler entrypoint used by the main workflow."""
         doc_map = self._build_formal_doc_map(retrieval_bundle)
         return self._compile_graph_with_doc_map(assembled_graph_ir, doc_map)
-
-    def generate_json(self, assembled_graph_ir: Dict[str, Any], retrieval_input: Dict[str, Any]) -> str:
-        """Backwards-compatible wrapper returning only the JSON text."""
-        return generate_json_compat(
-            self._compile_graph_with_doc_map,
-            assembled_graph_ir=assembled_graph_ir,
-            retrieval_input=retrieval_input,
-        )
 
     def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
         assembled_graph_ir = state.get("assembled_graph_ir", {})

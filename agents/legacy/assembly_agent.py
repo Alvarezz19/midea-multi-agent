@@ -13,6 +13,7 @@ from typing import Any, Dict, List
 
 import config
 from agents.assembly_shared import AssemblySharedMixin
+from agents.legacy.retrieval_context_utils import build_legacy_doc_map
 from agents.coding_utils import (
     resolve_input_count,
     resolve_output_count,
@@ -26,6 +27,7 @@ from utils.graph_ir import (
     SignalIR,
     SubflowDefinitionIR,
 )
+from utils.retrieval_bundle_utils import is_retrieval_bundle
 
 
 class AssemblyAgent(AssemblySharedMixin):
@@ -38,7 +40,10 @@ class AssemblyAgent(AssemblySharedMixin):
     ) -> Dict[str, Any]:
         plan_nodes = execution_plan.get("nodes", []) or []
         plan_connections = execution_plan.get("connections", []) or []
-        doc_map = self._build_compat_doc_map(retrieval_input)
+        if is_retrieval_bundle(retrieval_input):
+            doc_map = self._build_formal_doc_map(retrieval_input)
+        else:
+            doc_map = build_legacy_doc_map(retrieval_input)
         coords_map = topological_layout(plan_nodes, plan_connections)
 
         pages = [

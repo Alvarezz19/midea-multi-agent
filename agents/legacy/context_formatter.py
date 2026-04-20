@@ -1,16 +1,13 @@
-"""
-Context formatting helpers for retrieval-backed agents.
-"""
+"""Legacy retrieval_context formatting helpers."""
 from __future__ import annotations
 
 import json
 from typing import Any, Dict, List
 
-from utils.retrieval_bundle_utils import (
-    build_bundle_doc_map,
-    get_bundle_atomic_modules,
-    get_bundle_subflow_templates,
-    get_bundle_system_patterns,
+from agents.legacy.retrieval_context_utils import (
+    build_legacy_doc_map,
+    get_legacy_atomic_modules,
+    get_legacy_subflow_templates,
 )
 
 
@@ -89,26 +86,25 @@ def _append_summary_block(lines: List[str], node: Dict[str, Any]) -> None:
     lines.append(f"    Port overview: {_summarize_port_overview(ports_def)}")
 
 
-def format_docs_for_planner(
-    retrieval_bundle: Dict[str, Any],
+def format_legacy_docs_for_planner(
+    retrieval_context: Dict[str, Any],
     detail_top_n: int = 5,
     max_modules: int = 8,
 ) -> str:
-    """Format formal retrieval_bundle for planning-related callers."""
-    atomic_modules = get_bundle_atomic_modules(retrieval_bundle)
-    subflow_templates = get_bundle_subflow_templates(retrieval_bundle)
-    system_patterns = get_bundle_system_patterns(retrieval_bundle)
+    """Format legacy retrieval_context for the compat PlanningAgent."""
+    atomic_modules = get_legacy_atomic_modules(retrieval_context)
+    subflow_templates = get_legacy_subflow_templates(retrieval_context)
 
-    if not atomic_modules and not subflow_templates and not system_patterns:
+    if not atomic_modules and not subflow_templates:
         return "No retrieval candidates found."
 
-    metadata = retrieval_bundle.get("metadata", {}) if isinstance(retrieval_bundle, dict) else {}
+    metadata = retrieval_context.get("metadata", {}) if isinstance(retrieval_context, dict) else {}
     if not isinstance(metadata, dict):
         metadata = {}
 
-    query_text = metadata.get("query_text", "N/A")
-    avg_score = metadata.get("avg_atomic_score", 0)
-    retrieved_count = metadata.get("retrieved_atomic_count", len(atomic_modules))
+    query_text = retrieval_context.get("query", "N/A")
+    avg_score = metadata.get("avg_confidence_score", 0)
+    retrieved_count = metadata.get("retrieved_count", len(atomic_modules))
 
     lines: List[str] = []
     lines.append("Retrieval Summary")
@@ -116,28 +112,13 @@ def format_docs_for_planner(
     lines.append("Stats:")
     lines.append(f"  - Atomic modules: {retrieved_count}")
     lines.append(f"  - Subflow templates: {len(subflow_templates)}")
-    lines.append(f"  - System patterns: {len(system_patterns)}")
+    lines.append("  - System patterns: 0")
     lines.append(f"  - Avg atomic similarity: {float(avg_score or 0):.3f}")
 
     if metadata.get("detected_operations"):
         lines.append(f"  - Detected operations: {', '.join(metadata['detected_operations'])}")
     if metadata.get("intent"):
         lines.append(f"  - Intent: {metadata['intent']}")
-
-    if system_patterns:
-        lines.append("\nSystem Pattern Hints:")
-        for pattern in system_patterns[:3]:
-            pattern_name = pattern.get("pattern_name") or pattern.get("name") or pattern.get("pattern_id", "Unknown")
-            required_pages = pattern.get("required_pages", [])
-            optional_pages = pattern.get("optional_pages", [])
-            page_summary = []
-            if required_pages:
-                labels = [page.get("label") or page.get("page_key", "") for page in required_pages[:5]]
-                page_summary.append("required=" + ", ".join(labels))
-            if optional_pages:
-                labels = [page.get("label") or page.get("page_key", "") for page in optional_pages[:5]]
-                page_summary.append("optional=" + ", ".join(labels))
-            lines.append(f"  - {pattern_name}: {'; '.join(page_summary) if page_summary else 'no page summary'}")
 
     if subflow_templates:
         lines.append("\nSubflow Template Candidates:")
@@ -176,8 +157,6 @@ def format_docs_for_planner(
     top_similarity = float(relevant_nodes[0].get("similarity_score", 0) or 0) if relevant_nodes else 0.0
     if subflow_templates:
         lines.append("  Prefer reusable subflow templates before falling back to atomic assembly.")
-    if system_patterns:
-        lines.append("  Use system patterns as layout and page hints only, not as hard output schema.")
     if top_similarity > 0.8:
         lines.append("  Atomic candidates are strong; prefer the top-ranked modules when templates are insufficient.")
     elif top_similarity > 0.6:
@@ -196,9 +175,9 @@ def format_docs_for_planner(
     return "\n".join(lines)
 
 
-def format_docs_for_coding(retrieval_bundle: Dict[str, Any], selected_modules: List[str]) -> str:
-    """Prepare detailed module information from formal retrieval_bundle."""
-    doc_map = build_bundle_doc_map(retrieval_bundle)
+def format_legacy_docs_for_coding(retrieval_context: Dict[str, Any], selected_modules: List[str]) -> str:
+    """Prepare detailed module information for legacy coding callers."""
+    doc_map = build_legacy_doc_map(retrieval_context)
     if not doc_map:
         return "No relevant module information found."
 
@@ -282,20 +261,18 @@ def format_docs_for_coding(retrieval_bundle: Dict[str, Any], selected_modules: L
     return "\n".join(lines)
 
 
-def get_module_summary(retrieval_bundle: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract a structured summary from formal retrieval results."""
-    relevant_nodes = get_bundle_atomic_modules(retrieval_bundle)
-    metadata = retrieval_bundle.get("metadata", {}) if isinstance(retrieval_bundle, dict) else {}
+def get_legacy_module_summary(retrieval_context: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract a structured summary from legacy retrieval results."""
+    relevant_nodes = get_legacy_atomic_modules(retrieval_context)
+    metadata = retrieval_context.get("metadata", {}) if isinstance(retrieval_context, dict) else {}
     if not isinstance(metadata, dict):
         metadata = {}
-
-    avg_similarity = metadata.get("avg_atomic_score", 0)
 
     return {
         "total_modules": len(relevant_nodes),
         "module_types": [node.get("module_type") for node in relevant_nodes],
         "top_module": relevant_nodes[0] if relevant_nodes else None,
-        "avg_similarity": avg_similarity,
+        "avg_similarity": metadata.get("avg_confidence_score", 0),
         "categories": sorted(
             {
                 str(node.get("category", "")).split("/")[0]

@@ -15,10 +15,11 @@ from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 import config
 from utils.console_utils import safe_print as print
+from agents.legacy.context_formatter import format_legacy_docs_for_planner
 from utils.context_formatter import format_docs_for_planner
+from agents.legacy.retrieval_context_utils import build_legacy_allowed_module_types
 from utils.retrieval_bundle_utils import (
     build_bundle_allowed_module_types,
-    build_legacy_allowed_module_types,
     is_retrieval_bundle,
 )
 from utils.model_manager import LLMManager
@@ -335,11 +336,18 @@ class PlanningAgent:
             self._available_module_types = build_legacy_allowed_module_types(retrieval_input)
 
         # 清洗检索上下文为轻量级文本
-        slim_context = format_docs_for_planner(
-            retrieval_input,
-            detail_top_n=config.PLANNING_CONTEXT_DETAIL_TOP_N,
-            max_modules=config.PLANNING_CONTEXT_MAX_MODULES,
-        )
+        if is_retrieval_bundle(retrieval_input):
+            slim_context = format_docs_for_planner(
+                retrieval_input,
+                detail_top_n=config.PLANNING_CONTEXT_DETAIL_TOP_N,
+                max_modules=config.PLANNING_CONTEXT_MAX_MODULES,
+            )
+        else:
+            slim_context = format_legacy_docs_for_planner(
+                retrieval_input,
+                detail_top_n=config.PLANNING_CONTEXT_DETAIL_TOP_N,
+                max_modules=config.PLANNING_CONTEXT_MAX_MODULES,
+            )
         analysis_context = self._format_analysis_context(analysis_result)
 
         if config.DEBUG:

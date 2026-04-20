@@ -12,12 +12,22 @@
 
 - `legacy_execution_plan_compat.py`
 - `legacy_agent_imports_compat.py`
+- `phase2_planning_bundle_compat.py`
+- `phase2_retrieval_bundle_compat.py`
+- `phase6_retrieval_eval_compat.py`
+
+已清退：
+
 - `agents/legacy/retrieval_compat.py`
 - `agents/legacy/coding_compat.py`
 - `phase1_workflow_compat.py`
 - `phase2_bundle_consumers_compat.py`
-- `phase2_planning_bundle_compat.py`
 - `phase2_retrieval_agent_compat.py`
-- `phase2_retrieval_bundle_compat.py`
-- `phase6_retrieval_eval_compat.py`
 - `phase7_coding_determinism_compat.py`
+
+原因：
+
+- 这些文件直接绑定已删除的仓库级 public compat API：
+  - `RetrievalAgent.retrieve(...)`
+  - `CodingAgent.compile_graph(...)`
+  - `CodingAgent.generate_json(...)`

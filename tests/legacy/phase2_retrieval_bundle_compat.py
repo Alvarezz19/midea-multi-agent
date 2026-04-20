@@ -9,11 +9,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from utils.retrieval_bundle_utils import (
+from agents.legacy.retrieval_context_utils import (
     build_legacy_doc_map,
     build_legacy_retrieval_context,
     get_legacy_atomic_modules,
     get_legacy_subflow_templates,
+)
+from utils.retrieval_bundle_utils import (
     is_retrieval_bundle,
     load_structured_payload,
 )
