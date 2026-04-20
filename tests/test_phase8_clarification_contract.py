@@ -102,7 +102,6 @@ class _StubSubsystem:
 class _StubAssembly:
     def __call__(self, state):
         state["assembled_graph_ir"] = {"unresolved_items": []}
-        state["execution_plan"] = {"goal": "stub"}
         state["current_step"] = "global_assembly_completed"
         return state
 
@@ -110,7 +109,6 @@ class _StubAssembly:
 class _StubCoding:
     def __call__(self, state):
         state["compiled_artifact"] = {"compile_report": {"page_count": 0, "subflow_count": 0, "node_count": 0}}
-        state["generated_code"] = "{}"
         state["current_step"] = "coding_completed"
         return state
 

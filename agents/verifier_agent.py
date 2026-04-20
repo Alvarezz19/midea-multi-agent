@@ -248,34 +248,6 @@ class VerifierAgent:
             ).strip(),
         }
 
-    def _compat_planning_issues(self, assembled_graph_ir: Dict[str, Any]) -> List[VerificationIssue]:
-        issues: List[VerificationIssue] = []
-        source_execution_plan = assembled_graph_ir.get("source_execution_plan", {}) or {}
-        if not isinstance(source_execution_plan, dict) or not source_execution_plan:
-            return issues
-
-        source_goal = str(source_execution_plan.get("goal", "") or "").strip()
-        source_nodes = source_execution_plan.get("nodes", []) or []
-        if source_goal.startswith("规划失败:"):
-            issues.append(self._make_issue(
-                issue_id=f"IR-{len(issues) + 1:03d}",
-                scope="planning",
-                target_id="execution_plan.goal",
-                rule_id="plan.generation.must_succeed",
-                message=f"规划阶段失败：{source_goal}",
-                suggested_fix="修复 planning 失败原因后重新生成执行计划。",
-            ))
-        if isinstance(source_nodes, list) and len(source_nodes) == 0:
-            issues.append(self._make_issue(
-                issue_id=f"IR-{len(issues) + 1:03d}",
-                scope="planning",
-                target_id="execution_plan.nodes",
-                rule_id="plan.nodes.must_not_be_empty",
-                message="执行计划为空：至少需要 1 个节点。",
-                suggested_fix="确保 compat execution_plan 仅作为投影输出，真实规划结果由 architecture_plan/subsystem_plan_map 承载。",
-            ))
-        return issues
-
     def _native_planning_issues(
         self,
         requirement_spec: Dict[str, Any],
@@ -296,9 +268,6 @@ class VerifierAgent:
                 for item in requirement_spec.get("subsystems", []) or []
                 if isinstance(item, dict) and str(item.get("subsystem_id", "")).strip()
             ]
-
-        if not expected_subsystem_ids and (assembled_graph_ir.get("source_execution_plan", {}) or {}):
-            return issues
 
         if architecture_plan and not subsystem_slots and expected_subsystem_ids:
             issues.append(self._make_issue(
@@ -359,7 +328,7 @@ class VerifierAgent:
             and str(item.get("severity", "warning")).strip().lower() == "error"
             and str(item.get("scope", "assembly")).strip() == "planning"
         ]
-        if unresolved_planning_errors and not (assembled_graph_ir.get("source_execution_plan") or {}):
+        if unresolved_planning_errors:
             issues.append(self._make_issue(
                 issue_id=f"PL-{len(issues) + 1:03d}",
                 scope="planning",
@@ -393,7 +362,6 @@ class VerifierAgent:
         warnings: List[str] = []
         metrics = VerificationMetrics()
 
-        issues.extend(self._compat_planning_issues(assembled_graph_ir))
         issues.extend(
             self._native_planning_issues(
                 requirement_spec,

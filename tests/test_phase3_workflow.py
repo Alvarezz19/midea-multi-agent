@@ -25,7 +25,6 @@ import workflow
 import workflow_trace
 from utils.ahu_knowledge_builder import build_ahu_knowledge_assets, write_assets_to_chroma
 from utils.model_manager import EmbeddingManager, LLMManager
-from utils.retrieval_bundle_utils import build_legacy_retrieval_context
 
 
 def make_requirement_spec() -> dict:
@@ -131,7 +130,6 @@ class StubRetrieval:
     def __call__(self, state):
         bundle = make_bundle()
         state["retrieval_bundle"] = bundle
-        state["retrieval_context"] = build_legacy_retrieval_context(bundle)
         state["current_step"] = "retrieval_completed"
         return state
 
@@ -437,7 +435,10 @@ class Phase3WorkflowTests(unittest.TestCase):
         self.assertIn("architecture_plan", result)
         self.assertIn("subsystem_plan_map", result)
         self.assertIn("assembled_graph_ir", result)
-        self.assertTrue(result["execution_plan"]["nodes"])
+        self.assertNotIn("source_execution_plan", result["assembled_graph_ir"])
+        self.assertNotIn("execution_plan", result)
+        self.assertNotIn("generated_code", result)
+        self.assertNotIn("retrieval_context", result)
         self.assertEqual(result["verification_report"]["status"], "passed")
         self.assertEqual(result["final_output"]["verification_report"]["status"], "passed")
 
@@ -607,7 +608,9 @@ class Phase3WorkflowRealIntegrationTests(unittest.TestCase):
             result["subsystem_plan_map"]["supply_fan_ctrl"]["template_binding"]["template_id"].startswith("ahu_subflow__")
         )
         self.assertTrue(result["compiled_artifact"]["flow_objects"])
-        self.assertTrue(result["execution_plan"]["nodes"])
+        self.assertNotIn("source_execution_plan", result["assembled_graph_ir"])
+        self.assertNotIn("execution_plan", result)
+        self.assertNotIn("generated_code", result)
 
     def test_workflow_runs_multi_subsystem_cases_with_real_phase2_assets(self):
         cases = {

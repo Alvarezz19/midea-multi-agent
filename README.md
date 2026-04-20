@@ -27,8 +27,9 @@ user_query
   -> (accept -> END) / (repair_agent -> subsystem_planning | global_assembly | coding)
 ```
 
-- 当前真实主产物是 `compiled_artifact`；`generated_code` 只是兼容字段，等于 `compiled_artifact["json_text"]`。
-- 当前真实编译输入是 `assembled_graph_ir`；`execution_plan` 仅作为兼容投影保留。
+- 当前真实主产物是 `compiled_artifact`；正式顶层状态已不再回填 `generated_code`。
+- 当前真实编译输入是 `assembled_graph_ir`；正式顶层状态已不再回填 `execution_plan`。
+- `assembled_graph_ir.source_execution_plan` 已从正式 IR 中移除。
 - 当前未接入：`Send` 并行派发、reducer fan-in、`repair_review` 后置审核、完整 `internal_flow_objects` body 编译。
 - `workflow_trace.py` 现在会把 review 暂停记为 `interrupted`，并在 trace 目录中补 `review_records.json`、`approval_record.json` 与 review 索引路径。
 
@@ -89,31 +90,27 @@ python workflow_trace.py
 - `verification_report`
 - `final_output`
 
-### 兼容字段
+### 已降级为 legacy / compat 的对象
 
-- `retrieval_context`
-- `execution_plan`
-- `generated_code`
+- `build_legacy_retrieval_context(...)`
+- `utils/legacy_execution_plan.py` 中的 `build_legacy_execution_plan(...)`
 
 ### 历史预留字段
 
-- `execution_result`
-- `validation_result`
 - `debug_history`
 - `retry_count`
 - `current_step`
-- `next_step`
 
 ## 各节点职责
 
 | 节点 | 当前职责 | 关键输出 |
 |:---|:---|:---|
 | `analysis` | 结构化需求理解 | `analysis_result`、`requirement_spec` |
-| `retrieval` | 检索原子模块与 Phase 2 AHU 资产 | `retrieval_bundle`、兼容 `retrieval_context` |
+| `retrieval` | 检索原子模块与 Phase 2 AHU 资产 | `retrieval_bundle` |
 | `architecture_planning` | 生成系统骨架、页签和共享信号约束 | `decomposition_result`、`architecture_plan` |
 | `subsystem_planning` | 逐个子系统生成局部 IR | `subsystem_plan_map` |
-| `global_assembly` | 组装全局 Graph IR，并回填 compat `execution_plan` | `assembled_graph_ir`、`execution_plan` |
-| `coding` | 确定性编译平台 JSON | `compiled_artifact`、`generated_code` |
+| `global_assembly` | 组装全局 Graph IR | `assembled_graph_ir` |
+| `coding` | 确定性编译平台 JSON | `compiled_artifact` |
 | `verification` | 结构验收 | `verification_report`、`final_output` |
 
 ## Phase 2 资产链与知识库
@@ -160,9 +157,9 @@ python scripts/build_phase2_retrieval_indexes.py --output-dir AHU程序/pattern_
 |:---|:---|:---|
 | `agents/planning_agent.py` | 旧主链 compat planner | 仍有 Phase 2 回归测试覆盖，但不在 Phase 3 正式主链中 |
 | `agents/assembly_agent.py` | 旧装配节点 + 基础能力复用 | 不作为正式节点运行，但 `GlobalAssembler` 仍复用其基础装配工具 |
-| `agents/validation_agent.py` | 旧契约占位实现 | 未接入主链，仍读取历史 `execution_result` 语义 |
-| `agents/debugging_agent.py` | 旧修复闭环占位实现 | 未接入主链，等待后续 Repair 方案明确 |
-| `agents/retrieval_agent_old.py` | 历史保留实现 | 当前正式入口是 `agents/retrieval_agent.py` |
+| `agents/validation_agent.py` | legacy 兼容包装 | 真实实现已迁移到 `agents/legacy/validation_agent.py` |
+| `agents/debugging_agent.py` | legacy 兼容包装 | 真实实现已迁移到 `agents/legacy/debugging_agent.py` |
+| `agents/retrieval_agent_old.py` | legacy 兼容包装 | 真实实现已迁移到 `agents/legacy/retrieval_agent_old.py`；当前正式入口是 `agents/retrieval_agent.py` |
 
 这些模块后续可以继续收敛到 `legacy/` 目录，但前提是 compat 路径和基础复用能力已经完全清退。
 

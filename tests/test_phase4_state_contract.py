@@ -38,6 +38,16 @@ class Phase4StateContractTests(unittest.TestCase):
 
         self.assertTrue(expected_fields.issubset(set(workflow.WorkflowState.__annotations__)))
         self.assertTrue(expected_fields.issubset(set(workflow_trace.WorkflowState.__annotations__)))
+        self.assertNotIn("execution_plan", workflow.WorkflowState.__annotations__)
+        self.assertNotIn("generated_code", workflow.WorkflowState.__annotations__)
+        self.assertNotIn("execution_result", workflow.WorkflowState.__annotations__)
+        self.assertNotIn("validation_result", workflow.WorkflowState.__annotations__)
+        self.assertNotIn("next_step", workflow.WorkflowState.__annotations__)
+        self.assertNotIn("execution_plan", workflow_trace.WorkflowState.__annotations__)
+        self.assertNotIn("generated_code", workflow_trace.WorkflowState.__annotations__)
+        self.assertNotIn("execution_result", workflow_trace.WorkflowState.__annotations__)
+        self.assertNotIn("validation_result", workflow_trace.WorkflowState.__annotations__)
+        self.assertNotIn("next_step", workflow_trace.WorkflowState.__annotations__)
 
     def test_build_initial_state_initializes_repair_defaults(self):
         state = workflow.build_initial_state("为 AHU 生成送风机标准控制")
@@ -67,6 +77,11 @@ class Phase4StateContractTests(unittest.TestCase):
         self.assertEqual(state["architecture_feedback_patch"], {})
         self.assertFalse(state["enable_hitl_clarification"])
         self.assertFalse(state["enable_hitl_architecture_review"])
+        self.assertNotIn("execution_plan", state)
+        self.assertNotIn("generated_code", state)
+        self.assertNotIn("execution_result", state)
+        self.assertNotIn("validation_result", state)
+        self.assertNotIn("next_step", state)
 
     def test_run_workflow_passes_recursion_limit_and_preserves_repair_defaults(self):
         captured: dict[str, object] = {}

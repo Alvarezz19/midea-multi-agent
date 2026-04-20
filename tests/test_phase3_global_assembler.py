@@ -245,7 +245,7 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
         self.assertEqual(len(graph_ir["edges"]), 1)
         self.assertEqual(graph_ir["edges"][0]["from_instance"], "node::supply_fan_ctrl::fan_main")
         self.assertEqual(graph_ir["edges"][0]["to_instance"], "node::heater_ctrl::heater_main")
-        self.assertTrue(graph_ir["source_execution_plan"]["nodes"])
+        self.assertNotIn("source_execution_plan", graph_ir)
 
         artifact = CodingAgent().compile_graph(graph_ir, make_bundle())
         report = VerifierAgent().verify(graph_ir, artifact)

@@ -330,10 +330,9 @@ class CodingAgent:
 
     def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
         assembled_graph_ir = state.get("assembled_graph_ir", {})
-        bundle_or_context = state.get("retrieval_bundle") or state.get("retrieval_context", {})
-        compiled_artifact = self.compile_graph(assembled_graph_ir, bundle_or_context)
+        retrieval_bundle = state.get("retrieval_bundle", {}) or {}
+        compiled_artifact = self.compile_graph(assembled_graph_ir, retrieval_bundle)
 
         state["compiled_artifact"] = compiled_artifact
-        state["generated_code"] = compiled_artifact["json_text"]
         state["current_step"] = "coding_completed"
         return state

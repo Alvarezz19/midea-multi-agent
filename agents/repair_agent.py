@@ -37,9 +37,9 @@ TARGET_STATE_KEYS_BY_SCOPE = {
     "compile": ["assembled_graph_ir"],
 }
 INVALIDATE_STATE_BY_SCOPE = {
-    "planning": ["subsystem_plan_map", "assembled_graph_ir", "compiled_artifact", "verification_report", "final_output", "execution_plan", "generated_code"],
-    "assembly": ["assembled_graph_ir", "compiled_artifact", "verification_report", "final_output", "execution_plan", "generated_code"],
-    "compile": ["compiled_artifact", "verification_report", "final_output", "generated_code"],
+    "planning": ["subsystem_plan_map", "assembled_graph_ir", "compiled_artifact", "verification_report", "final_output"],
+    "assembly": ["assembled_graph_ir", "compiled_artifact", "verification_report", "final_output"],
+    "compile": ["compiled_artifact", "verification_report", "final_output"],
 }
 REPAIR_STRATEGY_BY_SCOPE = {
     "planning": "rebind_shared_signal_owner",
@@ -425,10 +425,7 @@ class RepairAgent:
 
     def _invalidate_downstream(self, state: Dict[str, Any], repair_scope: str) -> None:
         for key in INVALIDATE_STATE_BY_SCOPE.get(repair_scope, []):
-            if key == "generated_code":
-                state[key] = ""
-            else:
-                state[key] = {}
+            state[key] = {}
 
     def _mark_shared_signal_as_external(
         self,

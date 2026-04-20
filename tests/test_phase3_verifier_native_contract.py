@@ -247,6 +247,35 @@ class Phase3VerifierNativeContractTests(unittest.TestCase):
         self.assertTrue(issue["repair_payload"]["allowed_external"])
         self.assertEqual(issue["repair_payload"]["resolution_status"], "externalized")
 
+    def test_verifier_reports_native_planning_unresolved_items_without_compat_projection(self):
+        graph_ir = make_graph_ir()
+        graph_ir["unresolved_items"] = [
+            {
+                "type": "synthetic_shared_signal_source",
+                "severity": "error",
+                "scope": "planning",
+                "signal_name": "schedule_enable",
+                "message": "Shared signal schedule_enable has no real exporter.",
+                "suggested_fix": "Declare it as external input or export it from a real subsystem.",
+            }
+        ]
+
+        with patch.object(config, "DEBUG", False):
+            artifact = CodingAgent().compile_graph(graph_ir, make_bundle())
+            report = VerifierAgent().verify(
+                graph_ir,
+                artifact,
+                requirement_spec=make_requirement_spec(),
+                architecture_plan=make_architecture_plan(),
+                subsystem_plan_map=make_subsystem_plan_map(),
+            )
+
+        self.assertEqual(report["status"], "retryable_error")
+        self.assertEqual(report["repair_scope"], "planning")
+        self.assertTrue(
+            any(issue["rule_id"] == "plan.unresolved_items.must_be_resolved" for issue in report["issues"])
+        )
+
     def test_verifier_projects_structured_payload_for_assembly_unresolved_item(self):
         graph_ir = {
             "graph_ir_version": "2.0",

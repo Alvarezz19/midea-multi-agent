@@ -116,6 +116,24 @@ def make_execution_plan():
     }
 
 
+def make_bundle():
+    context = make_retrieval_context()
+    return {
+        "atomic_modules": list(context["relevant_nodes"]),
+        "subflow_templates": [],
+        "system_patterns": [],
+        "style_guides": [],
+        "metadata": {
+            "query_text": context["query"],
+            "retrieved_atomic_count": context["metadata"]["retrieved_count"],
+            "avg_atomic_score": context["metadata"]["avg_confidence_score"],
+            "query_variants": [context["query"]],
+            "intent": "general_query",
+            "detected_operations": [],
+        },
+    }
+
+
 class WorkflowPhase1Tests(unittest.TestCase):
     def setUp(self):
         self.retrieval_context = make_retrieval_context()
@@ -369,8 +387,6 @@ class WorkflowPhase1Tests(unittest.TestCase):
 
         self.assertEqual(report["status"], "retryable_error")
         rule_ids = {issue["rule_id"] for issue in report["issues"]}
-        self.assertIn("plan.generation.must_succeed", rule_ids)
-        self.assertIn("plan.nodes.must_not_be_empty", rule_ids)
         self.assertIn("ir.node_instances.must_not_be_empty", rule_ids)
         self.assertIn("compile.nodes.must_not_be_empty", rule_ids)
 
@@ -414,11 +430,6 @@ class WorkflowPhase1Tests(unittest.TestCase):
             "signal_registry": [],
             "layout_hints": {},
             "unresolved_items": [],
-            "source_execution_plan": {
-                "goal": "wire port check",
-                "nodes": [{"logic_id": "src"}, {"logic_id": "dst"}],
-                "connections": [],
-            },
         }
         flow_objects = [
             {"id": "tab1", "type": "tab", "label": "Control", "disabled": False, "info": ""},
@@ -475,15 +486,31 @@ class WorkflowPhase1Tests(unittest.TestCase):
 
         class StubRetrieval:
             def __call__(self, state):
-                state["retrieval_context"] = make_retrieval_context()
-                state["retrieval_bundle"] = {}
+                state["retrieval_bundle"] = make_bundle()
                 state["current_step"] = "retrieval_completed"
                 return state
 
         class StubArchitecturePlanning:
             def __call__(self, state):
                 state["decomposition_result"] = {"pages": [], "subsystem_descriptors": [], "shared_signal_registry": [], "template_needs": [], "planning_order": []}
-                state["architecture_plan"] = {"goal": "sum two constants", "pages": [], "subsystem_slots": [], "global_constraints": [], "naming_strategy": {}, "layout_strategy": {}, "pattern_bindings": [], "warnings": []}
+                state["architecture_plan"] = {
+                    "goal": "sum two constants",
+                    "pages": [],
+                    "subsystem_slots": [
+                        {
+                            "subsystem_id": "compat_subsystem",
+                            "page_id": "page_control",
+                            "preferred_implementation": "atomic_assembly",
+                            "preferred_template_ids": [],
+                            "fallback_mode": "atomic_assembly",
+                        }
+                    ],
+                    "global_constraints": [],
+                    "naming_strategy": {},
+                    "layout_strategy": {},
+                    "pattern_bindings": [],
+                    "warnings": [],
+                }
                 state["current_step"] = "architecture_planned"
                 return state
 
@@ -495,7 +522,19 @@ class WorkflowPhase1Tests(unittest.TestCase):
                         "page_id": "page_control",
                         "implementation_mode": "atomic_assembly",
                         "template_binding": {},
-                        "node_instances": [],
+                        "node_instances": [
+                            {
+                                "logic_id": "const_a",
+                                "module_type": "constInput",
+                                "page_id": "page_control",
+                                "template_id": None,
+                                "parameters": {"fixedValue": 1, "name": "A"},
+                                "input_count": 0,
+                                "output_count": 1,
+                                "position": {"x": 100, "y": 100},
+                                "reasoning": "compat stub upgraded to native-minimal contract",
+                            }
+                        ],
                         "edges": [],
                         "imported_signals": [],
                         "exported_signals": [],
@@ -509,8 +548,7 @@ class WorkflowPhase1Tests(unittest.TestCase):
 
         class StubGlobalAssembly:
             def __call__(self, state):
-                state["execution_plan"] = make_execution_plan()
-                state["assembled_graph_ir"] = AssemblyAgent().assemble(make_execution_plan(), make_retrieval_context())
+                state["assembled_graph_ir"] = AssemblyAgent().assemble(make_execution_plan(), make_bundle())
                 state["current_step"] = "global_assembly_completed"
                 return state
 
@@ -526,7 +564,9 @@ class WorkflowPhase1Tests(unittest.TestCase):
         self.assertIn("verification_report", result)
         self.assertEqual(result["verification_report"]["status"], "passed")
         self.assertEqual(result["final_output"]["verification_report"]["status"], "passed")
-        self.assertEqual(result["generated_code"], result["compiled_artifact"]["json_text"])
+        self.assertNotIn("execution_plan", result)
+        self.assertNotIn("generated_code", result)
+        self.assertTrue(result["compiled_artifact"]["json_text"])
 
     def test_workflow_trace_saves_trace_when_node_raises(self):
         class StubAnalysis:

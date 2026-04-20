@@ -208,7 +208,6 @@ class AssemblyAgent:
             signal_registry=signals,
             layout_hints={"page_positions": coords_map},
             unresolved_items=unresolved_items,
-            source_execution_plan=execution_plan,
         )
 
         if config.DEBUG:

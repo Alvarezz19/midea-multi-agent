@@ -66,14 +66,7 @@ class WorkflowState(TypedDict):
     verification_report: dict
     final_output: dict
 
-    # Compat fields
-    retrieval_context: dict
-    execution_plan: dict
-    generated_code: str
-
     # Historical / reserved fields
-    execution_result: dict
-    validation_result: dict
     debug_history: list
     repair_context: RepairContext
     repair_history: list[RepairHistoryEntry]
@@ -94,7 +87,6 @@ class WorkflowState(TypedDict):
     enable_hitl_clarification: bool
     enable_hitl_architecture_review: bool
     current_step: str
-    next_step: str
 
 
 PHASE3_NODE_ORDER = [
@@ -352,13 +344,7 @@ def build_initial_state(
         "compiled_artifact": {},
         "verification_report": {},
         "final_output": {},
-        # Compat fields
-        "retrieval_context": {},
-        "execution_plan": {},
-        "generated_code": "",
         # Historical / reserved fields
-        "execution_result": {},
-        "validation_result": {},
         "debug_history": [],
         "repair_context": {},
         "repair_history": [],
@@ -379,7 +365,6 @@ def build_initial_state(
         "enable_hitl_clarification": bool(enable_hitl_clarification),
         "enable_hitl_architecture_review": bool(enable_hitl_architecture_review),
         "current_step": "start",
-        "next_step": "",
     }
 
 
@@ -474,15 +459,6 @@ if __name__ == "__main__":
 
     result = run_workflow(test_query)
 
-    if result.get("execution_plan"):
-        plan = result["execution_plan"]
-        print(f"\n{'=' * 60}")
-        print("规划输出")
-        print("=" * 60)
-        print(f"目标: {plan.get('goal', 'N/A')}")
-        print(f"节点数: {len(plan.get('nodes', []))}")
-        print(f"连接数: {len(plan.get('connections', []))}")
-
     if result.get("assembled_graph_ir"):
         graph_ir = result["assembled_graph_ir"]
         print(f"\n{'=' * 60}")
@@ -496,6 +472,7 @@ if __name__ == "__main__":
     if result.get("compiled_artifact"):
         artifact = result["compiled_artifact"]
         report = artifact.get("compile_report", {})
+        json_code = artifact.get("json_text", "")
         print(f"\n{'=' * 60}")
         print("编译输出")
         print("=" * 60)
@@ -503,6 +480,13 @@ if __name__ == "__main__":
         print(f"页面数: {report.get('page_count', 0)}")
         print(f"子流程定义数: {report.get('subflow_count', 0)}")
         print(f"节点数: {report.get('node_count', 0)}")
+        if json_code:
+            print(f"\n{'=' * 60}")
+            print("JSON 预览")
+            print("=" * 60)
+            print(json_code[:500])
+            if len(json_code) > 500:
+                print(f"\n... (总计 {len(json_code)} 字符)")
 
     if result.get("verification_report"):
         verification = result["verification_report"]
@@ -513,15 +497,8 @@ if __name__ == "__main__":
         print(f"错误数: {len(verification.get('issues', []))}")
         print(f"警告数: {len(verification.get('warnings', []))}")
 
-    if result.get("generated_code"):
-        json_code = result["generated_code"]
-        print(f"\n{'=' * 60}")
-        print("JSON 预览")
-        print("=" * 60)
-        print(json_code[:500])
-        if len(json_code) > 500:
-            print(f"\n... (总计 {len(json_code)} 字符)")
-
+    if result.get("compiled_artifact", {}).get("json_text"):
+        json_code = result["compiled_artifact"]["json_text"]
         from utils.time_utils import generate_output_filename
 
         output_dir = "generated_flow"

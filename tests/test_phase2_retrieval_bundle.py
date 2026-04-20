@@ -1,7 +1,6 @@
 # Phase 2 retrieval bundle tests.
 
 import sys
-import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -10,15 +9,6 @@ from unittest.mock import patch
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-
-if 'agents.retrieval_agent' not in sys.modules:
-    retrieval_stub = types.ModuleType('agents.retrieval_agent')
-
-    class RetrievalAgent:
-        pass
-
-    retrieval_stub.RetrievalAgent = RetrievalAgent
-    sys.modules['agents.retrieval_agent'] = retrieval_stub
 
 import workflow
 import workflow_trace
@@ -122,6 +112,8 @@ class RetrievalBundlePhase2Tests(unittest.TestCase):
     def test_workflow_state_includes_retrieval_bundle(self):
         self.assertIn('retrieval_bundle', workflow.WorkflowState.__annotations__)
         self.assertIn('retrieval_bundle', workflow_trace.WorkflowState.__annotations__)
+        self.assertNotIn('retrieval_context', workflow.WorkflowState.__annotations__)
+        self.assertNotIn('retrieval_context', workflow_trace.WorkflowState.__annotations__)
 
     def test_workflow_run_initial_state_contains_retrieval_bundle(self):
         captured = {}
@@ -140,6 +132,7 @@ class RetrievalBundlePhase2Tests(unittest.TestCase):
 
         self.assertIn('retrieval_bundle', captured['initial_state'])
         self.assertEqual(captured['initial_state']['retrieval_bundle'], {})
+        self.assertNotIn('retrieval_context', captured['initial_state'])
         self.assertEqual(result['retrieval_bundle'], {})
 
     def test_workflow_trace_initial_state_contains_retrieval_bundle(self):
@@ -159,6 +152,7 @@ class RetrievalBundlePhase2Tests(unittest.TestCase):
 
         self.assertIn('retrieval_bundle', captured['initial_state'])
         self.assertEqual(captured['initial_state']['retrieval_bundle'], {})
+        self.assertNotIn('retrieval_context', captured['initial_state'])
         self.assertEqual(result['final_output']['workflow_trace']['trace_dir'], 'mock')
 
     def test_bundle_to_legacy_context(self):

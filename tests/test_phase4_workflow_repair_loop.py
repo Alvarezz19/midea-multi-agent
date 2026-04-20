@@ -215,7 +215,6 @@ class StubSubsystemPlanningExternal:
 class StubGlobalAssembly:
     def __call__(self, state):
         state["assembled_graph_ir"] = {"unresolved_items": []}
-        state["execution_plan"] = {"goal": "compat"}
         state["current_step"] = "global_assembly_completed"
         return state
 
@@ -238,7 +237,6 @@ class StubGlobalAssemblyExternal:
                     }
                 ]
             }
-        state["execution_plan"] = {"goal": "compat"}
         state["current_step"] = "global_assembly_completed"
         return state
 
@@ -406,7 +404,6 @@ class StubVerifierAmbiguousReject:
 class StubCoding:
     def __call__(self, state):
         state["compiled_artifact"] = {"json_text": "[]", "flow_objects": [], "compile_report": {"warnings": []}}
-        state["generated_code"] = "[]"
         state["current_step"] = "coding_completed"
         return state
 

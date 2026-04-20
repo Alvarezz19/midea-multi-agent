@@ -1,0 +1,38 @@
+flowchart TD
+    Start([Start]) --> Analysis["analysis<br/>输出: analysis_result, requirement_spec"]
+    Analysis --> Ambiguity["ambiguity_router<br/>判定是否需要前置澄清"]
+
+    Ambiguity -->|需要澄清| ClarifyReview["clarification_review<br/>生成/冻结 review_request"]
+    Ambiguity -->|无需澄清| Retrieval["retrieval<br/>输出: retrieval_bundle"]
+
+    ClarifyReview -->|pending / interrupt| ClarifyReview
+    ClarifyReview -->|answered| ClarifyApply["clarification_apply<br/>回写 requirement_spec / analysis_result"]
+    ClarifyReview -->|not_required / assumed| Retrieval
+
+    ClarifyApply -->|reject| End1([END])
+    ClarifyApply -->|continue| Retrieval
+
+    Retrieval --> ArchPlan["architecture_planning<br/>输出: decomposition_result, architecture_plan"]
+    ArchPlan --> ArchReview["architecture_review<br/>架构骨架评审"]
+
+    ArchReview -->|pending / interrupt| ArchReview
+    ArchReview -->|answered| ArchApply["architecture_feedback_apply<br/>回写需求侧约束"]
+    ArchReview -->|not_required / assumed| Subsystem["subsystem_planning<br/>输出: subsystem_plan_map"]
+
+    ArchApply -->|feedback / clarify| ArchPlan
+    ArchApply -->|approve| Subsystem
+    ArchApply -->|reject| End2([END])
+
+    Subsystem --> Assembly["global_assembly<br/>输出: assembled_graph_ir"]
+    Assembly --> Coding["coding<br/>输出: compiled_artifact"]
+    Coding --> Verify["verification<br/>输出: verification_report, final_output"]
+    Verify --> RepairRouter["repair_router<br/>按 scope 与预算裁决"]
+
+    RepairRouter -->|accept| End3([END])
+    RepairRouter -->|reject| End4([END])
+    RepairRouter -->|planning_repair / assembly_repair / compile_repair| RepairAgent["repair_agent<br/>局部修补上游对象"]
+
+    RepairAgent -->|resume subsystem_planning| Subsystem
+    RepairAgent -->|resume global_assembly| Assembly
+    RepairAgent -->|resume coding| Coding
+    RepairAgent -->|END| End5([END])

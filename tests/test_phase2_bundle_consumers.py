@@ -203,7 +203,6 @@ class Phase2BundleConsumerTests(unittest.TestCase):
         state = {
             "assembled_graph_ir": assembled,
             "retrieval_bundle": bundle,
-            "retrieval_context": {"query": "legacy", "relevant_nodes": []},
         }
 
         result = agent.__call__(state)
@@ -220,7 +219,8 @@ class Phase2BundleConsumerTests(unittest.TestCase):
         self.assertEqual(artifact["compile_report"]["node_count"], 1)
         self.assertEqual(artifact["id_map"], artifact_recompiled["id_map"])
         self.assertEqual(artifact["json_text"], artifact_recompiled["json_text"])
-        self.assertIn('"type": "subflow"', result["generated_code"])
+        self.assertIn('"type": "subflow"', artifact["json_text"])
+        self.assertNotIn("generated_code", result)
 
 
 if __name__ == "__main__":

@@ -311,10 +311,7 @@ class RetrievalAgentPhase2ChromaTests(unittest.TestCase):
             result["retrieval_bundle"]["system_patterns"][0]["pattern_id"],
             "ahu_control_pattern_v1",
         )
-        self.assertEqual(
-            [node["module_type"] for node in result["retrieval_context"]["relevant_nodes"]],
-            ["constInput"],
-        )
+        self.assertNotIn("retrieval_context", result)
 
     def test_safe_console_text_replaces_unsupported_characters_for_gbk(self) -> None:
         class FakeStream:

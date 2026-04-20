@@ -11,6 +11,7 @@ __all__ = [
     "coding_agent",
     "debugging_agent",
     "global_assembler",
+    "legacy",
     "planning_agent",
     "retrieval_agent",
     "subsystem_planner",

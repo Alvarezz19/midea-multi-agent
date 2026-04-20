@@ -90,7 +90,6 @@ class AssembledGraphIR(BaseModel):
     signal_registry: List[SignalIR] = Field(default_factory=list)
     layout_hints: Dict[str, Any] = Field(default_factory=dict)
     unresolved_items: List[Dict[str, Any]] = Field(default_factory=list)
-    source_execution_plan: Dict[str, Any] = Field(default_factory=dict)
 
 
 class CompileReport(BaseModel):

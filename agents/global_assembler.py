@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Tuple
 
 import config
 from utils.graph_ir import AssembledGraphIR, EdgeIR, NodeInstanceIR, PageIR, SignalIR
-from utils.phase3_adapters import build_legacy_execution_plan, normalize_signal_name
+from utils.phase3_adapters import normalize_signal_name
 from utils.signal_semantics import canonicalize_signal_name
 from .assembly_agent import AssemblyAgent
 from .coding_utils import resolve_input_count, resolve_output_count
@@ -624,7 +624,6 @@ class GlobalAssembler(AssemblyAgent):
             )
             occupied_inputs[target_instance].add(target_port)
 
-        legacy_execution_plan = build_legacy_execution_plan(requirement_spec, architecture_plan, subsystem_plan_map)
         assembled = AssembledGraphIR(
             goal=str(architecture_plan.get("goal", "") or requirement_spec.get("scenario_summary", "")),
             pages=pages,
@@ -639,7 +638,6 @@ class GlobalAssembler(AssemblyAgent):
                 "subsystem_positions": subsystem_positions,
             },
             unresolved_items=unresolved_items,
-            source_execution_plan=legacy_execution_plan,
         )
 
         if config.DEBUG:
@@ -652,13 +650,11 @@ class GlobalAssembler(AssemblyAgent):
         requirement_spec = state.get("requirement_spec", {}) or {}
         architecture_plan = state.get("architecture_plan", {}) or {}
         subsystem_plan_map = state.get("subsystem_plan_map", {}) or {}
-        bundle_or_context = state.get("retrieval_bundle") or state.get("retrieval_context", {})
-        legacy_execution_plan = build_legacy_execution_plan(requirement_spec, architecture_plan, subsystem_plan_map)
-        state["execution_plan"] = legacy_execution_plan
+        retrieval_bundle = state.get("retrieval_bundle", {}) or {}
         state["assembled_graph_ir"] = self.assemble(
             architecture_plan=architecture_plan,
             subsystem_plan_map=subsystem_plan_map,
-            bundle_or_context=bundle_or_context,
+            bundle_or_context=retrieval_bundle,
             requirement_spec=requirement_spec,
         )
         state["current_step"] = "global_assembly_completed"
