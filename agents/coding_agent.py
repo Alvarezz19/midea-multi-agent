@@ -1,169 +1,177 @@
 """
 编码智能体 (Coding Agent)
-职责：将规划方案转化为可执行的 Python 代码（基于 Kong SDK）
+职责：将规划方案转化为平台可执行的 JSON 配置文件
 """
 from typing import Dict, List, Any
-from langchain.chat_models import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
+import json
+import copy
 import config
+from .coding_utils import (
+    generate_short_uuid,
+    topological_layout,
+    build_reverse_connections,
+    fill_template,
+    resolve_input_count
+)
 
 
 class CodingAgent:
-    """编码智能体 - 核心智能体"""
+    """编码智能体 - 将规划图转换为平台 JSON 配置"""
     
     def __init__(self):
-        """初始化 LLM"""
-        # TODO: 实现 LLM 初始化
-        # self.llm = ChatOpenAI(
-        #     model=config.MODEL_NAME,
-        #     openai_api_key=config.OPENAI_API_KEY,
-        #     openai_api_base=config.OPENAI_BASE_URL,
-        #     temperature=0  # 零温度保证代码生成的确定性
-        # )
-        
-        self.coding_prompt = self._create_coding_prompt()
+        """初始化编码智能体"""
+        if config.DEBUG:
+            print(f"✅ 编码智能体初始化完成")
     
-    def _create_coding_prompt(self) -> ChatPromptTemplate:
-        """创建编码提示词模板"""
-        template = """你是一位 Python 代码生成专家。请根据规划方案生成基于 Kong SDK 的代码。
-
-执行计划：
-{execution_plan}
-
-Kong SDK API 文档：
-```python
-# 1. 创建流程构建器
-flow = FlowBuilder()
-
-# 2. 添加节点
-node = flow.add_node(
-    node_type="<节点类型>",  # 如 'swInput', 'compare', 'switch'
-    name="<节点名称>",
-    **params  # 其他参数
-)
-
-# 3. 建立连接
-source_node.connect(target_node, out_port=0, in_port=0)
-
-# 4. 导出 JSON
-json_output = flow.export_json()
-```
-
-严格约束：
-1. ⚠️ 必须使用 Kong SDK，严禁臆造 API
-2. ⚠️ 所有节点类型必须在允许列表中：{allowed_node_types}
-3. ⚠️ 代码必须可执行，导入语句完整
-4. ⚠️ 使用有意义的变量名
-
-输出格式：
-```python
-from kong_sdk import FlowBuilder
-
-def generate_flow():
-    \"\"\"<功能描述>\"\"\"
-    flow = FlowBuilder()
-    
-    # 步骤1：<描述>
-    node1 = flow.add_node(...)
-    
-    # 步骤2：<描述>
-    node2 = flow.add_node(...)
-    
-    # 建立连接
-    node1.connect(node2)
-    
-    return flow.export_json()
-
-# 生成组态
-if __name__ == "__main__":
-    result = generate_flow()
-    print(result)
-```
-
-请开始生成代码：
-"""
-        return ChatPromptTemplate.from_template(template)
-    
-    def generate_code(self, plan: Dict[str, Any]) -> str:
+    def generate_json(self, plan_ir: Dict[str, Any], retrieval_context: Dict[str, Any]) -> str:
         """
-        生成 Python 代码
+        生成最终的 JSON 配置文件
         
         Args:
-            plan: 执行计划
+            plan_ir: 规划智能体输出的 PlanIR 字典
+            retrieval_context: 检索智能体返回的完整上下文（包含 template_json）
             
         Returns:
-            Python 代码字符串
+            JSON 字符串
         """
-        # TODO: 调用 LLM 生成代码
-        # allowed_types = list(NODE_TYPES.keys())
-        # messages = self.coding_prompt.format_messages(
-        #     execution_plan=str(plan),
-        #     allowed_node_types=str(allowed_types)
-        # )
-        # response = self.llm(messages)
-        # code = self._extract_code_block(response.content)
+        if config.DEBUG:
+            print(f"\n🔧 编码智能体开始工作...")
+            print(f"   目标: {plan_ir.get('goal', 'N/A')}")
+            print(f"   节点数: {len(plan_ir.get('nodes', []))}")
         
-        # 示例代码（硬编码）
-        code = '''from kong_sdk import FlowBuilder
-
-def generate_flow():
-    """夏季主机初始开启台数计算逻辑"""
-    flow = FlowBuilder()
-    
-    # 步骤1：读取湿球温度
-    temp_sensor = flow.add_node(
-        "swInput", 
-        "湿球温度",
-        address="AI_WetBulb_Temp"
-    )
-    
-    # 步骤2：定义温度阈值
-    threshold_23 = flow.add_node("constant", "阈值_23C", value=23.0)
-    threshold_25 = flow.add_node("constant", "阈值_25C", value=25.0)
-    threshold_27 = flow.add_node("constant", "阈值_27C", value=27.0)
-    threshold_29 = flow.add_node("constant", "阈值_29C", value=29.0)
-    threshold_31 = flow.add_node("constant", "阈值_31C", value=31.0)
-    
-    # 步骤3：温度比较
-    compare_1 = flow.add_node("compare", "比较_23", operator=">")
-    compare_2 = flow.add_node("compare", "比较_25", operator=">")
-    compare_3 = flow.add_node("compare", "比较_27", operator=">")
-    compare_4 = flow.add_node("compare", "比较_29", operator=">")
-    compare_5 = flow.add_node("compare", "比较_31", operator=">")
-    
-    # 建立比较连接
-    temp_sensor.connect(compare_1, out_port=0, in_port=0)
-    threshold_23.connect(compare_1, out_port=0, in_port=1)
-    
-    temp_sensor.connect(compare_2, out_port=0, in_port=0)
-    threshold_25.connect(compare_2, out_port=0, in_port=1)
-    
-    # TODO: 完整连接其他比较节点
-    
-    # 步骤4：累加结果
-    accumulator = flow.add_node("accumulator", "开机台数")
-    compare_1.connect(accumulator)
-    compare_2.connect(accumulator)
-    # TODO: 连接其他比较结果
-    
-    # 步骤5：手自动切换
-    switch = flow.add_node("switch", "手自动切换")
-    accumulator.connect(switch, out_port=0, in_port=0)
-    
-    return flow.export_json()
-
-if __name__ == "__main__":
-    import json
-    result = generate_flow()
-    print(json.dumps(result, indent=2, ensure_ascii=False))
-'''
-        return code
-    
-    def _extract_code_block(self, text: str) -> str:
-        """从 Markdown 代码块中提取代码"""
-        # TODO: 实现代码提取逻辑
-        # 处理 ```python ... ``` 格式
-        pass
+        try:
+            # --- 步骤1: 建立模块索引 ---
+            relevant_nodes = retrieval_context.get('relevant_nodes', [])
+            doc_map = {node['module_type']: node for node in relevant_nodes}
+            
+            if config.DEBUG:
+                print(f"\n   📚 可用模块类型: {list(doc_map.keys())}")
+            
+            # --- 步骤2: ID 实例化 ---
+            id_map = {}
+            nodes = plan_ir.get('nodes', [])
+            for node in nodes:
+                id_map[node['logic_id']] = generate_short_uuid()
+            
+            if config.DEBUG:
+                print(f"\n   🔑 ID 映射:")
+                for logic_id, real_id in list(id_map.items())[:3]:
+                    print(f"      {logic_id} -> {real_id}")
+                if len(id_map) > 3:
+                    print(f"      ... 共 {len(id_map)} 个")
+            
+            # --- 步骤3: 自动布局 ---
+            connections = plan_ir.get('connections', [])
+            coords_map = topological_layout(nodes, connections)
+            
+            if config.DEBUG:
+                print(f"\n   📐 布局完成: {len(coords_map)} 个节点定位")
+            
+            # --- 步骤4: 反向连线索引 ---
+            # 平台的 wires 格式是：wires[输入端口索引] = [{id: 上游节点ID, port: 上游输出端口}]
+            reverse_connections = build_reverse_connections(connections, id_map)
+            
+            if config.DEBUG:
+                print(f"\n   🔗 连接关系: {len(connections)} 条")
+            
+            # --- 步骤5: 生成节点 JSON ---
+            final_modules = []
+            
+            # 首先添加 Tab 页（容器）
+            flow_id = generate_short_uuid()
+            final_modules.append({
+                "id": flow_id,
+                "type": "tab",
+                "label": "自动生成流程",
+                "disabled": False,
+                "info": ""
+            })
+            
+            # 逐个生成节点
+            for node in nodes:
+                logic_id = node['logic_id']
+                module_type = node['module_type']
+                
+                # A. 获取模板
+                if module_type not in doc_map:
+                    if config.DEBUG:
+                        print(f"   ⚠️  警告: 缺少模块 {module_type} 的定义，跳过")
+                    continue
+                
+                module_doc = doc_map[module_type]
+                template_raw = module_doc.get('template_json', {})
+                
+                # 处理 template_json 可能是列表的情况
+                if isinstance(template_raw, list):
+                    if len(template_raw) > 0:
+                        template = copy.deepcopy(template_raw[0])
+                    else:
+                        template = {}
+                else:
+                    template = copy.deepcopy(template_raw)
+                
+                # B. 确定输入端口数量
+                planned_params = node.get('parameters', {})
+                template_inputs = template.get('inputs', 0)
+                input_count = resolve_input_count(
+                    template_inputs, planned_params, module_doc
+                )
+                
+                # C. 构建 wires 数组（基于输入端口）
+                # wires[输入端口索引] = [{id: 上游节点ID, port: 上游输出端口}]
+                wires = []
+                node_incoming = reverse_connections.get(logic_id, {})
+                
+                for i in range(input_count):
+                    if i in node_incoming:
+                        # 存在连接
+                        conn_info = node_incoming[i]
+                        wires.append([conn_info])  # 注意：数组的数组
+                    else:
+                        # 悬空端口
+                        wires.append([])
+                
+                # D. 填充模板
+                real_id = id_map[logic_id]
+                coords = coords_map.get(logic_id, {'x': 0, 'y': 0})
+                module_name = module_doc.get('name', module_type)  # 获取模块原始名称
+                
+                filled_node = fill_template(
+                    template=template,
+                    node=node,
+                    real_id=real_id,
+                    flow_id=flow_id,
+                    coords=coords,
+                    wires=wires,
+                    module_name=module_name
+                )
+                
+                final_modules.append(filled_node)
+            
+            # --- 步骤6: 序列化 ---
+            json_output = json.dumps(final_modules, indent=2, ensure_ascii=False)
+            
+            if config.DEBUG:
+                print(f"\n✅ JSON 生成完成:")
+                print(f"   总节点数: {len(final_modules)} (含 Tab 页)")
+                print(f"   文件大小: {len(json_output)} 字符")
+            
+            return json_output
+        
+        except Exception as e:
+            if config.DEBUG:
+                print(f"\n❌ 编码失败: {e}")
+                import traceback
+                traceback.print_exc()
+            
+            # 返回空配置
+            return json.dumps([{
+                "id": generate_short_uuid(),
+                "type": "tab",
+                "label": "生成失败",
+                "disabled": True,
+                "info": str(e)
+            }], indent=2, ensure_ascii=False)
     
     def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -175,14 +183,14 @@ if __name__ == "__main__":
         Returns:
             更新后的状态
         """
-        plan = state.get("execution_plan", {})
+        execution_plan = state.get("execution_plan", {})
+        retrieval_context = state.get("retrieval_context", {})
         
-        # 生成代码
-        code = self.generate_code(plan)
+        # 生成 JSON 配置
+        json_output = self.generate_json(execution_plan, retrieval_context)
         
         # 更新状态
-        state["generated_code"] = code
+        state["generated_code"] = json_output  # 这里存储的是 JSON 字符串
         state["current_step"] = "coding_completed"
-        state["retry_count"] = state.get("retry_count", 0)  # 初始化重试计数
         
         return state

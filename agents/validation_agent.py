@@ -3,8 +3,8 @@
 职责：双重质检 - 形式化验证 + 语义验证
 """
 from typing import Dict, List, Any, Tuple
-from langchain.chat_models import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
 import json
 import config
 

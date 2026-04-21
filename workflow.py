@@ -2,22 +2,23 @@
 LangGraph 工作流编排
 定义 6 个智能体的协作流程（DAG + 条件路由）
 """
-from typing import TypedDict, Literal
+from typing import TypedDict
 from langgraph.graph import StateGraph, END
+from agents.analysis_agent import AnalysisAgent
 from agents.retrieval_agent import RetrievalAgent
 from agents.planning_agent import PlanningAgent
 from agents.coding_agent import CodingAgent
-from agents.validation_agent import ValidationAgent
-from agents.debugging_agent import DebuggingAgent
-from tools.execution_tool import ExecutionTool
-import config
+from langsmith import traceable
+import os
 
+os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
 # 定义工作流状态
 class WorkflowState(TypedDict):
     """工作流全局状态"""
     user_query: str  # 用户输入的需求
-    retrieval_context: dict  # 检索到的上下文
+    analysis_result: dict  # 分析智能体输出
+    retrieval_context: dict  # 检索到的完整上下文（原始数据）
     execution_plan: dict  # 执行计划
     generated_code: str  # 生成的 Python 代码
     execution_result: dict  # 代码执行结果
@@ -29,6 +30,7 @@ class WorkflowState(TypedDict):
     final_output: dict  # 最终输出
 
 
+@traceable(name="create_workflow", tags=["workflow", "langgraph"])
 def create_workflow() -> StateGraph:
     """
     创建 LangGraph 工作流
@@ -37,94 +39,32 @@ def create_workflow() -> StateGraph:
         配置好的状态图
     """
     # 初始化所有智能体
+    analysis_agent = AnalysisAgent()
     retrieval_agent = RetrievalAgent()
-    planning_agent = PlanningAgent()
-    coding_agent = CodingAgent()
-    validation_agent = ValidationAgent()
-    debugging_agent = DebuggingAgent()
-    execution_tool = ExecutionTool()
+    planning_agent = PlanningAgent()  # 启用规划智能体
+    coding_agent = CodingAgent()      # 启用编码智能体
     
     # 创建状态图
     workflow = StateGraph(WorkflowState)
     
     # ========== 添加节点 ==========
+    workflow.add_node("analysis", analysis_agent)
     workflow.add_node("retrieval", retrieval_agent)
     workflow.add_node("planning", planning_agent)
     workflow.add_node("coding", coding_agent)
-    workflow.add_node("execution", execution_tool)
-    workflow.add_node("validation", validation_agent)
-    workflow.add_node("debugging", debugging_agent)
     
     # ========== 定义边缘（流程）==========
-    
-    # 1. 开始 -> 检索
-    workflow.set_entry_point("retrieval")
-    
-    # 2. 检索 -> 规划（无条件）
-    workflow.add_edge("retrieval", "planning")
-    
-    # 3. 规划 -> 编码（无条件）
-    workflow.add_edge("planning", "coding")
-    
-    # 4. 编码 -> 执行（无条件）
-    workflow.add_edge("coding", "execution")
-    
-    # 5. 执行 -> 验证 OR 调试（条件边缘）
-    def route_after_execution(state: WorkflowState) -> Literal["validation", "debugging"]:
-        """根据执行结果决定下一步"""
-        if state["execution_result"]["success"]:
-            return "validation"
-        else:
-            return "debugging"
-    
-    workflow.add_conditional_edges(
-        "execution",
-        route_after_execution,
-        {
-            "validation": "validation",
-            "debugging": "debugging"
-        }
-    )
-    
-    # 6. 验证 -> 结束 OR 调试（条件边缘）
-    def route_after_validation(state: WorkflowState) -> Literal["end", "debugging"]:
-        """根据验证结果决定是否结束"""
-        if state["validation_result"]["passed"]:
-            return "end"
-        else:
-            return "debugging"
-    
-    workflow.add_conditional_edges(
-        "validation",
-        route_after_validation,
-        {
-            "end": END,
-            "debugging": "debugging"
-        }
-    )
-    
-    # 7. 调试 -> 执行 OR 结束（条件边缘，形成闭环）
-    def route_after_debugging(state: WorkflowState) -> Literal["execution", "end"]:
-        """根据重试次数决定是否继续"""
-        if state["retry_count"] >= config.MAX_RETRY_TIMES:
-            # 超过最大重试次数，强制结束
-            return "end"
-        else:
-            # 重新执行修正后的代码
-            return "execution"
-    
-    workflow.add_conditional_edges(
-        "debugging",
-        route_after_debugging,
-        {
-            "execution": "execution",
-            "end": END
-        }
-    )
+
+    workflow.set_entry_point("analysis")
+    workflow.add_edge("analysis", "retrieval")       # 分析 -> 检索
+    workflow.add_edge("retrieval", "planning")        # 检索 -> 规划
+    workflow.add_edge("planning", "coding")           # 规划 -> 编码
+    workflow.add_edge("coding", END)                  # 编码 -> 结束（临时）
     
     return workflow
 
 
+@traceable(name="run_workflow", tags=["workflow", "langgraph"])
 def run_workflow(user_query: str) -> dict:
     """
     运行完整工作流
@@ -139,11 +79,12 @@ def run_workflow(user_query: str) -> dict:
     workflow = create_workflow()
     
     # TODO: 编译图
-    # app = workflow.compile()
+    app = workflow.compile()
     
     # 初始化状态
     initial_state = {
         "user_query": user_query,
+        "analysis_result": {},
         "retrieval_context": {},
         "execution_plan": {},
         "generated_code": "",
@@ -157,94 +98,143 @@ def run_workflow(user_query: str) -> dict:
     }
     
     # TODO: 执行工作流
-    # result = app.invoke(initial_state)
-    
-    # 示例返回（模拟执行）
-    result = {
-        "success": True,
-        "final_output": {
-            "version": "1.0",
-            "nodes": [],
-            "wires": []
-        },
-        "metadata": {
-            "total_steps": 5,
-            "retry_count": 0,
-            "execution_time": "2.3s"
-        }
+    invoke_config = {
+        "run_name": "MideaWorkflow",
+        "tags": ["workflow", "langgraph"],
+        "metadata": {"user_query": user_query},
     }
-    
+
+    result = app.invoke(initial_state, config=invoke_config)
+
     return result
 
-
-# 可视化工具（可选）
-def visualize_workflow():
-    """
-    生成工作流的可视化图
-    
-    TODO: 使用 graphviz 或 mermaid 生成流程图
-    返回 Mermaid 格式的字符串
-    """
-    mermaid_graph = """
-graph TD
-    Start([开始]) --> Retrieval[检索智能体]
-    Retrieval --> Planning[规划智能体]
-    Planning --> Coding[编码智能体]
-    Coding --> Execution[执行工具]
-    
-    Execution -->|成功| Validation[验证智能体]
-    Execution -->|失败| Debugging[调试智能体]
-    
-    Validation -->|通过| End([结束])
-    Validation -->|未通过| Debugging
-    
-    Debugging -->|重试次数<3| Execution
-    Debugging -->|重试次数>=3| End
-    
-    style Start fill:#90EE90
-    style End fill:#FFB6C1
-    style Retrieval fill:#87CEEB
-    style Planning fill:#87CEEB
-    style Coding fill:#FFD700
-    style Execution fill:#DDA0DD
-    style Validation fill:#F0E68C
-    style Debugging fill:#FFA07A
-"""
-    return mermaid_graph
 
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("KONG CUBE 智能组态生成系统 - LangGraph 工作流")
+    # 测试完整工作流
+    print("\n\n测试完整工作流调用:")
     print("=" * 60)
     
-    # 测试运行
-    test_query = "计算夏季主机初始开启数量，需要手自动切换功能"
-    
+    test_query = "生成一个程序，接收一个输入，输入5v的时候，输出1，输入3v的时候输出2，输入10v的时候输出0"
     print(f"\n用户需求: {test_query}\n")
     
-    # TODO: 取消注释以实际运行
-    # result = run_workflow(test_query)
-    # print(f"生成结果: {result}")
+    result = run_workflow(test_query)
+
+    # 显示分析结果
+    if result.get("analysis_result"):
+        analysis = result["analysis_result"]
+        retrieval_plan = analysis.get("retrieval_plan", {})
+        scenario_analysis = analysis.get("scenario_analysis", {})
+
+        print(f"\n\n{'=' * 60}")
+        print("🧠 分析智能体输出:")
+        print("=" * 60)
+
+        summary = scenario_analysis.get("summary", "N/A")
+        print(f"\n业务摘要: {summary}")
+
+        key_fields = [
+            ("business_goal", "业务目标"),
+            ("system_type", "系统类型"),
+            ("equipment_object", "设备对象"),
+            ("actuator", "执行器"),
+            ("controlled_variable", "被控量"),
+            ("feedback_variable", "反馈量"),
+            ("setpoint_variable", "设定值"),
+            ("output_signal", "目标输出"),
+            ("control_strategy", "控制策略"),
+        ]
+        for key, label in key_fields:
+            value = scenario_analysis.get(key)
+            if value:
+                print(f"  - {label}: {value}")
+
+        if scenario_analysis.get("ambiguities"):
+            print(f"  - 模糊点: {scenario_analysis['ambiguities']}")
+        if scenario_analysis.get("assumptions"):
+            print(f"  - 假设: {scenario_analysis['assumptions']}")
+        if "confidence" in scenario_analysis:
+            print(f"  - 置信度: {scenario_analysis.get('confidence', 0):.2f}")
+
+        print(f"\n检索计划:")
+        print(f"  - intent: {retrieval_plan.get('intent', 'N/A')}")
+        print(f"  - category_l1: {retrieval_plan.get('category_l1', '') or '空'}")
+        print(f"  - detected_operations: {retrieval_plan.get('detected_operations', [])}")
+        print(f"  - keywords: {retrieval_plan.get('keywords', [])}")
+        queries = retrieval_plan.get("queries", [])
+        if queries:
+            print(f"  - queries ({len(queries)} 条):")
+            for i, query in enumerate(queries, 1):
+                print(f"    [{i}] {query}")
     
-    print("\n工作流结构（Mermaid）:")
-    print(visualize_workflow())
+    # 显示原始检索结果
+    if result.get("retrieval_context"):
+        ctx = result["retrieval_context"]
+        print(f"\n📊 检索结果摘要:")
+        print(f"  - 查询: {ctx['query']}")
+        print(f"  - 找到模块数: {ctx['metadata']['retrieved_count']}")
+        print(f"  - 平均置信度: {ctx['metadata']['avg_confidence_score']:.3f}")
+        
+        if ctx['relevant_nodes']:
+            print(f"\n  最相关的模块:")
+            for node in ctx['relevant_nodes'][:3]:
+                print(f"    • {node['name']} ({node['module_type']}) - {node['similarity_score']:.3f}")
     
-    print("\n注意: 完整运行需要：")
-    print("1. 配置 .env 文件中的 API 密钥")
-    print("2. 安装所有依赖: pip install -r requirements.txt")
-    print("3. 初始化向量数据库: python -m tools.init_vectordb")
+    # 显示规划结果
+    if result.get("execution_plan"):
+        plan = result["execution_plan"]
+        print(f"\n\n{'=' * 60}")
+        print("🎯 规划智能体输出:")
+        print("=" * 60)
+        print(f"\n目标: {plan.get('goal', 'N/A')}")
+        
+        nodes = plan.get('nodes', [])
+        if nodes:
+            print(f"\n节点列表 ({len(nodes)} 个):")
+            for i, node in enumerate(nodes, 1):
+                print(f"\n  [{i}] {node.get('logic_id')} ({node.get('module_type')})")
+                print(f"      理由: {node.get('reasoning', 'N/A')}")
+                if node.get('parameters'):
+                    print(f"      参数: {node['parameters']}")
+        
+        connections = plan.get('connections', [])
+        if connections:
+            print(f"\n连接关系 ({len(connections)} 条):")
+            for conn in connections:
+                print(f"  {conn['from_node']}[{conn['from_port_index']}] -> {conn['to_node']}[{conn['to_port_index']}]")
     
-    # 绘制工作流程图
-    print("\n正在生成工作流程图...")
-    try:
-        workflow = create_workflow()
-        app = workflow.compile()  # 必须先编译
-        png_data = app.get_graph().draw_mermaid_png()
-        with open("workflow_graph2.png", 'wb') as f:
-            f.write(png_data)
-        print("✅ 流程图已保存为 workflow_graph.png")
-    except Exception as e:
-        print(f"⚠️  保存图像失败: {e}")
-        print("提示: 可能需要安装 pygraphviz 或使用在线 Mermaid 渲染器") 
+    # 显示编码结果
+    if result.get("generated_code"):
+        print(f"\n\n{'=' * 60}")
+        print("🔧 编码智能体输出:")
+        print("=" * 60)
+        
+        json_code = result["generated_code"]
+        print(f"\nJSON 文件预览（前 500 字符）:")
+        print(json_code[:500])
+        if len(json_code) > 500:
+            print(f"\n... (总计 {len(json_code)} 字符)")
+        
+        # 保存到文件
+        import os
+        from utils.time_utils import generate_output_filename
+        
+        # 创建输出目录
+        output_dir = "generated_flow"
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # 生成带时间戳的文件名
+        output_filename = generate_output_filename(prefix="模块", ext="json")
+        output_file = os.path.join(output_dir, output_filename)
+        
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(json_code)
+        
+        abs_path = os.path.abspath(output_file)
+        print(f"\n✅ JSON 已保存到: {abs_path}")
+
+    print("\n" + "=" * 60)
+    print("测试完成！")
+    print("=" * 60) 
 

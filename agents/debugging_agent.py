@@ -3,8 +3,8 @@
 职责：故障修复，分析错误并生成修正代码
 """
 from typing import Dict, List, Any
-from langchain.chat_models import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
 import config
 
 

@@ -1,7 +1,18 @@
 langchain>=0.1.0
+langchain-openai>=0.0.5
 langgraph>=0.0.40
 chromadb>=0.4.0
 openai>=1.0.0
 streamlit>=1.30.0
 pydantic>=2.0.0
 python-dotenv>=1.0.0
+langsmith>=0.1.0
+
+# Embedding 模型支持
+sentence-transformers>=2.2.0
+torch>=2.0.0
+transformers>=4.30.0
+
+# 可选：加速 BGE 模型推理
+# faiss-cpu>=1.7.0  # CPU 版本
+# faiss-gpu>=1.7.0  # GPU 版本（需要 CUDA）
