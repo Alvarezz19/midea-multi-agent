@@ -2,7 +2,7 @@
 
 基于 LangGraph 的多智能体工作流，用于把自然语言需求转换为 KONG CUBE 可导入的组态 JSON。
 
-> 最后核对时间：2026-04-17  
+> 最后核对时间：2026-04-21
 > 当前真实主链、状态契约与测试事实以 [工作流总结文档](工作流总结文档.md) 为准；变更时间线见 [工作流演进记录](工作流演进记录.md)。
 
 ## 当前结论
@@ -14,17 +14,29 @@
 user_query
   -> analysis
   -> ambiguity_router
-  -> (clarification_review -> clarification_apply -> retrieval) | retrieval
-  -> retrieval
+ambiguity_router
+  -> clarification_review | retrieval
+clarification_review
+  -> clarification_review | clarification_apply | retrieval
+clarification_apply
+  -> retrieval | END(reject)
+retrieval
   -> architecture_planning
+architecture_planning
   -> architecture_review
-  -> (architecture_feedback_apply -> architecture_planning) | subsystem_planning
-  -> subsystem_planning
+architecture_review
+  -> architecture_review | architecture_feedback_apply | subsystem_planning
+architecture_feedback_apply
+  -> architecture_planning(feedback/clarify) | subsystem_planning(approve) | END(reject)
+subsystem_planning
   -> global_assembly
   -> coding
   -> verification
   -> repair_router
-  -> (accept -> END) / (repair_agent -> subsystem_planning | global_assembly | coding)
+repair_router
+  -> END(accept/reject) | repair_agent
+repair_agent
+  -> subsystem_planning | global_assembly | coding | END
 ```
 
 - 当前真实主产物是 `compiled_artifact`；正式顶层状态已不再回填 `generated_code`。
@@ -73,7 +85,7 @@ conda activate midea
 python workflow_trace.py
 ```
 
-`workflow_trace.py` 与 `workflow.py` 使用同一套正式主链拓扑，只额外落盘 trace 文件，并在 `final_output.workflow_trace` 回写产物路径；当存在 review 历史时，还会补充 `review_records_json`、`approval_record_json` 与 thread/attempt 级 review 索引。
+`workflow_trace.py` 与 `workflow.py` 使用同一套正式主链拓扑，只额外落盘 trace 文件，并在 `final_output.workflow_trace` 回写产物路径；当存在 review 历史时，会补充 `review_records_json`、`approval_record_json`，而 thread/attempt 级 review 索引还要求 `thread_id` 非空。
 
 ## 关键状态字段
 
@@ -126,6 +138,8 @@ python workflow_trace.py
 - `CHROMA_PERSIST_DIR = ./outputs/chroma_db`
 - `AHU_PATTERN_LIBRARY_DIR = AHU程序/pattern_library`
 - `PHASE2_CHROMA_COLLECTION_OWNER = phase2_ahu_assets`
+
+若按 `.env.example` 初始化环境，则 `CHROMA_PERSIST_DIR` 会被覆盖为 `./chroma_db`；两者都属于当前代码支持的合法口径。
 
 ### 构建命令
 
@@ -180,7 +194,7 @@ python scripts/build_phase2_retrieval_indexes.py --output-dir AHU程序/pattern_
 
 ### 后续阶段说明
 
-- 若后续进入 HITL / `interrupt` / persistence，需要按目标 API 重新验证 LangGraph 版本，并补 checkpointer 相关依赖。
+- 当前代码已经接入 HITL / `interrupt` / persistence，且 `requirements.txt` 已声明 `langgraph-checkpoint`；若后续升级 LangGraph 或 checkpointer 相关 API，需要重新验证版本与合同测试。
 - 若后续进入 `Send` / `Command` 路由升级，应从当前已验证版本出发，不再按旧下界假设兼容。
 - 当前 `1.0.6` 只代表本仓库现有 Phase 1/2/3 主链的验证基线，不代表未来所有 LangGraph 新能力都已验过。
 
@@ -192,7 +206,13 @@ python scripts/build_phase2_retrieval_indexes.py --output-dir AHU程序/pattern_
 conda activate midea
 python -m unittest discover -s tests -p "test_phase3*.py"
 python -m unittest discover -s tests -p "test_phase2*.py"
-python -m unittest discover -s tests -p "test_phase1_workflow.py"
+python -m unittest discover -s tests -p "test_phase4*.py"
+python -m unittest discover -s tests -p "test_phase7*.py"
+python -m unittest discover -s tests -p "test_phase8*.py"
+python -m unittest tests.test_phase5_workflow_query_suite
+python -m unittest tests.test_phase6_real_query_suite_contract
+python -m unittest tests.test_phase6_retrieval_eval_contract
+python -m unittest tests.test_phase6_readiness_contract
 ```
 
 环境与依赖一致性：
@@ -200,6 +220,7 @@ python -m unittest discover -s tests -p "test_phase1_workflow.py"
 ```powershell
 conda activate midea
 python -m unittest tests.test_runtime_versions
+python -m compileall workflow.py workflow_trace.py agents utils tests scripts
 python -m pip check
 ```
 
@@ -209,6 +230,17 @@ Phase 2 正式落库烟测：
 conda activate midea
 python scripts/build_phase2_retrieval_indexes.py --output-dir outputs/test_tmp/pattern_library_phase123_rectify
 python scripts/build_phase2_retrieval_indexes.py --output-dir outputs/test_tmp/pattern_library_phase123_rectify_write --write-chroma --persist-dir outputs/test_tmp/chroma_phase123_rectify
+```
+
+工作流与评估脚本：
+
+```powershell
+conda activate midea
+python scripts/run_phase4_query_smoke.py
+python scripts/run_phase5_query_suite.py
+python scripts/run_phase6_retrieval_eval.py
+python scripts/run_phase6_real_query_suite.py
+python scripts/run_phase8_hitl_smoke.py --thread-id phase8-smoke --mode clarification --resume clarify
 ```
 
 ## 文档索引
