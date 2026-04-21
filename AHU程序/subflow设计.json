@@ -1,0 +1,375 @@
+{
+  "flowName": "热泵设备运行许可与模式设定逻辑",
+  "description": "这是一个楼宇自控或工业控制中的设备启停与模式选择逻辑，具体针对热泵 (ZP) 系统。核心逻辑包含：1. 通过一个模拟量（ZP_AM）作为通道选择的输入，决定通道输出等于通道0或通道1；2. 使用与逻辑检测设备运行状态，并将与逻辑输出给通道0；3. 模拟量（ZP_MC，代表设备的某种状态）作为通道1；4.通道选择的输出经过一个5秒延时模块再和设备某状态（ZP_F）的取反作与逻辑，与逻辑的输出作为流程的输出，代表设备是否启动。",
+  "nodes": [
+    {
+      "id": "a4918e7",
+      "type": "quote",
+      "name": "引用",
+      "function": "引用送风机运行状态信号 [AV-18][MS#37]SF_RUN"
+    },
+    {
+      "id": "1a65287",
+      "type": "quote",
+      "name": "引用",
+      "function": "引用系统运行状态信号 [AV-5][MS#2]SYS_RUN"
+    },
+    {
+      "id": "67a07e6",
+      "type": "logic",
+      "name": "逻辑运算",
+      "IType": "AND",
+      "function": "当 SF_RUN 和 SYS_RUN 同时为真时，输出为高电平"
+    },
+    {
+      "id": "66ed753",
+      "type": "delayOn",
+      "name": "延时开",
+      "parameter": "5 seconds",
+      "function": "将通道选择输出信号延迟 5 秒"
+    },
+    {
+      "id": "c6f9ace",
+      "type": "switch",
+      "name": "通道选择器",
+      "function": "基于逻辑输入在多个变量通道之间进行切换控制"
+    },
+    {
+      "id": "d1c1b96",
+      "type": "swInput",
+      "name": "变量",
+      "bacnet": "OBJECT_ANALOG_VALUE (Instance 44)",
+      "function": "用于存储或输出 ZP_AM 模拟量值"
+    },
+    {
+      "id": "80880de",
+      "type": "swInput",
+      "name": "变量",
+      "bacnet": "OBJECT_ANALOG_VALUE (Instance 45)",
+      "function": "用于存储或输出 ZP_MC 模拟量值"
+    },
+    {
+      "id": "d2b932e",
+      "type": "quote",
+      "name": "引用",
+      "function": "引用反馈信号 [AV-49][MS#45]ZP_F"
+    },
+    {
+      "id": "67da805",
+      "type": "logic",
+      "name": "逻辑运算",
+      "lType": "NOT",
+      "function": "将 ZP_F 信号取反"
+    },
+    {
+      "id": "c376fbf",
+      "type": "logic",
+      "name": "逻辑运算",
+      "IType": "AND",
+      "function": "结合通道的延时信号与反相后的信号进行与逻辑判断"
+    },
+    {
+      "id": "fd87768",
+      "type": "swInput",
+      "name": "ZP_CST",
+      "function": "最终状态变量输出或存储"
+    }
+  ],
+  "edges": [
+    { "from": "a4918e7", "to": "67a07e6", "description": "SF_RUN 输出到 一级逻辑运算(AND) 的输入端口0" },
+    { "from": "1a65287", "to": "67a07e6", "description": "SYS_RUN 输出到 一级逻辑运算(AND) 的输入端口1" },
+    { "from": "67a07e6", "to": "c6f9ace", "description": "运行条件判断结果 输出至 通道选择器输入端口1（通道0）" },
+    { "from": "d1c1b96", "to": "c6f9ace", "description": "模拟量变量ZP_AM 输出至 通道选择器输入端口0（通道选择）" },
+    { "from": "80880de", "to": "c6f9ace", "description": "模拟量变量ZP_MC 输出至 通道选择器输入端口2（通道1）" },
+    { "from": "c6f9ace", "to": "66ed753", "description": "通道选择器 输出至 延时开模块的输入端口" },
+    { "from": "d2b932e", "to": "67da805", "description": "引用信号ZP_F 输出到 取反逻辑" },
+    { "from": "67da805", "to": "c376fbf", "description": "取反后的信号 进入 二级逻辑运算(AND)" },
+    { "from": "c376fbf", "to": "fd87768", "description": "逻辑判断结果 最终赋值给 ZP_CST" }
+  ],
+  "rawJson": [
+    {
+        "id": "a4918e7",
+        "type": "quote",
+        "z": "128ce6f",
+        "inputs": 0,
+        "outputs": 1,
+        "name": "引用",
+        "labelName": "[91c2db3:0] [AV-18][MS#37]SF_RUN",
+        "labelNameOld": "[91c2db3:0] [AV-18][MS#37]SF_RUN",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 3570,
+        "y": 800,
+        "wires": []
+    },
+    {
+        "id": "d1c1b96",
+        "type": "swInput",
+        "z": "128ce6f",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "变量",
+        "swInputType": "analog",
+        "swInputDefault": 0,
+        "swInputPriority": "16",
+        "bacnetVisible": true,
+        "bacnetObjectType": "OBJECT_ANALOG_VALUE",
+        "bacnetObjectInstanceAuto": true,
+        "bacnetObjectInstance": "44",
+        "bacnetObjectUnits": "No Units",
+        "bacnetObjectPrefix": "ZP_AM",
+        "bacnetObjectCOV": false,
+        "bacnetObjectCOVInscreace": 0.1,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "powerDownSave": true,
+        "modbusSlaveEnable": false,
+        "modbusSlaveRegAddr": 0,
+        "modbusSlaveRegType": "0",
+        "x": 3740,
+        "y": 700,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "80880de",
+        "type": "swInput",
+        "z": "128ce6f",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "变量",
+        "swInputType": "analog",
+        "swInputDefault": 0,
+        "swInputPriority": "16",
+        "bacnetVisible": true,
+        "bacnetObjectType": "OBJECT_ANALOG_VALUE",
+        "bacnetObjectInstanceAuto": true,
+        "bacnetObjectInstance": "45",
+        "bacnetObjectUnits": "No Units",
+        "bacnetObjectPrefix": "ZP_MC",
+        "bacnetObjectCOV": false,
+        "bacnetObjectCOVInscreace": 0.1,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "powerDownSave": false,
+        "modbusSlaveEnable": false,
+        "modbusSlaveRegAddr": 0,
+        "modbusSlaveRegType": "0",
+        "x": 3700,
+        "y": 920,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "c6f9ace",
+        "type": "switch",
+        "z": "128ce6f",
+        "inputs": 3,
+        "outputs": 1,
+        "name": "通道选择",
+        "channels": 2,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 3960,
+        "y": 820,
+        "wires": [
+            [
+                {
+                    "id": "d1c1b96",
+                    "port": 0
+                }
+            ],
+            [
+                {
+                    "id": "67a07e6",
+                    "port": 0
+                }
+            ],
+            [
+                {
+                    "id": "80880de",
+                    "port": 0
+                }
+            ]
+        ]
+    },
+    {
+        "id": "fd87768",
+        "type": "swInput",
+        "z": "128ce6f",
+        "inputs": 2,
+        "outputs": 2,
+        "name": "ZP_CST",
+        "swInputType": "analog",
+        "swInputDefault": 0,
+        "swInputPriority": "16",
+        "bacnetVisible": false,
+        "bacnetObjectType": "OBJECT_DISABLED",
+        "bacnetObjectInstanceAuto": true,
+        "bacnetObjectInstance": 1,
+        "bacnetObjectUnits": "No Units",
+        "bacnetObjectPrefix": "",
+        "bacnetObjectCOV": false,
+        "bacnetObjectCOVInscreace": 0.1,
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "powerDownSave": false,
+        "modbusSlaveEnable": false,
+        "modbusSlaveRegAddr": 0,
+        "modbusSlaveRegType": "0",
+        "x": 4520,
+        "y": 820,
+        "wires": [
+            [
+                {
+                    "id": "c376fbf",
+                    "port": 0
+                }
+            ],
+            []
+        ]
+    },
+    {
+        "id": "c376fbf",
+        "type": "logic",
+        "z": "128ce6f",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "逻辑运算",
+        "lType": "AND",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 4350,
+        "y": 820,
+        "wires": [
+            [
+                {
+                    "id": "66ed753",
+                    "port": 0
+                }
+            ],
+            [
+                {
+                    "id": "67da805",
+                    "port": 0
+                }
+            ]
+        ]
+    },
+    {
+        "id": "d2b932e",
+        "type": "quote",
+        "z": "128ce6f",
+        "inputs": 0,
+        "outputs": 1,
+        "name": "引用",
+        "labelName": "[6a1a552:0] [AV-49][MS#45]ZP_F",
+        "labelNameOld": "[6a1a552:0] [AV-49][MS#45]ZP_F",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 3920,
+        "y": 900,
+        "wires": []
+    },
+    {
+        "id": "67da805",
+        "type": "logic",
+        "z": "128ce6f",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "逻辑运算",
+        "lType": "NOT",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 4110,
+        "y": 920,
+        "wires": [
+            [
+                {
+                    "id": "d2b932e",
+                    "port": 0
+                }
+            ]
+        ]
+    },
+    {
+        "id": "66ed753",
+        "type": "delayOn",
+        "z": "128ce6f",
+        "inputs": 1,
+        "outputs": 1,
+        "name": "延时开",
+        "timeout": "5",
+        "timeoutFromInput": false,
+        "timeoutUnits": "seconds",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "debugView": [
+            {
+                "n": "O1: ",
+                "v": ""
+            },
+            {
+                "n": "left:",
+                "v": ""
+            }
+        ],
+        "x": 4160,
+        "y": 820,
+        "wires": [
+            [
+                {
+                    "id": "c6f9ace",
+                    "port": 0
+                }
+            ]
+        ]
+    },
+    {
+        "id": "67a07e6",
+        "type": "logic",
+        "z": "128ce6f",
+        "inputs": 2,
+        "outputs": 1,
+        "name": "逻辑运算",
+        "lType": "AND",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 3810,
+        "y": 820,
+        "wires": [
+            [
+                {
+                    "id": "a4918e7",
+                    "port": 0
+                }
+            ],
+            [
+                {
+                    "id": "1a65287",
+                    "port": 0
+                }
+            ]
+        ]
+    },
+    {
+        "id": "1a65287",
+        "type": "quote",
+        "z": "128ce6f",
+        "inputs": 0,
+        "outputs": 1,
+        "name": "引用",
+        "labelName": "[432f93c:0] [AV-5][MS#2]SYS_RUN",
+        "labelNameOld": "",
+        "outOfService": 0,
+        "outOfServiceValue": 0,
+        "x": 3560,
+        "y": 860,
+        "wires": []
+    }
+]
+}

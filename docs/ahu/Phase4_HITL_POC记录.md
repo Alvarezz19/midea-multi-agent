@@ -102,3 +102,4 @@ python scripts/poc_phase4_hitl.py --thread-id phase4-hitl-demo-2 --resume reject
 1. 继续保持正式主链无 checkpointer，先把 Repair 与并行派发收口。
 2. 等 `Send` fan-out 与 Repair 路由稳定后，再设计正式 HITL 节点插入点。
 3. 若进入正式 persistence 方案，优先补“副作用幂等性清单”和“thread_id 管理约定”。
+

@@ -212,3 +212,4 @@ def merge_parallel_conflicts(
   - fan-in 冲突 deterministic reject
   - 最终 `subsystem_plan_map` 顺序稳定
 - 以上约束已经足够直接转实现，不需要再补关键决策。
+

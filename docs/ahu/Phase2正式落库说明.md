@@ -142,3 +142,4 @@ python -m unittest tests.test_phase2_production_chroma_smoke
 `AHU程序/flows_*.json -> AHU程序/pattern_library -> outputs/chroma_db`
 
 后续 Phase 3/Phase 4 的真实检索与规划回归，应以这条链路为默认基线，而不是继续依赖历史根目录 `chroma_db/` 或临时私有目录。
+

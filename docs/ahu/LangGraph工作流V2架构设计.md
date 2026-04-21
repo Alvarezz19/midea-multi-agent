@@ -1,6 +1,6 @@
 # LangGraph 工作流 V2 架构设计
 
-> 基于 `AHU程序/智能体优化思路.md` 进一步细化  
+> 基于 `docs/ahu/智能体优化思路.md` 进一步细化  
 > 目标：把当前“Analysis -> Retrieval -> Planning -> Coding”的线性链路，升级为适合 AHU 复杂控制程序生成的工程编译式工作流
 
 ## 1. 评估结论
@@ -717,3 +717,4 @@ class WorkflowStateV2(TypedDict):
 - 模式切换与联锁
 - 结构风格一致性
 - 可回溯、可修补、可调试的工程生成流程
+

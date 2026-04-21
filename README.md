@@ -215,7 +215,7 @@ python scripts/build_phase2_retrieval_indexes.py --output-dir outputs/test_tmp/p
 
 - [工作流总结文档](工作流总结文档.md)：当前系统真实画像、状态字段、测试事实
 - [工作流演进记录](工作流演进记录.md)：改动时间线、决策与验收记录
-- [AHU程序/LangGraph工作流V2架构设计.md](AHU程序/LangGraph工作流V2架构设计.md)：V2 架构设计稿
+- [docs/ahu/LangGraph工作流V2架构设计.md](docs/ahu/LangGraph工作流V2架构设计.md)：V2 架构设计稿
 - [docs/analysis_agent_summary.md](docs/analysis_agent_summary.md)：Analysis Agent 当前边界
 - [docs/new_retrieval_agent_summary.md](docs/new_retrieval_agent_summary.md)：Retrieval Agent 当前正式契约与兼容接口
 - [docs/planning_agent_summary.md](docs/planning_agent_summary.md)：旧 `PlanningAgent` compat 说明
@@ -231,3 +231,4 @@ python scripts/build_phase2_retrieval_indexes.py --output-dir outputs/test_tmp/p
 ## 许可证
 
 内部项目，仅供美的楼宇科技使用。
+

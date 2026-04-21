@@ -2,7 +2,7 @@
 
 > 更新时间：2026-04-17  
 > 目标：在不改正式主链拓扑的前提下，为下一阶段评估 `Send / HITL / persistence` 提供节点级副作用与幂等性边界。  
-> 依据：当前代码实现、`AHU程序/Phase4_Send并行预留设计.md`、`AHU程序/Phase4_HITL_POC记录.md`，以及 LangGraph 官方文档：  
+> 依据：当前代码实现、`docs/ahu/Phase4_Send并行预留设计.md`、`docs/ahu/Phase4_HITL_POC记录.md`，以及 LangGraph 官方文档：  
 > - <https://docs.langchain.com/oss/python/langgraph/use-graph-api>  
 > - <https://docs.langchain.com/oss/python/langgraph/durable-execution>  
 > - <https://docs.langchain.com/oss/python/langgraph/interrupts>
@@ -100,7 +100,7 @@
 
 - 本清单只关注副作用与幂等性，不直接替代 reducer 设计。
 - 对 `Send` 来说，真正敏感的不是“节点是否纯函数”，而是“并行 worker 是否会同时写同一状态键”。
-- 相关 reducer 风险与合并策略，以 `subsystem_plan_map`、`parallel_merge_conflicts` 为核心，详见 `AHU程序/Phase6_Send_HITL准入评审表.md`。
+- 相关 reducer 风险与合并策略，以 `subsystem_plan_map`、`parallel_merge_conflicts` 为核心，详见 `docs/ahu/Phase6_Send_HITL准入评审表.md`。
 
 ---
 
@@ -116,3 +116,4 @@
 3. `coding` 的稳定 ID 或等价幂等边界
 4. `repair_agent` 的 HITL 可拆分边界
 5. `workflow_trace` 的 thread/attempt 映射规则
+

@@ -21,10 +21,10 @@
 
 ## 2. 证据清单
 
-- `AHU程序/Phase4_Send并行预留设计.md`
-- `AHU程序/Phase4_HITL_POC记录.md`
-- `AHU程序/Phase6_副作用幂等性清单.md`
-- `AHU程序/Phase6_thread_id与恢复契约.md`
+- `docs/ahu/Phase4_Send并行预留设计.md`
+- `docs/ahu/Phase4_HITL_POC记录.md`
+- `docs/ahu/Phase6_副作用幂等性清单.md`
+- `docs/ahu/Phase6_thread_id与恢复契约.md`
 - `workflow.py`
 - `workflow_trace.py`
 - `scripts/poc_phase4_hitl.py`
@@ -125,3 +125,4 @@
 
 - 作为 Phase 7 开工前的设计准入：`conditional-go`
 - 作为当前时点的正式主链准入：`no-go`
+

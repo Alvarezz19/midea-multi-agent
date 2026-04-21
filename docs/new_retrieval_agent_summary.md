@@ -108,11 +108,11 @@ user_query
 - 本质上是 `build_legacy_retrieval_context(retrieval_bundle)` 的兼容视图
 - 主要服务旧 `PlanningAgent` / `AssemblyAgent` / 历史调用方
 
-### `agents/retrieval_agent_old.py`
+### `agents/legacy/retrieval_agent_old.py`
 
-- 历史保留实现
-- 不在当前正式主链中
-- 不应继续扩展为新的正式检索入口
+- 该历史实现已从仓库代码删除
+- 当前正式主链只保留 `agents/retrieval_agent.py`
+- 不应再围绕旧检索实现扩展新的兼容入口
 
 ## 8. 一句话结论
 
