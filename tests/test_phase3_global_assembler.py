@@ -11,9 +11,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import config
+from agents.assembly_shared import AssemblySharedMixin
 from agents.coding_agent import CodingAgent
 from agents.global_assembler import GlobalAssembler
-from agents.legacy.assembly_agent import AssemblyAgent as LegacyAssemblyAgent
 from agents.verifier_agent import VerifierAgent
 
 
@@ -230,8 +230,8 @@ def make_subsystem_plan_map() -> dict:
 
 
 class Phase3GlobalAssemblerTests(unittest.TestCase):
-    def test_global_assembler_no_longer_inherits_legacy_assembly_agent(self):
-        self.assertFalse(issubclass(GlobalAssembler, LegacyAssemblyAgent))
+    def test_global_assembler_inherits_shared_mixin_directly(self):
+        self.assertEqual(GlobalAssembler.__mro__[1], AssemblySharedMixin)
 
     def test_global_assembler_merges_pages_and_shared_signals(self):
         with patch.object(config, "DEBUG", False):

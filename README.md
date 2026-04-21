@@ -92,8 +92,7 @@ python workflow_trace.py
 
 ### 已降级为 legacy / compat 的对象
 
-- `build_legacy_retrieval_context(...)`
-- `utils/legacy_execution_plan.py` 中的 `build_legacy_execution_plan(...)`
+- 当前仓库级 compat helper 已清退完成；`retrieval_context`、`execution_plan` 等仅作为历史术语保留在文档说明中。
 
 ### 历史预留字段
 
@@ -153,14 +152,9 @@ python scripts/build_phase2_retrieval_indexes.py --output-dir AHU程序/pattern_
 
 ## 遗留模块状态
 
-| 模块 | 当前状态 | 说明 |
-|:---|:---|:---|
-| `agents/legacy/planning_agent.py` | legacy 实现 | 仍有 Phase 2 legacy 回归测试覆盖，但不在 Phase 3 正式主链中 |
-| `agents/legacy/assembly_agent.py` | legacy 实现 | 正式共享 helper 已抽到 `agents/assembly_shared.py`；formal 代码不再复用该类 |
+仓库级 Batch 3 已完成：`agents/legacy/` 与 `tests/legacy/` 已整体清退；原 `planning_agent.py`、`assembly_agent.py`、`validation_agent.py`、`debugging_agent.py`、`retrieval_agent_old.py` root wrapper 也均已删除。`GlobalAssembler` 当前直接复用 `agents/assembly_shared.py` 中的共享 helper，不再依赖任何 legacy assembler 类。
 
-其中 root wrapper `planning_agent.py`、`assembly_agent.py`、`validation_agent.py`、`debugging_agent.py`、`retrieval_agent_old.py` 已删除；另外仓内 `0` 调用的 `agents/legacy/validation_agent.py`、`agents/legacy/debugging_agent.py`、`agents/legacy/retrieval_agent_old.py` 也已清退。`GlobalAssembler` 已不再继承 legacy `AssemblyAgent`，而是复用 `agents/assembly_shared.py` 中的共享 helper。
-
-兼容测试也开始分层：`tests/test_legacy_execution_plan.py`、`tests/test_phase2_planning_bundle.py`、`tests/test_phase2_retrieval_bundle.py`、`tests/test_phase2_retrieval_agent.py`、`tests/test_phase6_retrieval_eval_contract.py` 目前仍保留兼容入口或混合入口，真实测试实现已下沉到 `tests/legacy/` / `tests/contracts/`，以便在不破坏现有命令的前提下逐步剥离 legacy 回归集。`tests/test_legacy_agent_imports.py` 已随 root wrapper 删除一并清退。
+当前根目录测试中，`tests/test_phase2_retrieval_bundle.py`、`tests/test_phase2_retrieval_agent.py`、`tests/test_phase6_retrieval_eval_contract.py` 都只承载 formal contract；`tests/test_phase2_planning_bundle.py`、`tests/test_legacy_execution_plan.py` 与 `tests/test_legacy_agent_imports.py` 已随对应 compat 资产删除一并清退。
 
 ## 已验证环境基线
 
