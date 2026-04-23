@@ -45,6 +45,9 @@ export function AttemptStatusHeader({ attempt, isRefreshing, onRefresh }: Attemp
           </div>
         </dl>
         <nav className="header-actions" aria-label="工作流视图">
+          <Link className="ghost-button" to="/workflow">
+            返回启动页
+          </Link>
           <button className="ghost-button" type="button" onClick={onRefresh} disabled={isRefreshing}>
             {isRefreshing ? "同步中" : "刷新"}
           </button>
