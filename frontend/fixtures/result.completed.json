@@ -1,0 +1,27 @@
+{
+  "thread_id": "wf_demo_001",
+  "attempt_id": "20260423_101500_000001",
+  "status": "completed",
+  "result": {
+    "json_text": "{\"ok\": true, \"pages\": [{\"id\": \"control\"}]}",
+    "compile_report": {
+      "page_count": 1,
+      "subflow_count": 1,
+      "node_count": 24,
+      "warnings": []
+    },
+    "verification_report": {
+      "status": "passed",
+      "repair_scope": "none",
+      "issue_summary": "ok",
+      "issues": [],
+      "warnings": [],
+      "metrics": {
+        "missing_required_inputs": 0,
+        "isolated_nodes": 0,
+        "invalid_port_refs": 0
+      }
+    }
+  },
+  "trace_files": {}
+}

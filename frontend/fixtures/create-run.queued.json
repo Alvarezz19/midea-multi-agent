@@ -1,0 +1,7 @@
+{
+  "thread_id": "wf_demo_001",
+  "attempt_id": "20260423_101500_000001",
+  "status": "queued",
+  "poll_url": "/api/workflow/threads/wf_demo_001/attempts/20260423_101500_000001",
+  "thread_url": "/api/workflow/threads/wf_demo_001"
+}

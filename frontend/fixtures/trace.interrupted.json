@@ -1,0 +1,35 @@
+{
+  "thread_id": "wf_demo_001",
+  "attempt_id": "20260423_101500_000001",
+  "status": "interrupted",
+  "current_step": "architecture_review_prepared",
+  "summary": {
+    "workflow_status": "interrupted",
+    "node_count": 6,
+    "last_successful_node": "architecture_planning",
+    "verification_status": "",
+    "verification_issue_summary": "",
+    "repair_round_count": 0,
+    "final_route_decision": "",
+    "review_status": "pending",
+    "review_id": "architecture_review-0001",
+    "hitl_stage": "architecture_review",
+    "acceptance_summary": ""
+  },
+  "review": {
+    "review_id": "architecture_review-0001",
+    "stage": "architecture_review",
+    "status": "pending",
+    "question": "请确认当前系统骨架。",
+    "options": [],
+    "context_summary": ""
+  },
+  "diagnostics": {
+    "verification_status": "",
+    "verification_issue_summary": "",
+    "repair_round_count": 0,
+    "retry_counts_by_scope": {},
+    "final_route_decision": ""
+  },
+  "trace_files": {}
+}

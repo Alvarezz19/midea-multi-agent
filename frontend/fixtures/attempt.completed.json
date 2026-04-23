@@ -1,0 +1,30 @@
+{
+  "thread_id": "wf_demo_001",
+  "attempt_id": "20260423_101500_000001",
+  "status": "completed",
+  "current_step": "verification_completed",
+  "workflow_status": "completed",
+  "user_query": "为 AHU 生成送风机与电加热联动控制",
+  "review": {
+    "review_id": "architecture_review-0001",
+    "stage": "none",
+    "status": "applied",
+    "question": "",
+    "options": [],
+    "context_summary": ""
+  },
+  "progress": {
+    "current_step_label": "verification_completed",
+    "last_successful_node": "verification",
+    "node_count": 12
+  },
+  "diagnostics": {
+    "verification_status": "passed",
+    "verification_issue_summary": "ok",
+    "repair_round_count": 0,
+    "retry_counts_by_scope": {},
+    "final_route_decision": "accept"
+  },
+  "trace_files": {},
+  "subtasks": []
+}

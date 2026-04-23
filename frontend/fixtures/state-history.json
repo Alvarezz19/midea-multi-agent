@@ -1,0 +1,36 @@
+{
+  "thread_id": "wf_demo_001",
+  "attempt_id": "20260423_101500_000001",
+  "items": [
+    {
+      "created_at": "2026-04-23T10:15:20Z",
+      "next": ["architecture_review"],
+      "metadata": {
+        "step": 5
+      },
+      "state": {
+        "current_step": "architecture_planned",
+        "review_status": "none",
+        "review_id": "",
+        "hitl_stage": "",
+        "verification_status": "",
+        "route_decision": ""
+      }
+    },
+    {
+      "created_at": "2026-04-23T10:15:24Z",
+      "next": [],
+      "metadata": {
+        "step": 6
+      },
+      "state": {
+        "current_step": "architecture_review_prepared",
+        "review_status": "pending",
+        "review_id": "architecture_review-0001",
+        "hitl_stage": "architecture_review",
+        "verification_status": "",
+        "route_decision": ""
+      }
+    }
+  ]
+}
