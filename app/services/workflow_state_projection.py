@@ -5,6 +5,45 @@ from typing import Any
 from app.repositories.workflow_run_repository import AttemptRecord, ThreadRecord
 
 
+TRACE_SUMMARY_KEYS = [
+    "execution_time",
+    "workflow_status",
+    "failed_node",
+    "last_successful_node",
+    "node_count",
+    "total_elapsed_seconds",
+    "selected_case_pattern_id",
+    "retrieved_atomic_count",
+    "retrieved_subflow_count",
+    "retrieved_pattern_count",
+    "top_subflow_template_ids",
+    "top_system_pattern_ids",
+    "reuse_template_subsystem_count",
+    "atomic_assembly_subsystem_count",
+    "subsystem_ids",
+    "unresolved_item_count",
+    "unresolved_item_types",
+    "planning_unresolved_by_type",
+    "ambiguous_signal_count",
+    "verification_status",
+    "verification_repair_scope",
+    "verification_issue_summary",
+    "verification_error_count",
+    "verification_warning_count",
+    "verification_metrics",
+    "repair_round_count",
+    "repair_scopes_seen",
+    "final_route_decision",
+    "retry_exhausted",
+    "retry_counts_by_scope",
+    "review_status",
+    "review_id",
+    "hitl_stage",
+    "failure_bucket",
+    "acceptance_summary",
+]
+
+
 def infer_attempt_status(state: dict[str, Any] | None, *, fallback: str = "running") -> str:
     payload = dict(state or {})
     final_output = payload.get("final_output", {}) or {}
@@ -73,6 +112,7 @@ def build_attempt_detail(attempt: AttemptRecord, state: dict[str, Any] | None = 
         "progress": build_progress_projection(payload),
         "diagnostics": build_diagnostics_projection(payload),
         "trace_files": trace_files,
+        "subtasks": [],
     }
 
 
@@ -103,6 +143,58 @@ def build_attempt_list_item(attempt: AttemptRecord) -> dict[str, Any]:
         "verification_status": attempt.verification_status,
         "final_route_decision": attempt.final_route_decision,
     }
+
+
+def build_trace_projection(
+    attempt: AttemptRecord,
+    state: dict[str, Any] | None = None,
+    trace_summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = dict(state or attempt.latest_state or {})
+    trace_files = dict(((payload.get("final_output", {}) or {}).get("workflow_trace", {}) or {}) or attempt.trace_files)
+    summary_source = dict(trace_summary or {})
+    summary = {key: summary_source.get(key) for key in TRACE_SUMMARY_KEYS if key in summary_source}
+    if "node_count" not in summary:
+        summary["node_count"] = len(list(summary_source.get("nodes", []) or []))
+    if "workflow_status" not in summary:
+        summary["workflow_status"] = infer_attempt_status(payload, fallback=attempt.status)
+    return {
+        "thread_id": attempt.thread_id,
+        "attempt_id": attempt.attempt_id,
+        "status": infer_attempt_status(payload, fallback=attempt.status),
+        "current_step": str(payload.get("current_step", "") or attempt.current_step or "start").strip() or "start",
+        "summary": summary,
+        "review": build_review_projection(payload),
+        "diagnostics": build_diagnostics_projection(payload),
+        "trace_files": trace_files,
+    }
+
+
+def build_state_history_projection(
+    *,
+    thread_id: str,
+    attempt_id: str,
+    snapshots: list[dict[str, Any]],
+) -> dict[str, Any]:
+    items: list[dict[str, Any]] = []
+    for snapshot in snapshots:
+        values = dict(snapshot.get("values", {}) or {})
+        items.append(
+            {
+                "created_at": str(snapshot.get("created_at", "") or ""),
+                "next": list(snapshot.get("next", []) or []),
+                "metadata": dict(snapshot.get("metadata", {}) or {}),
+                "state": {
+                    "current_step": str(values.get("current_step", "") or "").strip(),
+                    "review_status": str(values.get("review_status", "") or "").strip(),
+                    "review_id": str(values.get("review_id", "") or "").strip(),
+                    "hitl_stage": str(values.get("hitl_stage", "") or "").strip(),
+                    "verification_status": str((values.get("verification_report", {}) or {}).get("status", "") or "").strip(),
+                    "route_decision": str((values.get("route_decision", {}) or {}).get("decision", "") or "").strip(),
+                },
+            }
+        )
+    return {"thread_id": thread_id, "attempt_id": attempt_id, "items": items}
 
 
 def build_thread_overview(thread: ThreadRecord, latest_attempt: AttemptRecord | None) -> dict[str, Any]:
