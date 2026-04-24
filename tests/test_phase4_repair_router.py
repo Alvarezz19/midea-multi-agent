@@ -23,8 +23,10 @@ def make_state(
     retry_budget: dict | None = None,
     retry_counts_by_scope: dict | None = None,
     retry_count: int | None = None,
+    enable_repair_agent: bool = True,
 ) -> dict:
     state = workflow.build_initial_state("为 AHU 生成送风机标准控制")
+    state["enable_repair_agent"] = enable_repair_agent
     state["verification_report"] = {
         "status": status,
         "repair_scope": repair_scope,
@@ -129,6 +131,33 @@ class RepairRouterTests(unittest.TestCase):
         self.assertEqual(result["route_decision"]["decision"], "planning_repair")
         self.assertEqual(result["route_decision"]["reason"], "planning_retry_allowed")
         self.assertEqual(result["route_decision"]["next_node"], "repair_agent")
+
+    def test_router_rejects_repairable_issue_when_repair_agent_is_not_enabled(self):
+        state = make_state(
+            repair_scope="assembly",
+            issues=[{"issue_id": "IR-003"}],
+            enable_repair_agent=False,
+        )
+
+        result = RepairRouter()(state)
+
+        self.assertEqual(result["route_decision"]["decision"], "reject")
+        self.assertEqual(result["route_decision"]["next_node"], "END")
+        self.assertEqual(result["route_decision"]["reason"], "repair_agent_disabled")
+        self.assertFalse(result["route_decision"]["retry_exhausted"])
+        self.assertEqual(result["route_decision"]["issue_ids"], ["IR-003"])
+
+    def test_router_defaults_to_reject_when_repair_agent_flag_is_absent(self):
+        state = make_state(
+            repair_scope="assembly",
+            issues=[{"issue_id": "IR-003"}],
+        )
+        state.pop("enable_repair_agent", None)
+
+        result = RepairRouter()(state)
+
+        self.assertEqual(result["route_decision"]["decision"], "reject")
+        self.assertEqual(result["route_decision"]["reason"], "repair_agent_disabled")
 
     def test_phase4_topology_helper_can_register_repair_loop(self):
         def _noop(state):

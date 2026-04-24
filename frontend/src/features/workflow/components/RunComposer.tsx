@@ -13,6 +13,7 @@ export function RunComposer({ isSubmitting, onSubmit }: RunComposerProps) {
   const [threadId, setThreadId] = useState("");
   const [enableClarification, setEnableClarification] = useState(false);
   const [enableArchitectureReview, setEnableArchitectureReview] = useState(true);
+  const [enableRepairAgent, setEnableRepairAgent] = useState(false);
   const [message, setMessage] = useState("");
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -29,6 +30,7 @@ export function RunComposer({ isSubmitting, onSubmit }: RunComposerProps) {
         title: title.trim(),
         enable_hitl_clarification: enableClarification,
         enable_hitl_architecture_review: enableArchitectureReview,
+        enable_repair_agent: enableRepairAgent,
         runtime_metadata: {
           source: "frontend",
           operator: "local_demo"
@@ -93,6 +95,17 @@ export function RunComposer({ isSubmitting, onSubmit }: RunComposerProps) {
           <span>
             <strong>前置澄清</strong>
             <small>当需求歧义较高时暂停并要求补充信息。</small>
+          </span>
+        </label>
+        <label className="switch-card">
+          <input
+            type="checkbox"
+            checked={enableRepairAgent}
+            onChange={(event) => setEnableRepairAgent(event.target.checked)}
+          />
+          <span>
+            <strong>自动修复</strong>
+            <small>验收失败时允许 RepairAgent 尝试确定性修补。</small>
           </span>
         </label>
       </div>

@@ -624,7 +624,7 @@ class Phase4WorkflowRepairLoopTests(unittest.TestCase):
              patch.object(workflow, "GlobalAssembler", StubGlobalAssembly), \
              patch.object(workflow, "CodingAgent", StubCoding), \
              patch.object(workflow, "VerifierAgent", StubVerifierSuccessAfterRepair):
-            result = workflow.run_workflow("fan heater")
+            result = workflow.run_workflow("fan heater", enable_repair_agent=True)
 
         _assert_no_compat_fields(result)
         self.assertEqual(result["verification_report"]["status"], "passed")
@@ -642,7 +642,7 @@ class Phase4WorkflowRepairLoopTests(unittest.TestCase):
              patch.object(workflow, "GlobalAssembler", StubGlobalAssembly), \
              patch.object(workflow, "CodingAgent", StubCoding), \
              patch.object(workflow, "VerifierAgent", StubVerifierReject):
-            result = workflow.run_workflow("fan heater")
+            result = workflow.run_workflow("fan heater", enable_repair_agent=True)
 
         _assert_no_compat_fields(result)
         self.assertEqual(result["verification_report"]["status"], "retryable_error")
@@ -660,7 +660,7 @@ class Phase4WorkflowRepairLoopTests(unittest.TestCase):
              patch.object(workflow, "GlobalAssembler", StubGlobalAssemblyExternal), \
              patch.object(workflow, "CodingAgent", StubCoding), \
              patch.object(workflow, "VerifierAgent", StubVerifierExternalAfterRepair):
-            result = workflow.run_workflow("fan external")
+            result = workflow.run_workflow("fan external", enable_repair_agent=True)
 
         _assert_no_compat_fields(result)
         self.assertEqual(result["verification_report"]["status"], "passed")
@@ -679,7 +679,7 @@ class Phase4WorkflowRepairLoopTests(unittest.TestCase):
              patch.object(workflow, "GlobalAssembler", StubGlobalAssembly), \
              patch.object(workflow, "CodingAgent", StubCoding), \
              patch.object(workflow, "VerifierAgent", StubVerifierAmbiguousSuccessAfterRepair):
-            result = workflow.run_workflow("fan heater ambiguous unique")
+            result = workflow.run_workflow("fan heater ambiguous unique", enable_repair_agent=True)
 
         _assert_no_compat_fields(result)
         self.assertEqual(result["verification_report"]["status"], "passed")
@@ -695,7 +695,7 @@ class Phase4WorkflowRepairLoopTests(unittest.TestCase):
              patch.object(workflow, "GlobalAssembler", StubGlobalAssembly), \
              patch.object(workflow, "CodingAgent", StubCoding), \
              patch.object(workflow, "VerifierAgent", StubVerifierAmbiguousReject):
-            result = workflow.run_workflow("fan heater ambiguous reject")
+            result = workflow.run_workflow("fan heater ambiguous reject", enable_repair_agent=True)
 
         _assert_no_compat_fields(result)
         self.assertEqual(result["verification_report"]["status"], "retryable_error")
@@ -727,7 +727,7 @@ class Phase4WorkflowRepairLoopTests(unittest.TestCase):
              patch.object(workflow_trace, "CodingAgent", StubCoding), \
              patch.object(workflow_trace, "VerifierAgent", StubVerifierSuccessAfterRepair), \
              patch.object(workflow_trace, "_save_workflow_trace", side_effect=_capture_trace):
-            result = workflow_trace.run_workflow("fan heater")
+            result = workflow_trace.run_workflow("fan heater", enable_repair_agent=True)
 
         _assert_no_compat_fields(result)
         node_names = [record["node_name"] for record in captured_records["nodes"]]

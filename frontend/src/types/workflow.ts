@@ -19,6 +19,7 @@ export interface CreateRunRequest {
   title?: string;
   enable_hitl_clarification?: boolean;
   enable_hitl_architecture_review?: boolean;
+  enable_repair_agent?: boolean;
   runtime_metadata?: Record<string, unknown>;
 }
 

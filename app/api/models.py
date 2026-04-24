@@ -11,6 +11,7 @@ class CreateRunRequest(BaseModel):
     title: str = ""
     enable_hitl_clarification: bool = False
     enable_hitl_architecture_review: bool = False
+    enable_repair_agent: bool = False
     runtime_metadata: dict[str, Any] = Field(default_factory=dict)
 
 

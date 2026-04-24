@@ -45,6 +45,7 @@ class WorkflowRuntimeRunner:
         runtime_metadata: dict[str, Any] | None,
         enable_hitl_clarification: bool,
         enable_hitl_architecture_review: bool,
+        enable_repair_agent: bool = False,
     ) -> WorkflowRunResult:
         node_io_records: list[dict[str, Any]] = []
         started_at = time()
@@ -53,6 +54,7 @@ class WorkflowRuntimeRunner:
             user_query,
             enable_hitl_clarification=bool(enable_hitl_clarification and str(thread_id or "").strip()),
             enable_hitl_architecture_review=bool(enable_hitl_architecture_review and str(thread_id or "").strip()),
+            enable_repair_agent=enable_repair_agent,
         )
         invoke_config = build_runtime_invoke_config(
             user_query=user_query,

@@ -86,6 +86,7 @@ class WorkflowService:
         title: str = "",
         enable_hitl_clarification: bool = False,
         enable_hitl_architecture_review: bool = False,
+        enable_repair_agent: bool = False,
         runtime_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         normalized_thread_id = str(thread_id or "").strip() or self._generate_thread_id()
@@ -100,6 +101,7 @@ class WorkflowService:
                 runtime_metadata=runtime_metadata,
                 enable_hitl_clarification=enable_hitl_clarification,
                 enable_hitl_architecture_review=enable_hitl_architecture_review,
+                enable_repair_agent=enable_repair_agent,
                 enforce_single_active=True,
             )
         except ActiveAttemptExistsError as exc:
@@ -126,6 +128,7 @@ class WorkflowService:
             runtime_metadata or {},
             bool(enable_hitl_clarification),
             bool(enable_hitl_architecture_review),
+            bool(enable_repair_agent),
         )
         return response
 
@@ -296,6 +299,7 @@ class WorkflowService:
         runtime_metadata: dict[str, Any],
         enable_hitl_clarification: bool,
         enable_hitl_architecture_review: bool,
+        enable_repair_agent: bool,
     ) -> None:
         self._repository.mark_attempt_running(thread_id, attempt_id)
         try:
@@ -306,6 +310,7 @@ class WorkflowService:
                 runtime_metadata=runtime_metadata,
                 enable_hitl_clarification=enable_hitl_clarification,
                 enable_hitl_architecture_review=enable_hitl_architecture_review,
+                enable_repair_agent=enable_repair_agent,
             )
             status = infer_attempt_status(result.state, fallback="completed")
             self._repository.update_attempt_state(

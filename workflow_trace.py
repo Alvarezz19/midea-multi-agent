@@ -724,6 +724,7 @@ def run_workflow(
     runtime_metadata: dict[str, Any] | None = None,
     enable_hitl_clarification: bool = False,
     enable_hitl_architecture_review: bool = False,
+    enable_repair_agent: bool = False,
 ) -> dict:
     node_io_records: list[dict] = []
     started_at = time.time()
@@ -740,6 +741,7 @@ def run_workflow(
         enable_hitl_architecture_review=bool(
             enable_hitl_architecture_review and checkpointer is not None and str(thread_id or "").strip()
         ),
+        enable_repair_agent=enable_repair_agent,
     )
 
     invoke_config = build_runtime_invoke_config(
@@ -774,7 +776,7 @@ def run_workflow(
 
 
 if __name__ == "__main__":
-    query = "生成一个程序，接收一个输入，输入5v的时候，输出1，输入3v的时候输出2，输入10v的时候输出0"
+    query = "生成一个 AHU 空调箱 Node-RED flows JSON，包含 IO/通讯、控制、定时、直膨机状态 四个页面。子系统包括送风机标准控制、送风机频率控制、风阀控制、冷水阀控制、电加热控制、直膨机控制。系统需支持自动/手动、本地/远程、定时启停、夏季/冬季模式。请显式给出每个子系统的输入输出点、故障报警、联锁条件、延时逻辑和 PID 调节信号，并按标准控制子流程组织。"
     result = run_workflow(query)
 
     print("=" * 60)

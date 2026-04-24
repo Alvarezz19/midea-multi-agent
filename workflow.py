@@ -87,6 +87,7 @@ class WorkflowState(TypedDict):
     architecture_feedback_patch: dict
     enable_hitl_clarification: bool
     enable_hitl_architecture_review: bool
+    enable_repair_agent: bool
     current_step: str
 
 
@@ -323,6 +324,7 @@ def build_initial_state(
     *,
     enable_hitl_clarification: bool = False,
     enable_hitl_architecture_review: bool = False,
+    enable_repair_agent: bool = False,
 ) -> dict:
     """Create the canonical initial state shared by both entrypoints."""
     retry_budget = default_retry_budget()
@@ -360,6 +362,7 @@ def build_initial_state(
         "architecture_feedback_patch": {},
         "enable_hitl_clarification": bool(enable_hitl_clarification),
         "enable_hitl_architecture_review": bool(enable_hitl_architecture_review),
+        "enable_repair_agent": bool(enable_repair_agent),
         "current_step": "start",
     }
 
@@ -417,6 +420,7 @@ def run_workflow(
     runtime_metadata: dict[str, Any] | None = None,
     enable_hitl_clarification: bool = False,
     enable_hitl_architecture_review: bool = False,
+    enable_repair_agent: bool = False,
 ) -> dict:
     """Run the end-to-end workflow and return the final state."""
     workflow = create_workflow(checkpointer=checkpointer)
@@ -430,6 +434,7 @@ def run_workflow(
         enable_hitl_architecture_review=bool(
             enable_hitl_architecture_review and checkpointer is not None and str(thread_id or "").strip()
         ),
+        enable_repair_agent=enable_repair_agent,
     )
 
     invoke_config = build_runtime_invoke_config(

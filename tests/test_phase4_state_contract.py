@@ -34,6 +34,7 @@ class Phase4StateContractTests(unittest.TestCase):
             "architecture_feedback_patch",
             "enable_hitl_clarification",
             "enable_hitl_architecture_review",
+            "enable_repair_agent",
         }
 
         self.assertTrue(expected_fields.issubset(set(workflow.WorkflowState.__annotations__)))
@@ -79,6 +80,7 @@ class Phase4StateContractTests(unittest.TestCase):
         self.assertEqual(state["architecture_feedback_patch"], {})
         self.assertFalse(state["enable_hitl_clarification"])
         self.assertFalse(state["enable_hitl_architecture_review"])
+        self.assertFalse(state["enable_repair_agent"])
         self.assertNotIn("retrieval_context", state)
         self.assertNotIn("execution_plan", state)
         self.assertNotIn("generated_code", state)
@@ -111,8 +113,26 @@ class Phase4StateContractTests(unittest.TestCase):
         self.assertNotIn("validation_result", initial_state)
         self.assertNotIn("next_step", initial_state)
         self.assertEqual(initial_state["route_decision"], {})
+        self.assertFalse(initial_state["enable_repair_agent"])
         self.assertEqual(initial_state["retry_count"], sum(initial_state["retry_counts_by_scope"].values()))
         self.assertEqual(result["repair_history"], [])
+
+    def test_run_workflow_can_enable_repair_agent(self):
+        captured: dict[str, object] = {}
+
+        class FakeApp:
+            def invoke(self, initial_state, config=None):
+                captured["initial_state"] = initial_state
+                return initial_state
+
+        class FakeWorkflow:
+            def compile(self):
+                return FakeApp()
+
+        with patch.object(workflow, "create_workflow", return_value=FakeWorkflow()):
+            workflow.run_workflow("fan control", enable_repair_agent=True)
+
+        self.assertTrue(captured["initial_state"]["enable_repair_agent"])
 
     def test_trace_run_workflow_passes_recursion_limit_and_keeps_repair_defaults(self):
         captured: dict[str, object] = {}
@@ -143,6 +163,7 @@ class Phase4StateContractTests(unittest.TestCase):
         self.assertNotIn("validation_result", initial_state)
         self.assertNotIn("next_step", initial_state)
         self.assertEqual(initial_state["repair_context"], {})
+        self.assertFalse(initial_state["enable_repair_agent"])
         self.assertEqual(initial_state["retry_count"], sum(initial_state["retry_counts_by_scope"].values()))
         self.assertEqual(result["final_output"]["workflow_trace"]["trace_dir"], "mock-trace")
 

@@ -23,6 +23,7 @@ REPAIR_REASON_BY_DECISION = {
     "compile_repair": "compile_retry_allowed",
     "reject_invalid_scope": "unsupported_repair_scope",
     "reject_budget_exhausted": "retry_budget_exhausted",
+    "reject_repair_agent_disabled": "repair_agent_disabled",
 }
 ROUTE_NEXT_NODE_BY_DECISION = {
     "accept": "END",
@@ -77,6 +78,7 @@ class RepairRouter:
         verification_report: Dict[str, Any],
         retry_budget: Dict[str, Any] | None = None,
         retry_counts_by_scope: Dict[str, Any] | None = None,
+        enable_repair_agent: bool = False,
     ) -> RouteDecision:
         report = verification_report or {}
         normalized_budget = _normalize_retry_budget(retry_budget)
@@ -100,6 +102,10 @@ class RepairRouter:
             decision = "reject"
             reason = REPAIR_REASON_BY_DECISION["reject_budget_exhausted"]
             retry_exhausted = True
+        elif not enable_repair_agent:
+            decision = "reject"
+            reason = REPAIR_REASON_BY_DECISION["reject_repair_agent_disabled"]
+            retry_exhausted = False
         else:
             decision = REPAIR_DECISION_BY_SCOPE[repair_scope]
             reason = REPAIR_REASON_BY_DECISION[decision]
@@ -123,6 +129,7 @@ class RepairRouter:
             state.get("verification_report", {}) or {},
             retry_budget=retry_budget,
             retry_counts_by_scope=retry_counts_by_scope,
+            enable_repair_agent=bool(state.get("enable_repair_agent", False)),
         )
 
         state["retry_budget"] = retry_budget

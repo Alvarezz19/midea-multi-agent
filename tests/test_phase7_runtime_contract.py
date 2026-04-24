@@ -91,6 +91,7 @@ class Phase7RuntimeContractTests(unittest.TestCase):
         )
         self.assertTrue(captured["config"]["metadata"]["persistence_enabled"])
         self.assertTrue(captured["initial_state"]["enable_hitl_architecture_review"])
+        self.assertFalse(captured["initial_state"]["enable_repair_agent"])
 
         with patch.object(workflow, "create_workflow", return_value=FakeWorkflow()):
             with self.assertRaises(ValueError):
@@ -173,6 +174,27 @@ class Phase7RuntimeContractTests(unittest.TestCase):
 
         self.assertIs(captured["compile_kwargs"]["checkpointer"], fake_checkpointer)
         self.assertTrue(captured["initial_state"]["enable_hitl_architecture_review"])
+
+    def test_trace_workflow_can_enable_repair_agent(self):
+        captured: dict[str, object] = {}
+
+        class FakeApp:
+            def invoke(self, initial_state, config=None):
+                captured["initial_state"] = initial_state
+                return initial_state
+
+        class FakeWorkflow:
+            def compile(self, **kwargs):
+                return FakeApp()
+
+        with patch.object(workflow_trace, "create_workflow", return_value=FakeWorkflow()), patch.object(
+            workflow_trace,
+            "_save_workflow_trace",
+            return_value={"trace_dir": "mock-trace", "attempt_id": "attempt-1"},
+        ):
+            workflow_trace.run_workflow("fan control", enable_repair_agent=True)
+
+        self.assertTrue(captured["initial_state"]["enable_repair_agent"])
 
 
 if __name__ == "__main__":

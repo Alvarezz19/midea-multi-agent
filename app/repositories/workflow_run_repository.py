@@ -56,6 +56,7 @@ class AttemptRecord:
     runtime_metadata: dict[str, Any] = field(default_factory=dict)
     enable_hitl_clarification: bool = False
     enable_hitl_architecture_review: bool = False
+    enable_repair_agent: bool = False
 
 
 @dataclass
@@ -128,6 +129,7 @@ class WorkflowRunRepository:
         runtime_metadata: dict[str, Any] | None,
         enable_hitl_clarification: bool,
         enable_hitl_architecture_review: bool,
+        enable_repair_agent: bool = False,
         enforce_single_active: bool = False,
     ) -> AttemptRecord:
         with self._lock:
@@ -148,6 +150,7 @@ class WorkflowRunRepository:
                 runtime_metadata=dict(runtime_metadata or {}),
                 enable_hitl_clarification=bool(enable_hitl_clarification),
                 enable_hitl_architecture_review=bool(enable_hitl_architecture_review),
+                enable_repair_agent=bool(enable_repair_agent),
             )
             self._attempts[(thread_id, attempt_id)] = record
             thread = self._threads[thread_id]
@@ -261,6 +264,10 @@ class WorkflowRunRepository:
         }
         self._attempts = {}
         for item in list(payload.get("attempts", []) or []):
+            if "disable_repair_agent" in item and "enable_repair_agent" not in item:
+                item["enable_repair_agent"] = not bool(item.pop("disable_repair_agent"))
+            else:
+                item.pop("disable_repair_agent", None)
             record = AttemptRecord(**item)
             self._attempts[(record.thread_id, record.attempt_id)] = record
 
@@ -323,4 +330,5 @@ class WorkflowRunRepository:
             runtime_metadata=dict(record.runtime_metadata),
             enable_hitl_clarification=record.enable_hitl_clarification,
             enable_hitl_architecture_review=record.enable_hitl_architecture_review,
+            enable_repair_agent=record.enable_repair_agent,
         )

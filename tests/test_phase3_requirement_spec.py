@@ -81,7 +81,8 @@ class Phase3RequirementSpecTests(unittest.TestCase):
         state = {"user_query": "AHU 送风机与冷水阀联动控制"}
         result = agent.__call__(state)
 
-        self.assertIs(result["analysis_result"], analysis_result)
+        self.assertIsNot(result["analysis_result"], analysis_result)
+        self.assertIn("clarification_signals", result["analysis_result"])
         self.assertIn("requirement_spec", result)
         self.assertEqual(result["requirement_spec"]["system_type"], "AHU")
         self.assertEqual(result["current_step"], "analysis_completed")

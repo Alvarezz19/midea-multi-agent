@@ -22,6 +22,7 @@ from app.services.workflow_service import WorkflowService
 class FakeRunner:
     def __init__(self) -> None:
         self.states: dict[str, dict[str, Any]] = {}
+        self.run_kwargs: dict[str, Any] = {}
         self._tmpdir = tempfile.TemporaryDirectory()
 
     def _trace_files(self, *, thread_id: str, attempt_id: str, workflow_status: str) -> dict[str, Any]:
@@ -58,7 +59,14 @@ class FakeRunner:
         runtime_metadata: dict[str, Any] | None,
         enable_hitl_clarification: bool,
         enable_hitl_architecture_review: bool,
+        enable_repair_agent: bool = False,
     ):
+        self.run_kwargs = {
+            "runtime_metadata": runtime_metadata,
+            "enable_hitl_clarification": enable_hitl_clarification,
+            "enable_hitl_architecture_review": enable_hitl_architecture_review,
+            "enable_repair_agent": enable_repair_agent,
+        }
         trace_files = self._trace_files(thread_id=thread_id, attempt_id=attempt_id, workflow_status="interrupted")
         state = {
             "user_query": user_query,
@@ -214,6 +222,18 @@ class WorkflowApiTests(unittest.TestCase):
         attempts_response = self.client.get(f"/api/workflow/threads/{thread_id}/attempts")
         self.assertEqual(attempts_response.status_code, 200)
         self.assertEqual(len(attempts_response.json()["items"]), 1)
+
+    def test_create_run_passes_enable_repair_agent_to_runner(self):
+        create_response = self.client.post(
+            "/api/workflow/runs",
+            json={
+                "user_query": "为 AHU 生成控制骨架",
+                "enable_repair_agent": True,
+            },
+        )
+
+        self.assertEqual(create_response.status_code, 200)
+        self.assertTrue(self.runner.run_kwargs["enable_repair_agent"])
 
     def test_resume_rejects_mismatched_review_id(self):
         create_response = self.client.post(
