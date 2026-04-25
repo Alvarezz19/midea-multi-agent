@@ -291,6 +291,12 @@ def _build_trace_summary(
     verification_warning_count = len(verification_report.get("warnings", []) or [])
     verification_metrics = verification_report.get("metrics", {}) or {}
     compile_report = compiled_artifact.get("compile_report", {}) or {}
+    flow_objects = compiled_artifact.get("flow_objects", []) or []
+    subflow_instance_count = sum(
+        1
+        for obj in flow_objects
+        if isinstance(obj, dict) and str(obj.get("type", "")).startswith("subflow:")
+    )
     subsystem_mode_counts = _count_subsystem_modes(subsystem_plan_map)
     subsystem_ids = ordered_subsystem_ids(architecture_plan, subsystem_plan_map)
     last_repair_entry = repair_history[-1] if repair_history else {}
@@ -405,6 +411,12 @@ def _build_trace_summary(
             "page_count": _to_int(compile_report.get("page_count", 0)),
             "subflow_count": _to_int(compile_report.get("subflow_count", 0)),
             "node_count": _to_int(compile_report.get("node_count", 0)),
+            "body_node_count": _to_int(compile_report.get("body_node_count", 0)),
+            "dropped_node_count": _to_int(compile_report.get("dropped_node_count", 0)),
+            "missing_template_count": _to_int(compile_report.get("missing_template_count", 0)),
+            "unresolved_placeholder_count": _to_int(compile_report.get("unresolved_placeholder_count", 0)),
+            "body_expansion_error_count": len(compile_report.get("body_expansion_errors", []) or []),
+            "subflow_instance_count": subflow_instance_count,
         },
         "acceptance_summary": acceptance_summary,
     }
@@ -572,7 +584,15 @@ def _save_workflow_trace(
         (
             f"**编译计数**: pages={summary['compile_report_summary']['page_count']} / "
             f"subflows={summary['compile_report_summary']['subflow_count']} / "
-            f"nodes={summary['compile_report_summary']['node_count']}\n"
+            f"instances={summary['compile_report_summary']['subflow_instance_count']} / "
+            f"nodes={summary['compile_report_summary']['node_count']} / "
+            f"body_nodes={summary['compile_report_summary']['body_node_count']}\n"
+        ),
+        (
+            f"**Strict Compile**: dropped={summary['compile_report_summary']['dropped_node_count']} / "
+            f"missing_templates={summary['compile_report_summary']['missing_template_count']} / "
+            f"placeholders={summary['compile_report_summary']['unresolved_placeholder_count']} / "
+            f"body_errors={summary['compile_report_summary']['body_expansion_error_count']}\n"
         ),
     ]
 

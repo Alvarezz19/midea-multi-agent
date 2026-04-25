@@ -16,6 +16,7 @@ from utils.graph_ir import (
     VerificationMetrics,
     VerificationReport,
 )
+from utils.platform_flow_schema import validate_flow_document
 from utils.signal_semantics import canonicalize_signal_name, classify_template_input
 
 
@@ -347,6 +348,66 @@ class VerifierAgent:
                 return scope_name
         return sorted(scopes)[0] if scopes else "none"
 
+    def _platform_flow_issues(self, flow_objects: Any) -> tuple[List[VerificationIssue], List[str], Dict[str, Any]]:
+        validation = validate_flow_document(flow_objects)
+        issues: List[VerificationIssue] = []
+        for item in validation.get("issues", []) or []:
+            issues.append(self._make_issue(
+                issue_id=f"PF-{len(issues) + 1:03d}",
+                scope="compile",
+                target_id=str(item.get("target_id", "")).strip() or "compiled_artifact.flow_objects",
+                rule_id=str(item.get("rule_id", "")).strip() or "flow.schema.invalid",
+                message=str(item.get("message", "")).strip() or "平台 flow schema 校验失败。",
+                repair_payload=item.get("details", {}) if isinstance(item.get("details"), dict) else {},
+            ))
+        warnings = [
+            str(item.get("message", "")).strip()
+            for item in validation.get("warnings", []) or []
+            if str(item.get("message", "")).strip()
+        ]
+        metrics = validation.get("metrics", {}) if isinstance(validation.get("metrics"), dict) else {}
+        return issues, warnings, metrics
+
+    def _strict_compile_report_issues(self, compile_report: Dict[str, Any]) -> List[VerificationIssue]:
+        dropped_node_count = int(compile_report.get("dropped_node_count", 0) or 0)
+        missing_template_count = int(compile_report.get("missing_template_count", 0) or 0)
+        unresolved_placeholder_count = int(compile_report.get("unresolved_placeholder_count", 0) or 0)
+        body_expansion_errors = [
+            str(item).strip()
+            for item in compile_report.get("body_expansion_errors", []) or []
+            if str(item).strip()
+        ]
+        if (
+            dropped_node_count <= 0
+            and missing_template_count <= 0
+            and unresolved_placeholder_count <= 0
+            and not body_expansion_errors
+        ):
+            return []
+
+        return [
+            self._make_issue(
+                issue_id="CP-STRICT-001",
+                scope="compile",
+                target_id="compiled_artifact.compile_report",
+                rule_id="compile.report.strict_errors.must_be_empty",
+                message=(
+                    "compile_report 存在 strict compile 错误: "
+                    f"dropped_node_count={dropped_node_count}, "
+                    f"missing_template_count={missing_template_count}, "
+                    f"unresolved_placeholder_count={unresolved_placeholder_count}, "
+                    f"body_expansion_errors={len(body_expansion_errors)}。"
+                ),
+                suggested_fix="修复模板缺失、节点跳过、占位符残留或 body 展开错误后重新编译。",
+                repair_payload={
+                    "dropped_node_count": dropped_node_count,
+                    "missing_template_count": missing_template_count,
+                    "unresolved_placeholder_count": unresolved_placeholder_count,
+                    "body_expansion_errors": body_expansion_errors,
+                },
+            )
+        ]
+
     def verify(
         self,
         assembled_graph_ir: Dict[str, Any],
@@ -674,6 +735,10 @@ class VerifierAgent:
                         ))
 
         compile_report = compiled_artifact.get("compile_report", {}) or {}
+        platform_issues, platform_warnings, platform_metrics = self._platform_flow_issues(flow_objects)
+        issues.extend(platform_issues)
+        warnings.extend(platform_warnings)
+        issues.extend(self._strict_compile_report_issues(compile_report))
         expected_pages = int(compile_report.get("page_count", 0) or 0)
         expected_subflows = int(compile_report.get("subflow_count", 0) or 0)
         expected_nodes = int(compile_report.get("node_count", 0) or 0)
@@ -699,6 +764,9 @@ class VerifierAgent:
             warnings.append(f"compile_report.subflow_count={expected_subflows}，实际 subflow 数={actual_subflows}。")
         if expected_nodes and expected_nodes != actual_nodes:
             warnings.append(f"compile_report.node_count={expected_nodes}，实际节点数={actual_nodes}。")
+
+        if platform_metrics:
+            metrics.invalid_port_refs += int(platform_metrics.get("invalid_port_refs", 0) or 0)
 
         error_issues = [issue for issue in issues if issue.severity == "error"]
         if error_issues:

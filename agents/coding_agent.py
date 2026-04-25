@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import copy
 import json
-from typing import Any, Dict, List, Set
+import re
+from typing import Any, Dict, List, Set, Tuple
 
 import config
 from utils.graph_ir import CompileReport, CompiledArtifact
@@ -24,6 +25,8 @@ from .coding_utils import (
 
 class CodingAgent:
     """Deterministic compiler from assembled_graph_ir to platform JSON."""
+
+    QUOTE_REF_RE = re.compile(r"\[([^:\]]+):(\d+)\]")
 
     def __init__(self):
         if config.DEBUG:
@@ -58,8 +61,11 @@ class CodingAgent:
 
         for definition in subflow_definitions:
             definition_id = definition["definition_id"]
-            real_id = self._assign_stable_id(f"subflow::{definition_id}", used_ids)
-            id_map[definition_id] = real_id
+            if definition_id in id_map:
+                real_id = id_map[definition_id]
+            else:
+                real_id = self._assign_stable_id(f"subflow::{definition_id}", used_ids)
+                id_map[definition_id] = real_id
             template_id = definition.get("template_id")
             if template_id:
                 id_map[template_id] = real_id
@@ -111,19 +117,206 @@ class CodingAgent:
                 wires.append([])
         return wires
 
+    @staticmethod
+    def _contains_placeholder(value: Any) -> bool:
+        if isinstance(value, str):
+            return "{{" in value and "}}" in value
+        if isinstance(value, dict):
+            return any(CodingAgent._contains_placeholder(item) for item in value.values())
+        if isinstance(value, list):
+            return any(CodingAgent._contains_placeholder(item) for item in value)
+        return False
+
+    @classmethod
+    def _rewrite_label_references(
+        cls,
+        value: str,
+        id_rewrite: Dict[str, str],
+        errors: List[str],
+        context: str,
+    ) -> str:
+        def replace(match: re.Match[str]) -> str:
+            raw_id = match.group(1).strip()
+            port = match.group(2)
+            if raw_id in id_rewrite:
+                return f"[{id_rewrite[raw_id]}:{port}]"
+            # 跨页面引用不一定属于 subflow body，本轮保留原引用并交给 flow schema 产出诊断。
+            return match.group(0)
+
+        return cls.QUOTE_REF_RE.sub(replace, value)
+
+    @staticmethod
+    def _remap_flat_wire_targets(
+        wires: Any,
+        id_rewrite: Dict[str, str],
+        errors: List[str],
+        context: str,
+    ) -> List[Dict[str, Any]]:
+        if not isinstance(wires, list):
+            errors.append(f"{context} 的 wires 不是列表。")
+            return []
+
+        remapped: List[Dict[str, Any]] = []
+        for target_index, target in enumerate(wires):
+            if not isinstance(target, dict):
+                errors.append(f"{context} 的 wires[{target_index}] 不是字典。")
+                continue
+            next_target = copy.deepcopy(target)
+            raw_id = str(next_target.get("id", "")).strip()
+            if raw_id in id_rewrite:
+                next_target["id"] = id_rewrite[raw_id]
+            elif raw_id:
+                errors.append(f"{context} 的 wires 目标 {raw_id} 无法重映射。")
+            remapped.append(next_target)
+        return remapped
+
+    @classmethod
+    def _remap_body_wires(
+        cls,
+        wires: Any,
+        id_rewrite: Dict[str, str],
+        errors: List[str],
+        context: str,
+    ) -> List[List[Dict[str, Any]]]:
+        if not isinstance(wires, list):
+            errors.append(f"{context} 的 wires 不是列表。")
+            return []
+
+        remapped_groups: List[List[Dict[str, Any]]] = []
+        for group_index, output_group in enumerate(wires):
+            if not isinstance(output_group, list):
+                errors.append(f"{context} 的 wires[{group_index}] 不是列表。")
+                remapped_groups.append([])
+                continue
+            remapped_groups.append(
+                cls._remap_flat_wire_targets(
+                    output_group,
+                    id_rewrite,
+                    errors,
+                    f"{context}.wires[{group_index}]",
+                )
+            )
+        return remapped_groups
+
+    def _compile_subflow_body_objects(
+        self,
+        subflow_definition: Dict[str, Any],
+        definition_real_id: str,
+        used_ids: Set[str],
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, str], List[str]]:
+        body_raw = subflow_definition.get("internal_flow_objects", []) or []
+        definition_id = str(subflow_definition.get("definition_id", "")).strip()
+        template_id = str(subflow_definition.get("template_id", "")).strip()
+        raw_definition = subflow_definition.get("raw_definition", {}) or {}
+        raw_definition_id = str(raw_definition.get("id", "")).strip()
+        context_prefix = definition_id or template_id or definition_real_id
+        errors: List[str] = []
+
+        if not body_raw:
+            return [], {}, errors
+        if not isinstance(body_raw, list):
+            return [], {}, [f"{context_prefix} 的 internal_flow_objects 不是列表。"]
+
+        body_id_map: Dict[str, str] = {}
+        for index, body_obj in enumerate(body_raw):
+            if not isinstance(body_obj, dict):
+                errors.append(f"{context_prefix} 的 body[{index}] 不是字典，已跳过。")
+                continue
+            raw_id = str(body_obj.get("id", "")).strip()
+            if not raw_id:
+                raw_id = f"missing_body_id_{index}"
+                errors.append(f"{context_prefix} 的 body[{index}] 缺少 id，已使用稳定占位 id。")
+            if raw_id not in body_id_map:
+                body_id_map[raw_id] = self._assign_stable_id(
+                    f"subflow_body::{context_prefix}::{raw_id}",
+                    used_ids,
+                )
+
+        id_rewrite = dict(body_id_map)
+        for alias in (raw_definition_id, definition_id, template_id):
+            if alias:
+                id_rewrite[alias] = definition_real_id
+        for body_obj in body_raw:
+            if not isinstance(body_obj, dict):
+                continue
+            parent_id = str(body_obj.get("z", "")).strip()
+            if parent_id and parent_id not in body_id_map:
+                id_rewrite[parent_id] = definition_real_id
+
+        body_objects: List[Dict[str, Any]] = []
+        for index, body_obj in enumerate(body_raw):
+            if not isinstance(body_obj, dict):
+                continue
+            raw_id = str(body_obj.get("id", "")).strip() or f"missing_body_id_{index}"
+            real_id = body_id_map.get(raw_id)
+            if not real_id:
+                continue
+
+            compiled_obj = copy.deepcopy(body_obj)
+            if compiled_obj.get("type") in {"tab", "subflow"}:
+                errors.append(f"{context_prefix} 的 body 节点 {raw_id} 不应是 tab/subflow，已跳过。")
+                continue
+            compiled_obj["id"] = real_id
+            compiled_obj["z"] = definition_real_id
+            if "wires" in compiled_obj:
+                compiled_obj["wires"] = self._remap_body_wires(
+                    compiled_obj.get("wires", []),
+                    id_rewrite,
+                    errors,
+                    f"{context_prefix}.body[{raw_id}]",
+                )
+            if isinstance(compiled_obj.get("labelName"), str):
+                compiled_obj["labelName"] = self._rewrite_label_references(
+                    compiled_obj["labelName"],
+                    id_rewrite,
+                    errors,
+                    f"{context_prefix}.body[{raw_id}]",
+                )
+            body_objects.append(compiled_obj)
+
+        return body_objects, body_id_map, errors
+
     def _compile_subflow_definition(
         self,
         subflow_definition: Dict[str, Any],
         real_id: str,
-    ) -> Dict[str, Any]:
+        body_id_map: Dict[str, str] | None = None,
+    ) -> Tuple[Dict[str, Any], List[str]]:
+        errors: List[str] = []
+        body_id_map = body_id_map or {}
         raw_definition = copy.deepcopy(subflow_definition.get("raw_definition", {}) or {})
         if raw_definition:
+            original_definition_id = str(raw_definition.get("id", "")).strip()
             raw_definition["id"] = real_id
             raw_definition.setdefault("type", "subflow")
             raw_definition.setdefault("name", subflow_definition.get("name", ""))
             raw_definition.setdefault("in", [])
             raw_definition.setdefault("out", [])
-            return raw_definition
+            id_rewrite = dict(body_id_map)
+            for alias in (
+                original_definition_id,
+                str(subflow_definition.get("definition_id", "")).strip(),
+                str(subflow_definition.get("template_id", "")).strip(),
+            ):
+                if alias:
+                    id_rewrite[alias] = real_id
+            for field_name in ("in", "out"):
+                ports = raw_definition.get(field_name, [])
+                if not isinstance(ports, list):
+                    errors.append(f"{subflow_definition.get('definition_id', real_id)} 的 {field_name} 不是列表。")
+                    raw_definition[field_name] = []
+                    continue
+                for index, port in enumerate(ports):
+                    if not isinstance(port, dict):
+                        errors.append(f"{subflow_definition.get('definition_id', real_id)} 的 {field_name}[{index}] 不是字典。")
+                        continue
+                    port["wires"] = self._remap_flat_wire_targets(
+                        port.get("wires", []),
+                        id_rewrite,
+                        errors,
+                        f"{subflow_definition.get('definition_id', real_id)}.{field_name}[{index}]",
+                    )
+            return raw_definition, errors
 
         in_ports = subflow_definition.get("in_ports", []) or []
         out_ports = subflow_definition.get("out_ports", []) or []
@@ -150,7 +343,7 @@ class CodingAgent:
                 }
                 for index, port in enumerate(out_ports)
             ],
-        }
+        }, errors
 
     def _compile_subflow_instance(
         self,
@@ -188,6 +381,11 @@ class CodingAgent:
         id_map = self._build_stable_id_map(pages, subflow_definitions, node_instances)
         layout_map: Dict[str, Dict[str, int]] = {}
         warnings: List[str] = []
+        used_ids: Set[str] = set(id_map.values())
+        body_node_count = 0
+        dropped_node_count = 0
+        missing_template_count = 0
+        body_expansion_errors: List[str] = []
 
         for page in pages:
             page_id = page["page_id"]
@@ -200,10 +398,35 @@ class CodingAgent:
                 "info": "",
             })
 
+        compiled_subflow_real_ids: Set[str] = set()
         for definition in subflow_definitions:
             definition_id = definition["definition_id"]
             real_id = id_map[definition_id]
-            flow_objects.append(self._compile_subflow_definition(definition, real_id))
+            if real_id in compiled_subflow_real_ids:
+                continue
+            compiled_subflow_real_ids.add(real_id)
+            body_objects, body_id_map, body_errors = self._compile_subflow_body_objects(
+                definition,
+                real_id,
+                used_ids,
+            )
+            for raw_id, body_real_id in body_id_map.items():
+                flow_objects_key = f"body::{definition_id}::{raw_id}"
+                id_map[flow_objects_key] = body_real_id
+                template_id = str(definition.get("template_id", "")).strip()
+                if template_id:
+                    id_map[f"body::{template_id}::{raw_id}"] = body_real_id
+
+            compiled_definition, definition_errors = self._compile_subflow_definition(
+                definition,
+                real_id,
+                body_id_map,
+            )
+            flow_objects.append(compiled_definition)
+            flow_objects.extend(body_objects)
+            body_node_count += len(body_objects)
+            body_expansion_errors.extend(body_errors)
+            body_expansion_errors.extend(definition_errors)
 
         for node in node_instances:
             instance_id = node["instance_id"]
@@ -226,6 +449,7 @@ class CodingAgent:
                 parent_scope_id = id_map[node["subflow_id"]]
             else:
                 warnings.append(f"{instance_id} 缺少 page_id/subflow_id，已跳过。")
+                dropped_node_count += 1
                 continue
 
             input_count = int(node.get("input_count", 0) or 0)
@@ -245,6 +469,8 @@ class CodingAgent:
             module_doc = doc_map.get(module_type)
             if not module_doc:
                 warnings.append(f"{instance_id} 缺少 module_type={module_type} 的模板定义，已跳过。")
+                missing_template_count += 1
+                dropped_node_count += 1
                 continue
 
             template = self._normalize_template(module_doc.get("template_json", {}))
@@ -255,6 +481,7 @@ class CodingAgent:
                 definition_real_id = id_map.get(definition_lookup_key) or id_map.get(module_type)
                 if not definition_real_id:
                     warnings.append(f"{instance_id} 的子流程定义 {module_type} 尚未生成，已跳过。")
+                    dropped_node_count += 1
                     continue
                 flow_objects.append(self._compile_subflow_instance(
                     node=node,
@@ -296,6 +523,7 @@ class CodingAgent:
             flow_objects.append(filled_node)
 
         warnings.extend(item.get("message", "") for item in unresolved_items if item.get("message"))
+        unresolved_placeholder_count = sum(1 for obj in flow_objects if self._contains_placeholder(obj))
 
         artifact = CompiledArtifact(
             json_text=json.dumps(flow_objects, indent=2, ensure_ascii=False),
@@ -309,6 +537,11 @@ class CodingAgent:
                 ),
                 subflow_count=sum(1 for obj in flow_objects if obj.get("type") == "subflow"),
                 page_count=sum(1 for obj in flow_objects if obj.get("type") == "tab"),
+                body_node_count=body_node_count,
+                dropped_node_count=dropped_node_count,
+                missing_template_count=missing_template_count,
+                unresolved_placeholder_count=unresolved_placeholder_count,
+                body_expansion_errors=body_expansion_errors,
                 warnings=warnings,
             ),
         )

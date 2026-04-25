@@ -71,6 +71,7 @@ class AssemblySharedMixin:
                 for index, port in enumerate(out_ports)
             ],
             raw_definition=raw_definition,
+            internal_flow_objects=copy.deepcopy(module_doc.get("internal_flow_objects", []) or []),
         )
 
 

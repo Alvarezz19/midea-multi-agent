@@ -55,6 +55,9 @@ def make_bundle() -> dict:
                     "inputs": 0,
                     "outputs": 1,
                 },
+                "internal_flow_objects": [
+                    {"id": "fan_body_1", "type": "constInput", "z": "fan_template", "inputs": 0, "outputs": 1, "wires": []}
+                ],
                 "compile_hints": {"input_count": 0, "output_count": 1},
             },
             {
@@ -81,6 +84,9 @@ def make_bundle() -> dict:
                     "inputs": 1,
                     "outputs": 1,
                 },
+                "internal_flow_objects": [
+                    {"id": "heater_body_1", "type": "constInput", "z": "heater_template", "inputs": 0, "outputs": 1, "wires": []}
+                ],
                 "compile_hints": {"input_count": 1, "output_count": 1},
             },
         ],
@@ -245,6 +251,7 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
 
         self.assertEqual(len(graph_ir["pages"]), 2)
         self.assertEqual(len(graph_ir["subflow_definitions"]), 2)
+        self.assertTrue(graph_ir["subflow_definitions"][0]["internal_flow_objects"])
         self.assertEqual(len(graph_ir["node_instances"]), 2)
         self.assertEqual(len(graph_ir["edges"]), 1)
         self.assertEqual(graph_ir["edges"][0]["from_instance"], "node::supply_fan_ctrl::fan_main")
@@ -387,7 +394,7 @@ class Phase3GlobalAssemblerTests(unittest.TestCase):
         self.assertFalse(
             any(
                 edge["to_instance"] == "node::heater_ctrl::heater_main"
-                and edge["from_instance"] != "node::placeholder::supply_fan_available_flag"
+                and not str(edge["from_instance"]).startswith("node::placeholder::supply_fan_available_flag::")
                 for edge in graph_ir["edges"]
             )
         )

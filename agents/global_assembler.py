@@ -574,7 +574,8 @@ class GlobalAssembler(AssemblySharedMixin):
             placeholder_counter += 1
             module_type = str(placeholder_source_doc.get("module_type", "")).strip()
             placeholder_logic_id = f"placeholder_{placeholder_counter}"
-            placeholder_instance_id = f"node::placeholder::{signal_key or placeholder_counter}"
+            # 同一外部信号可能接入多个子系统端口，实例 ID 必须包含消费端以避免编译后重复 id。
+            placeholder_instance_id = f"node::placeholder::{signal_key or placeholder_counter}::{target_instance}::{target_port}"
             input_count, output_count = self._resolve_counts(placeholder_source_doc, {})
             position = {
                 "x": page_offsets.get(page_id, 0),

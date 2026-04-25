@@ -40,6 +40,7 @@ class SubflowDefinitionIR(BaseModel):
     out_ports: List[SubflowPortIR] = Field(default_factory=list)
     template_source: str = "retrieval_template"
     raw_definition: Dict[str, Any] = Field(default_factory=dict)
+    internal_flow_objects: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class NodeInstanceIR(BaseModel):
@@ -98,6 +99,11 @@ class CompileReport(BaseModel):
     node_count: int = 0
     subflow_count: int = 0
     page_count: int = 0
+    body_node_count: int = 0
+    dropped_node_count: int = 0
+    missing_template_count: int = 0
+    unresolved_placeholder_count: int = 0
+    body_expansion_errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
 
 

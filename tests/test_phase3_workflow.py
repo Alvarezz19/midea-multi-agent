@@ -102,6 +102,9 @@ def make_bundle() -> dict:
                     "inputs": 1,
                     "outputs": 1,
                 },
+                "internal_flow_objects": [
+                    {"id": "fan_body_1", "type": "constInput", "z": "fan_template", "inputs": 0, "outputs": 1, "wires": []}
+                ],
                 "compile_hints": {"input_count": 1, "output_count": 1},
             }
         ],
@@ -497,7 +500,17 @@ class Phase3WorkflowTraceSummaryTests(unittest.TestCase):
             ]
         }
         final_state["compiled_artifact"] = {
-            "compile_report": {"page_count": 2, "subflow_count": 1, "node_count": 5}
+            "flow_objects": [{"id": "inst1", "type": "subflow:sf1"}],
+            "compile_report": {
+                "page_count": 2,
+                "subflow_count": 1,
+                "node_count": 5,
+                "body_node_count": 41,
+                "dropped_node_count": 1,
+                "missing_template_count": 2,
+                "unresolved_placeholder_count": 3,
+                "body_expansion_errors": ["body wire broken"],
+            },
         }
         final_state["verification_report"] = {
             "status": "retryable_error",
@@ -547,6 +560,12 @@ class Phase3WorkflowTraceSummaryTests(unittest.TestCase):
         self.assertEqual(summary["verification_error_count"], 1)
         self.assertEqual(summary["verification_warning_count"], 1)
         self.assertEqual(summary["verification_metrics"]["invalid_port_refs"], 2)
+        self.assertEqual(summary["compile_report_summary"]["body_node_count"], 41)
+        self.assertEqual(summary["compile_report_summary"]["dropped_node_count"], 1)
+        self.assertEqual(summary["compile_report_summary"]["missing_template_count"], 2)
+        self.assertEqual(summary["compile_report_summary"]["unresolved_placeholder_count"], 3)
+        self.assertEqual(summary["compile_report_summary"]["body_expansion_error_count"], 1)
+        self.assertEqual(summary["compile_report_summary"]["subflow_instance_count"], 1)
         self.assertEqual(summary["repair_round_count"], 0)
         self.assertEqual(summary["repair_scopes_seen"], [])
         self.assertEqual(summary["final_route_decision"], "")
@@ -616,6 +635,9 @@ class Phase3WorkflowRealIntegrationTests(unittest.TestCase):
             result["subsystem_plan_map"]["supply_fan_ctrl"]["template_binding"]["template_id"].startswith("ahu_subflow__")
         )
         self.assertTrue(result["compiled_artifact"]["flow_objects"])
+        self.assertGreater(result["compiled_artifact"]["compile_report"]["body_node_count"], 0)
+        self.assertEqual(result["route_decision"]["decision"], "accept")
+        self.assertEqual(result["repair_history"], [])
         _assert_no_compat_fields(result)
         self.assertNotIn("source_execution_plan", result["assembled_graph_ir"])
 
@@ -659,6 +681,7 @@ class Phase3WorkflowRealIntegrationTests(unittest.TestCase):
 
             self.assertEqual(result["verification_report"]["status"], "passed")
             self.assertEqual(result["route_decision"]["decision"], "accept")
+            self.assertGreater(result["compiled_artifact"]["compile_report"]["body_node_count"], 0)
             self.assertTrue(expectation["subsystems"].issubset(set(result["subsystem_plan_map"].keys())))
             _assert_no_compat_fields(result)
             for subsystem_id in expectation["expected_reuse_subsystems"]:
