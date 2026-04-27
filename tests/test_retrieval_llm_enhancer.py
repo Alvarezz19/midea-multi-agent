@@ -108,6 +108,36 @@ class RetrievalLlmEnhancerTests(RetrievalAgentPhase2ChromaHarness):
         self.assertEqual(bundle["metadata"]["query_variants"], ["fan control"])
         self.assertEqual(bundle["metadata"]["top_subflow_template_ids"], ["fan_template"])
 
+    def test_empty_llm_rewrite_uses_engineering_retrieval_hints_for_ahu(self):
+        requirement_spec = {
+            "system_type": "AHU",
+            "engineering": {
+                "retrieval_hints": {
+                    "pattern_queries": ["AHU control pattern"],
+                    "template_queries": ["fan control"],
+                    "atomic_queries": ["constant fan control"],
+                }
+            },
+            "subsystems": [{"subsystem_id": "supply_fan_ctrl"}],
+        }
+
+        with patch.object(config, "LLM_ENHANCEMENT_ENABLED", True), \
+             patch.object(config, "RETRIEVAL_USE_LLM_REWRITE", True), \
+             patch.object(LLMManager, "get_llm", return_value=FakeRewriteLLM({"confidence": 0.0})), \
+             self.agent_runtime() as agent:
+            bundle = agent.retrieve_bundle(
+                "AHU 空调箱控制",
+                similarity_threshold=0.0,
+                analysis_result={"retrieval_plan": {"queries": []}, "scenario_analysis": {"system_type": "AHU"}},
+                requirement_spec=requirement_spec,
+            )
+
+        self.assertTrue(bundle["metadata"]["llm_rewrite"]["deterministic_supplement_used"])
+        self.assertTrue(bundle["metadata"]["llm_rewrite"]["adopted"])
+        self.assertIn("fan control", bundle["metadata"]["template_query_variants"])
+        self.assertIn("AHU control pattern", bundle["metadata"]["pattern_query_variants"])
+        self.assertEqual(bundle["metadata"]["top_subflow_template_ids"], ["fan_template"])
+
     def test_rewrite_result_is_normalized_and_limited(self):
         rewriter = RetrievalQueryRewriter(
             FakeRewriteLLM(

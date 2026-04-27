@@ -231,6 +231,23 @@ class AnalysisEngineeringCompilerTests(unittest.TestCase):
         self.assertNotIn("engineering", result["requirement_spec"])
         self.assertFalse(result["analysis_result"]["engineering_analysis"]["adopted"])
 
+    def test_complex_ahu_empty_patch_gets_conservative_engineering_profile(self):
+        agent = AnalysisAgent.__new__(AnalysisAgent)
+        agent.analyze = lambda query: base_analysis_result()
+        agent.engineering_compiler = EngineeringRequirementCompiler(FakePatchLLM({"confidence": 0.0}), provider="fake", model="fake-model")
+
+        query = "生成 AHU 空调箱 Node-RED flows JSON，包含 IO/通讯、控制、定时、直膨机状态、直膨机故障、PID 和联锁。"
+        with patch.object(config, "ANALYSIS_USE_ENGINEERING_COMPILER", True):
+            result = agent.__call__({"user_query": query})
+
+        engineering = result["requirement_spec"]["engineering"]
+        diagnostics = result["analysis_result"]["engineering_analysis"]
+        self.assertTrue(diagnostics["adopted"])
+        self.assertTrue(diagnostics["deterministic_enrichment_used"])
+        self.assertGreaterEqual(len(engineering["points"]), 10)
+        self.assertTrue(engineering["target_profile"])
+        self.assertGreaterEqual(len(engineering["retrieval_hints"]["template_queries"]), 5)
+
     def test_engineering_compiler_failure_falls_back_to_baseline_spec(self):
         agent = AnalysisAgent.__new__(AnalysisAgent)
         agent.analyze = lambda query: base_analysis_result()

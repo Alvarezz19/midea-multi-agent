@@ -10,12 +10,26 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 
+class AssetQuerySpec(BaseModel):
+    """按资产类型拆分的检索查询。"""
+
+    asset_type: str = ""
+    subsystem_id: str = ""
+    subsystem_type: str = ""
+    intent: str = ""
+    query: str = ""
+    must_match_terms: List[str] = Field(default_factory=list)
+    port_roles: List[str] = Field(default_factory=list)
+
+
 class RetrievalRewriteResult(BaseModel):
     """检索查询改写结果。"""
 
     query_variants: List[str] = Field(default_factory=list)
     template_queries: List[str] = Field(default_factory=list)
     pattern_queries: List[str] = Field(default_factory=list)
+    atomic_queries: List[str] = Field(default_factory=list)
+    asset_queries: List[AssetQuerySpec] = Field(default_factory=list)
     category_l1: str = ""
     normalized_terms: List[str] = Field(default_factory=list)
     risk_flags: List[str] = Field(default_factory=list)
@@ -91,7 +105,7 @@ def _validate_payload(payload: Any) -> RetrievalRewriteResult:
         }
     if isinstance(payload, dict):
         payload = dict(payload)
-        for key in ("query_variants", "template_queries", "pattern_queries", "normalized_terms", "risk_flags"):
+        for key in ("query_variants", "template_queries", "pattern_queries", "atomic_queries", "normalized_terms", "risk_flags"):
             payload[key] = _stringify_list_items(payload.get(key, []))
     if hasattr(RetrievalRewriteResult, "model_validate"):
         return RetrievalRewriteResult.model_validate(payload)
@@ -126,10 +140,14 @@ class RetrievalQueryRewriter:
         system_prompt = """你是 AHU / 楼控资产检索查询改写器。
 
 任务：
-- 基于用户需求、analysis_result 和 requirement_hint，生成更适合检索原子模块、子流程模板、系统 pattern 的短查询。
+- 基于用户需求、analysis_result 和 requirement_hint，按资产类型生成检索查询。
+- system_pattern 查询关注目标 flows_*.json 形态、页签、标准对象组和完整 body。
+- subflow_template 查询按子系统拆分，必须体现端口语义、控制对象、反馈/设定/输出、联锁和模式。
+- atomic_module 查询关注 PID、limit、switch、delay、quote、通讯输出等原子模块。
 - 只能输出查询文本、术语和风险标记，不允许输出最终 flows JSON。
 - 不允许发明 template_id、pattern_id 或 module_type。
-- 不确定时写入 risk_flags，不要强行选择资产。"""
+- 不确定时写入 risk_flags，不要强行选择资产。
+- 对复杂 AHU 请求不能返回空查询；至少输出 1 条 pattern 查询和每个显式子系统 1 条 template 查询。"""
 
         user_template = """用户需求：
 {query}
@@ -140,7 +158,7 @@ analysis_result：
 requirement_hint：
 {requirement_json}
 
-请只输出合法 JSON 对象，字段符合 RetrievalRewriteResult，列表总量控制在 {max_queries} 条以内。"""
+请只输出合法 JSON 对象，字段符合 RetrievalRewriteResult。优先填写 asset_queries；同时可填写 pattern_queries、template_queries、atomic_queries。每一类查询都应简短、可检索，列表总量控制在 {max_queries} 条以内。"""
         return ChatPromptTemplate.from_messages([
             ("system", system_prompt),
             ("user", user_template),
@@ -175,19 +193,73 @@ requirement_hint：
 
     def _normalize(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         max_items = self.max_queries
-        query_variants = self._clean_list(payload.get("query_variants", []), max_items)
+        asset_queries = self._normalize_asset_queries(payload.get("asset_queries", []), max_items)
+        asset_query_texts = [item["query"] for item in asset_queries if item.get("query")]
+        pattern_asset_queries = [
+            item["query"]
+            for item in asset_queries
+            if item.get("asset_type") in {"system_pattern", "pattern"} and item.get("query")
+        ]
+        template_asset_queries = [
+            item["query"]
+            for item in asset_queries
+            if item.get("asset_type") in {"subflow_template", "template"} and item.get("query")
+        ]
+        atomic_asset_queries = [
+            item["query"]
+            for item in asset_queries
+            if item.get("asset_type") in {"atomic_module", "atomic"} and item.get("query")
+        ]
+        query_variants = self._clean_list(payload.get("query_variants", []) + asset_query_texts, max_items)
         remaining = max(0, max_items - len(query_variants))
-        template_queries = self._clean_list(payload.get("template_queries", []), remaining)
+        template_queries = self._clean_list(payload.get("template_queries", []) + template_asset_queries, remaining)
         remaining = max(0, max_items - len(query_variants) - len(template_queries))
-        pattern_queries = self._clean_list(payload.get("pattern_queries", []), remaining)
+        pattern_queries = self._clean_list(payload.get("pattern_queries", []) + pattern_asset_queries, remaining)
+        remaining = max(0, max_items - len(query_variants) - len(template_queries) - len(pattern_queries))
+        atomic_queries = self._clean_list(payload.get("atomic_queries", []) + atomic_asset_queries, remaining)
         return {
             "query_variants": query_variants,
             "template_queries": template_queries,
             "pattern_queries": pattern_queries,
+            "atomic_queries": atomic_queries,
+            "asset_queries": asset_queries,
             "category_l1": self._clean_text(payload.get("category_l1", "")),
             "normalized_terms": self._clean_list(payload.get("normalized_terms", []), max_items),
             "risk_flags": self._clean_list(payload.get("risk_flags", []), max_items),
         }
+
+    def _normalize_asset_queries(self, values: Any, max_items: int) -> List[Dict[str, Any]]:
+        if not isinstance(values, list):
+            return []
+        result: List[Dict[str, Any]] = []
+        seen = set()
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            asset_type = self._clean_text(item.get("asset_type", "")).lower()
+            query = self._clean_text(item.get("query", ""))
+            if asset_type not in {"system_pattern", "pattern", "subflow_template", "template", "atomic_module", "atomic"}:
+                continue
+            if not query:
+                continue
+            key = (asset_type, query)
+            if key in seen:
+                continue
+            result.append(
+                {
+                    "asset_type": asset_type,
+                    "subsystem_id": self._clean_text(item.get("subsystem_id", "")),
+                    "subsystem_type": self._clean_text(item.get("subsystem_type", "")),
+                    "intent": self._clean_text(item.get("intent", "")),
+                    "query": query,
+                    "must_match_terms": self._clean_list(item.get("must_match_terms", []), 8),
+                    "port_roles": self._clean_list(item.get("port_roles", []), 8),
+                }
+            )
+            seen.add(key)
+            if len(result) >= max_items:
+                break
+        return result
 
     def rewrite(
         self,
@@ -248,7 +320,9 @@ requirement_hint：
             len(normalized["query_variants"])
             + len(normalized["template_queries"])
             + len(normalized["pattern_queries"])
+            + len(normalized["atomic_queries"])
         )
+        diagnostics["asset_query_count"] = len(normalized.get("asset_queries", []) or [])
         return {
             "rewrite": normalized,
             "diagnostics": diagnostics,

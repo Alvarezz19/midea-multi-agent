@@ -97,7 +97,7 @@ def _is_empty_engineering_patch(patch: Dict[str, Any]) -> bool:
         "assumptions",
         "missing_required_fields",
     )
-    dict_keys = ("communication", "naming_convention")
+    dict_keys = ("communication", "naming_convention", "target_profile", "retrieval_hints")
     if any(_normalize_text(patch.get(key, "")) for key in scalar_keys):
         return False
     if any(patch.get(key) for key in list_keys + dict_keys):
@@ -500,6 +500,26 @@ def merge_engineering_requirement_patch(
             **dict(engineering.get("naming_convention", {}) or {}),
             **dict(patch.get("naming_convention", {}) or {}),
         }
+    if isinstance(patch.get("target_profile", {}), dict):
+        engineering["target_profile"] = {
+            **dict(engineering.get("target_profile", {}) or {}),
+            **dict(patch.get("target_profile", {}) or {}),
+        }
+    if isinstance(patch.get("retrieval_hints", {}), dict):
+        existing_hints = dict(engineering.get("retrieval_hints", {}) or {})
+        incoming_hints = dict(patch.get("retrieval_hints", {}) or {})
+        merged_hints: Dict[str, Any] = dict(existing_hints)
+        for key, value in incoming_hints.items():
+            if isinstance(value, list):
+                merged_hints[key] = _append_unique_strings(
+                    merged_hints.get(key, []) if isinstance(merged_hints.get(key, []), list) else [],
+                    value,
+                )
+            elif isinstance(value, dict):
+                merged_hints[key] = {**dict(merged_hints.get(key, {}) or {}), **value}
+            elif value not in (None, "", [], {}):
+                merged_hints[key] = value
+        engineering["retrieval_hints"] = merged_hints
     engineering["missing_required_fields"] = _append_unique_strings(
         engineering.get("missing_required_fields", []),
         missing_fields,

@@ -385,7 +385,121 @@ class RetrievalAgent:
                     "adopted": False,
                 },
             }
-        return result if isinstance(result, dict) else {"rewrite": {}, "diagnostics": {"enabled": True, "fallback_used": True}}
+        if not isinstance(result, dict):
+            result = {"rewrite": {}, "diagnostics": {"enabled": True, "fallback_used": True}}
+
+        rewrite_payload = result.get("rewrite", {}) if isinstance(result.get("rewrite", {}), dict) else {}
+        deterministic = self._build_deterministic_ahu_rewrite(query, requirement_hint or {})
+        if deterministic:
+            rewrite_payload = self._merge_rewrite_payloads(rewrite_payload, deterministic)
+            diagnostics = dict(result.get("diagnostics", {}) if isinstance(result.get("diagnostics", {}), dict) else {})
+            diagnostics["deterministic_supplement_used"] = bool(
+                not result.get("rewrite")
+                or not self._rewrite_has_queries(result.get("rewrite", {}))
+            )
+            result = {"rewrite": rewrite_payload, "diagnostics": diagnostics}
+        return result
+
+    @classmethod
+    def _rewrite_has_queries(cls, payload: Any) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        return any(
+            payload.get(key)
+            for key in ("query_variants", "template_queries", "pattern_queries", "atomic_queries", "asset_queries")
+        )
+
+    @classmethod
+    def _merge_rewrite_payloads(cls, primary: Dict[str, Any], supplement: Dict[str, Any]) -> Dict[str, Any]:
+        merged = dict(primary or {})
+        for key in ("query_variants", "template_queries", "pattern_queries", "atomic_queries", "normalized_terms", "risk_flags"):
+            values: List[str] = []
+            values.extend(merged.get(key, []) if isinstance(merged.get(key, []), list) else [])
+            values.extend(supplement.get(key, []) if isinstance(supplement.get(key, []), list) else [])
+            merged[key] = cls._clean_text_list(values)
+        asset_queries = []
+        if isinstance(merged.get("asset_queries", []), list):
+            asset_queries.extend(item for item in merged.get("asset_queries", []) if isinstance(item, dict))
+        if isinstance(supplement.get("asset_queries", []), list):
+            asset_queries.extend(item for item in supplement.get("asset_queries", []) if isinstance(item, dict))
+        if asset_queries:
+            seen = set()
+            deduped = []
+            for item in asset_queries:
+                key = (str(item.get("asset_type", "")), str(item.get("query", "")))
+                if key in seen or not key[1].strip():
+                    continue
+                deduped.append(dict(item))
+                seen.add(key)
+            merged["asset_queries"] = deduped
+        if not cls._clean_text(merged.get("category_l1", "")):
+            merged["category_l1"] = cls._clean_text(supplement.get("category_l1", ""))
+        return merged
+
+    @classmethod
+    def _build_deterministic_ahu_rewrite(cls, query: str, requirement_hint: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(requirement_hint, dict):
+            requirement_hint = {}
+        engineering = requirement_hint.get("engineering", {}) if isinstance(requirement_hint.get("engineering", {}), dict) else {}
+        retrieval_hints = engineering.get("retrieval_hints", {}) if isinstance(engineering.get("retrieval_hints", {}), dict) else {}
+        text = " ".join([
+            query or "",
+            str(requirement_hint.get("system_type", "") or ""),
+            str(requirement_hint.get("scenario_summary", "") or ""),
+        ]).lower()
+        is_ahu = "ahu" in text or "空调箱" in text or str(requirement_hint.get("system_type", "")).upper() == "AHU"
+        if not is_ahu:
+            return {}
+
+        pattern_queries = cls._clean_text_list(retrieval_hints.get("pattern_queries", []))
+        template_queries = cls._clean_text_list(retrieval_hints.get("template_queries", []))
+        atomic_queries = cls._clean_text_list(retrieval_hints.get("atomic_queries", []))
+        if not pattern_queries:
+            pattern_queries = [
+                "AHU IO通讯 控制 定时 直膨机状态 直膨机故障 标准页签 子流程 body",
+                "AHU flows JSON tab subflow internal_flow_objects 控制 定时 故障 状态",
+            ]
+        if not template_queries:
+            template_queries = [
+                "送风机 标准控制 运行反馈 故障 启停 联锁 子流程",
+                "送风机 频率控制 频率设定 频率反馈 上下限",
+                "风阀 控制 新风阀 回风阀 开度 手自动",
+                "冷水阀 PID PV SP MV 上下限 手自动",
+                "电加热 控制 故障 联锁 送风机可用",
+                "直膨机 控制 状态 故障 启停 联锁",
+            ]
+        if not atomic_queries:
+            atomic_queries = ["PID limit switch hysteresis delayOn delayOff rsFlipflop quote modbusOutput bacipOutput"]
+
+        asset_queries: List[Dict[str, Any]] = []
+        for pattern_query in pattern_queries:
+            asset_queries.append({"asset_type": "system_pattern", "intent": "pattern_shape", "query": pattern_query})
+        subsystem_ids = [
+            str(item.get("subsystem_id", "") or "").strip()
+            for item in requirement_hint.get("subsystems", [])
+            if isinstance(item, dict)
+        ]
+        for index, template_query in enumerate(template_queries):
+            asset_queries.append(
+                {
+                    "asset_type": "subflow_template",
+                    "subsystem_id": subsystem_ids[index] if index < len(subsystem_ids) else "",
+                    "intent": "template_match",
+                    "query": template_query,
+                }
+            )
+        for atomic_query in atomic_queries:
+            asset_queries.append({"asset_type": "atomic_module", "intent": "atomic_support", "query": atomic_query})
+
+        return {
+            "query_variants": [],
+            "pattern_queries": pattern_queries,
+            "template_queries": template_queries,
+            "atomic_queries": atomic_queries,
+            "asset_queries": asset_queries,
+            "normalized_terms": ["AHU", "IO/通讯", "控制", "定时", "直膨机状态", "直膨机故障", "PID", "联锁"],
+            "risk_flags": ["deterministic_ahu_rewrite_supplement"],
+        }
 
     @classmethod
     def _merge_rewrite_into_plan(
@@ -403,6 +517,7 @@ class RetrievalAgent:
         query_values.extend(rewrite_payload.get("query_variants", []) or [])
         query_values.extend(rewrite_payload.get("template_queries", []) or [])
         query_values.extend(rewrite_payload.get("pattern_queries", []) or [])
+        query_values.extend(rewrite_payload.get("atomic_queries", []) or [])
         if not query_values:
             query_values.append(query)
 
