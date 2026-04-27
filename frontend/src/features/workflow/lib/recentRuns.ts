@@ -37,3 +37,9 @@ export function saveRecentRun(response: CreateRunResponse, title: string, userQu
   ].slice(0, 8);
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
 }
+
+export function removeRecentRun(threadId: string, attemptId: string): RecentRun[] {
+  const next = loadRecentRuns().filter((item) => item.thread_id !== threadId || item.attempt_id !== attemptId);
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  return next;
+}

@@ -24,7 +24,7 @@ export const WORKFLOW_STAGES: WorkflowStage[] = [
     key: "clarification",
     label: "前置澄清",
     description: "必要时冻结澄清问题",
-    match: (step) => step.startsWith("clarification_")
+    match: (step) => step === "clarification_skipped" || step.startsWith("clarification_review_") || step === "clarification_applied"
   },
   {
     key: "retrieval",
@@ -42,7 +42,10 @@ export const WORKFLOW_STAGES: WorkflowStage[] = [
     key: "architecture_review",
     label: "架构评审",
     description: "人工确认或反馈系统骨架",
-    match: (step) => step.startsWith("architecture_review_") || step.startsWith("architecture_feedback_")
+    match: (step) =>
+      step === "architecture_review_skipped" ||
+      step.startsWith("architecture_review_") ||
+      step.startsWith("architecture_feedback_")
   },
   {
     key: "subsystem",

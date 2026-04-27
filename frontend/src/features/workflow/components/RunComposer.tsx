@@ -8,7 +8,7 @@ interface RunComposerProps {
 }
 
 export function RunComposer({ isSubmitting, onSubmit }: RunComposerProps) {
-  const [userQuery, setUserQuery] = useState("为 AHU 生成送风机与电加热联动控制");
+  const [userQuery, setUserQuery] = useState("");
   const [title, setTitle] = useState("AHU 控制方案");
   const [threadId, setThreadId] = useState("");
   const [enableClarification, setEnableClarification] = useState(false);
@@ -55,7 +55,7 @@ export function RunComposer({ isSubmitting, onSubmit }: RunComposerProps) {
           value={userQuery}
           onChange={(event) => setUserQuery(event.target.value)}
           rows={8}
-          placeholder="例如：为 AHU 生成送风机与电加热联动控制"
+          placeholder=""
         />
       </label>
 

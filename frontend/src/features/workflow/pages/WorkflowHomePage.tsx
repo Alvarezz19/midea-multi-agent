@@ -6,7 +6,7 @@ import { HealthBanner } from "../components/HealthBanner";
 import { RunComposer } from "../components/RunComposer";
 import { useCreateWorkflowRun } from "../hooks/useCreateWorkflowRun";
 import { useWorkflowHealth } from "../hooks/useWorkflowHealth";
-import { loadRecentRuns, saveRecentRun } from "../lib/recentRuns";
+import { loadRecentRuns, removeRecentRun, saveRecentRun } from "../lib/recentRuns";
 import type { CreateRunRequest } from "../../../types/workflow";
 
 export function WorkflowHomePage() {
@@ -21,6 +21,11 @@ export function WorkflowHomePage() {
     saveRecentRun(response, title || payload.title || "未命名工作流", userQuery);
     setRecentVersion((value) => value + 1);
     navigate(`/workflow/${response.thread_id}/${response.attempt_id}`);
+  }
+
+  function handleRemoveRecent(threadId: string, attemptId: string) {
+    removeRecentRun(threadId, attemptId);
+    setRecentVersion((value) => value + 1);
   }
 
   return (
@@ -41,11 +46,22 @@ export function WorkflowHomePage() {
           </div>
           <div className="recent-list">
             {recentRuns.map((item) => (
-              <Link to={`/workflow/${item.thread_id}/${item.attempt_id}`} key={`${item.thread_id}-${item.attempt_id}`}>
-                <strong>{item.title || "未命名工作流"}</strong>
-                <span>{item.user_query}</span>
-                <small>{item.thread_id}</small>
-              </Link>
+              <article className="recent-item" key={`${item.thread_id}-${item.attempt_id}`}>
+                <Link to={`/workflow/${item.thread_id}/${item.attempt_id}`}>
+                  <strong>{item.title || "未命名工作流"}</strong>
+                  <span>{item.user_query}</span>
+                  <small>{item.thread_id}</small>
+                </Link>
+                <button
+                  className="recent-delete"
+                  type="button"
+                  aria-label={`删除最近打开记录：${item.title || item.thread_id}`}
+                  title="删除记录"
+                  onClick={() => handleRemoveRecent(item.thread_id, item.attempt_id)}
+                >
+                  ×
+                </button>
+              </article>
             ))}
             {!recentRuns.length ? <p className="muted">暂无本地运行记录。</p> : null}
           </div>

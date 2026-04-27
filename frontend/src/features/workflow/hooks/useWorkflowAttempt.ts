@@ -13,6 +13,8 @@ function buildSignature(attempt: AttemptDetail | null) {
     attempt.current_step,
     attempt.review?.review_id,
     attempt.review?.status,
+    attempt.progress?.last_successful_node,
+    attempt.progress?.node_count,
     attempt.diagnostics?.verification_status,
     attempt.diagnostics?.final_route_decision
   ].join("|");
@@ -81,7 +83,7 @@ export function useWorkflowAttempt(threadId: string, attemptId: string) {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [data?.status, data?.current_step, data?.review?.review_id, refresh]);
+  }, [data, refresh]);
 
   useEffect(() => {
     const handleFocus = () => {

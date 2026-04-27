@@ -29,6 +29,14 @@ export function HealthBanner({ health, error, isLoading, onRefresh }: HealthBann
   const unhealthyCollections = Object.entries(health.collections ?? {})
     .filter(([, ready]) => !ready)
     .map(([name]) => name);
+  const collectionLabels: Record<string, string> = {
+    atomic_modules: "原子模块",
+    subflow_templates: "AHU 子流程模板",
+    system_patterns: "系统模式"
+  };
+  const unhealthyCollectionLabel = unhealthyCollections
+    .map((name) => collectionLabels[name] ?? name)
+    .join("、");
 
   return (
     <section className={`health-banner ${health.ok && health.chroma_ready ? "ok" : "warning"}`}>
@@ -40,7 +48,9 @@ export function HealthBanner({ health, error, isLoading, onRefresh }: HealthBann
           LLM={health.llm_provider || "unknown"} · embedding={health.embedding_provider || "unknown"}
         </p>
         {!health.chroma_ready && unhealthyCollections.length ? (
-          <p className="warning-text">Chroma collection 未就绪：{unhealthyCollections.join("、")}</p>
+          <p className="warning-text">
+            资产索引未就绪：{unhealthyCollectionLabel}。请先构建 Chroma 索引后再运行生成任务。
+          </p>
         ) : null}
       </div>
       <button className="ghost-button" type="button" onClick={onRefresh}>
