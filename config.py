@@ -118,6 +118,7 @@ RETRIEVAL_RERANKER_PROVIDER = os.getenv("RETRIEVAL_RERANKER_PROVIDER", "bge").st
 RETRIEVAL_RERANKER_MODEL = os.getenv("RETRIEVAL_RERANKER_MODEL", "BAAI/bge-reranker-v2-m3").strip()
 RETRIEVAL_RERANK_TOP_N = int(os.getenv("RETRIEVAL_RERANK_TOP_N", "50"))
 RETRIEVAL_RERANK_BATCH_SIZE = int(os.getenv("RETRIEVAL_RERANK_BATCH_SIZE", "16"))
+RETRIEVAL_RERANK_TIMEOUT_S = float(os.getenv("RETRIEVAL_RERANK_TIMEOUT_S", "20"))
 
 # ==================== 子系统规划 LLM 接口适配（默认关闭） ====================
 SUBSYSTEM_USE_LLM_ADAPTER = os.getenv("SUBSYSTEM_USE_LLM_ADAPTER", "false").lower() == "true"

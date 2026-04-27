@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import unittest
 from unittest.mock import patch
 
 import config
 from agents.retrieval_agent import RetrievalAgent
 from tests.retrieval_agent_phase2_shared import RetrievalAgentPhase2ChromaHarness
+from utils.reranker_manager import RerankerManager
 from utils.retrieval_rerank import rerank_retrieval_candidates
 
 
@@ -23,6 +25,20 @@ class FailingScorer:
     def score_pairs(self, pairs):
         del pairs
         raise RuntimeError("rerank failed")
+
+
+class FakeHTTPResponse:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def read(self):
+        return json.dumps(self.payload).encode("utf-8")
 
 
 class RetrievalCrossEncoderRerankTests(RetrievalAgentPhase2ChromaHarness):
@@ -93,6 +109,30 @@ class RetrievalCrossEncoderRerankTests(RetrievalAgentPhase2ChromaHarness):
         self.assertTrue(bundle["metadata"]["reranker_enabled"])
         self.assertFalse(bundle["metadata"]["reranker_fallback_used"])
         self.assertEqual(bundle["metadata"]["top_subflow_template_ids"], ["fan_template"])
+
+    def test_siliconflow_reranker_maps_scores_by_response_index(self):
+        payload = {
+            "id": "rerank-test",
+            "results": [
+                {"index": 1, "relevance_score": 0.9},
+                {"index": 0, "relevance_score": 0.1},
+            ],
+        }
+
+        with patch("utils.reranker_manager.request.urlopen", return_value=FakeHTTPResponse(payload)) as urlopen:
+            scorer = RerankerManager.get_reranker(
+                "siliconflow",
+                "BAAI/bge-reranker-v2-m3",
+                api_key="test-key",
+                base_url="https://api.siliconflow.cn/v1",
+                timeout_s=3,
+            )
+            scores = scorer.score_pairs([("fan", "generic"), ("fan", "fan control")])
+
+        self.assertEqual(scores, [0.1, 0.9])
+        request_obj = urlopen.call_args.args[0]
+        self.assertEqual(request_obj.full_url, "https://api.siliconflow.cn/v1/rerank")
+        self.assertIn("Bearer test-key", str(request_obj.headers))
 
 
 if __name__ == "__main__":

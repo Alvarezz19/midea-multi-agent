@@ -29,6 +29,34 @@ def _model_to_dict(model: Any) -> Dict[str, Any]:
     return dict(model or {})
 
 
+def _stringify_list_items(values: Any) -> List[str]:
+    """兼容真实 LLM 将字符串列表项输出成对象的情况。"""
+
+    if not isinstance(values, list):
+        return []
+    normalized: List[str] = []
+    for item in values:
+        if isinstance(item, str):
+            text = item.strip()
+        elif isinstance(item, dict):
+            text = str(
+                item.get("query")
+                or item.get("term")
+                or item.get("type")
+                or item.get("message")
+                or item.get("reason")
+                or item.get("text")
+                or ""
+            ).strip()
+            if not text:
+                text = json.dumps(item, ensure_ascii=False, sort_keys=True)
+        else:
+            text = str(item).strip()
+        if text:
+            normalized.append(text)
+    return normalized
+
+
 def _validate_payload(payload: Any) -> RetrievalRewriteResult:
     if isinstance(payload, RetrievalRewriteResult):
         return payload
@@ -61,6 +89,10 @@ def _validate_payload(payload: Any) -> RetrievalRewriteResult:
             "normalized_terms": normalized_terms,
             "risk_flags": risk_flags,
         }
+    if isinstance(payload, dict):
+        payload = dict(payload)
+        for key in ("query_variants", "template_queries", "pattern_queries", "normalized_terms", "risk_flags"):
+            payload[key] = _stringify_list_items(payload.get(key, []))
     if hasattr(RetrievalRewriteResult, "model_validate"):
         return RetrievalRewriteResult.model_validate(payload)
     return RetrievalRewriteResult.parse_obj(payload)
@@ -108,11 +140,17 @@ analysis_result：
 requirement_hint：
 {requirement_json}
 
-请输出 RetrievalRewriteResult，列表总量控制在 {max_queries} 条以内。"""
+请只输出合法 JSON 对象，字段符合 RetrievalRewriteResult，列表总量控制在 {max_queries} 条以内。"""
         return ChatPromptTemplate.from_messages([
             ("system", system_prompt),
             ("user", user_template),
         ])
+
+    def _invoke_json(self, messages: Any) -> Any:
+        llm = self.llm
+        if self.provider.lower() == "deepseek" and hasattr(llm, "bind"):
+            llm = llm.bind(response_format={"type": "json_object"})
+        return llm.invoke(messages)
 
     @staticmethod
     def _clean_text(value: Any) -> str:
@@ -178,6 +216,8 @@ requirement_hint：
         )
 
         try:
+            if self.provider.lower() == "deepseek":
+                raise RuntimeError("structured_output_skipped_for_deepseek_json_mode")
             structured_llm = self.llm.with_structured_output(
                 RetrievalRewriteResult,
                 method="function_calling",
@@ -188,7 +228,7 @@ requirement_hint：
             diagnostics["llm_used"] = True
         except Exception as structured_error:
             try:
-                response = self.llm.invoke(messages)
+                response = self._invoke_json(messages)
                 raw = self._extract_json_text(getattr(response, "content", "") or "")
                 payload = _model_to_dict(_validate_payload(json.loads(raw) if raw else {}))
                 diagnostics["llm_used"] = True

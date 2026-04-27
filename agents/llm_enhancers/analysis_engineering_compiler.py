@@ -78,9 +78,39 @@ def _model_to_dict(model: Any) -> Dict[str, Any]:
     return dict(model or {})
 
 
+def _stringify_list_items(values: Any, *, preferred_keys: List[str] | None = None) -> List[str]:
+    """兼容真实 LLM 将字符串列表项输出成对象的情况。"""
+
+    if not isinstance(values, list):
+        return []
+    keys = preferred_keys or ["code", "message", "field", "reason", "description", "name"]
+    normalized: List[str] = []
+    for item in values:
+        if isinstance(item, str):
+            text = item.strip()
+        elif isinstance(item, dict):
+            parts = [str(item.get(key, "") or "").strip() for key in keys]
+            text = ":".join(part for part in parts if part)
+            if not text:
+                text = json.dumps(item, ensure_ascii=False, sort_keys=True)
+        else:
+            text = str(item).strip()
+        if text:
+            normalized.append(text)
+    return normalized
+
+
 def _validate_patch(payload: Any) -> AhuRequirementPatch:
     if isinstance(payload, AhuRequirementPatch):
         return payload
+    if isinstance(payload, dict):
+        payload = dict(payload)
+        for key in ("required_pages", "global_modes", "acceptance_criteria", "ambiguities", "assumptions"):
+            payload[key] = _stringify_list_items(payload.get(key, []))
+        payload["missing_required_fields"] = _stringify_list_items(
+            payload.get("missing_required_fields", []),
+            preferred_keys=["code", "field", "message", "reason", "description"],
+        )
     if hasattr(AhuRequirementPatch, "model_validate"):
         return AhuRequirementPatch.model_validate(payload)
     return AhuRequirementPatch.parse_obj(payload)
@@ -133,12 +163,18 @@ class EngineeringRequirementCompiler:
 当前 requirement_spec：
 {requirement_json}
 
-请输出 AhuRequirementPatch。"""
+请只输出合法 JSON 对象，字段符合 AhuRequirementPatch。"""
 
         return ChatPromptTemplate.from_messages([
             ("system", system_prompt),
             ("user", user_template),
         ])
+
+    def _invoke_json(self, messages: Any) -> Any:
+        llm = self.llm
+        if self.provider.lower() == "deepseek" and hasattr(llm, "bind"):
+            llm = llm.bind(response_format={"type": "json_object"})
+        return llm.invoke(messages)
 
     def compile_patch(
         self,
@@ -166,6 +202,8 @@ class EngineeringRequirementCompiler:
         }
 
         try:
+            if self.provider.lower() == "deepseek":
+                raise RuntimeError("structured_output_skipped_for_deepseek_json_mode")
             structured_llm = self.llm.with_structured_output(
                 AhuRequirementPatch,
                 method="function_calling",
@@ -176,7 +214,7 @@ class EngineeringRequirementCompiler:
             diagnostics["llm_used"] = True
         except Exception as structured_error:
             try:
-                response = self.llm.invoke(messages)
+                response = self._invoke_json(messages)
                 raw = self._extract_json_text(getattr(response, "content", "") or "")
                 patch = _validate_patch(json.loads(raw) if raw else {})
                 diagnostics["llm_used"] = True
