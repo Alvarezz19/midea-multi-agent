@@ -57,7 +57,7 @@ Copy-Item .env.example .env
 
 - `LLM_PROVIDER` 及对应 API Key
 - `EMBEDDING_PROVIDER` 及对应模型配置
-- `ANALYSIS_LLM_PROVIDER`、`PLANNING_LLM_PROVIDER` 等可选覆盖项
+- `ANALYSIS_LLM_PROVIDER`、`LLM_ENHANCEMENT_PROVIDER` 及各节点 LLM 增强开关等可选覆盖项
 
 ## 正式入口
 

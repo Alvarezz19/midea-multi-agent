@@ -1,10 +1,12 @@
 """Phase 3 architecture planner."""
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import config
+from agents.llm_enhancers.architecture_advisor import ArchitectureAdvisor
 from utils.console_utils import safe_print as print
+from utils.model_manager import LLMManager
 from utils.phase3_adapters import make_page_id, make_page_key, normalize_signal_name
 from utils.phase3_contracts import empty_architecture_plan, empty_decomposition_result
 from utils.retrieval_bundle_utils import (
@@ -58,9 +60,41 @@ _GLOBAL_MODE_PAGE_KEYS = {
 class ArchitecturePlanner:
     """Build a deterministic system skeleton from requirement_spec and retrieval assets."""
 
-    def __init__(self):
+    def __init__(self, architecture_advisor: Optional[ArchitectureAdvisor] = None):
+        self.architecture_advisor = architecture_advisor
         if config.DEBUG:
             print("[ArchitecturePlanner] initialized")
+
+    @staticmethod
+    def _llm_advisor_enabled() -> bool:
+        return bool(config.LLM_ENHANCEMENT_ENABLED and config.ARCHITECTURE_USE_LLM_ADVISOR)
+
+    def _get_architecture_advisor(self) -> ArchitectureAdvisor:
+        if self.architecture_advisor is not None:
+            return self.architecture_advisor
+
+        provider = (
+            config.ARCHITECTURE_LLM_PROVIDER
+            or config.LLM_ENHANCEMENT_PROVIDER
+            or config.LLM_PROVIDER
+        )
+        model_name = (
+            config.ARCHITECTURE_LLM_MODEL
+            or config.LLM_ENHANCEMENT_MODEL
+            or None
+        )
+        llm = LLMManager.get_llm(
+            provider,
+            model=model_name,
+            temperature=config.LLM_ENHANCEMENT_TEMPERATURE,
+            timeout=config.ARCHITECTURE_LLM_TIMEOUT_S,
+        )
+        self.architecture_advisor = ArchitectureAdvisor(
+            llm=llm,
+            provider=provider,
+            model=model_name or "",
+        )
+        return self.architecture_advisor
 
     @staticmethod
     def _dedupe_signal_names(values: List[str]) -> List[str]:
@@ -893,6 +927,355 @@ class ArchitecturePlanner:
             }
         ]
 
+    @staticmethod
+    def _candidate_template_summaries(subflow_templates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        summaries: List[Dict[str, Any]] = []
+        for template in subflow_templates:
+            if not isinstance(template, dict):
+                continue
+            template_id = str(template.get("template_id") or template.get("module_type") or "").strip()
+            if not template_id:
+                continue
+            ports_definition = template.get("ports_definition", {})
+            summaries.append(
+                {
+                    "template_id": template_id,
+                    "template_name": str(template.get("template_name") or template.get("name") or "").strip(),
+                    "template_role": str(template.get("template_role", "")).strip(),
+                    "ports_summary": ports_definition if isinstance(ports_definition, dict) else {},
+                }
+            )
+        return summaries
+
+    @staticmethod
+    def _architecture_advisory_from_result(
+        result: Dict[str, Any],
+        *,
+        adopted_patch_count: int,
+        rejected_patch_count: int,
+        warnings: List[str],
+    ) -> Dict[str, Any]:
+        diagnostics = result.get("diagnostics", {}) if isinstance(result, dict) else {}
+        return {
+            "enabled": True,
+            "adopted": adopted_patch_count > 0,
+            "provider": str(diagnostics.get("provider", "") or ""),
+            "model": str(diagnostics.get("model", "") or ""),
+            "patch_count": adopted_patch_count,
+            "rejected_patch_count": rejected_patch_count,
+            "warnings": list(warnings or []),
+            "fallback_used": bool(diagnostics.get("fallback_used", False)),
+            "fallback_reason": str(diagnostics.get("fallback_reason", "") or ""),
+            "elapsed_ms": int(diagnostics.get("elapsed_ms", 0) or 0),
+            "confidence": diagnostics.get("confidence", 0.0),
+        }
+
+    @staticmethod
+    def _draft_signal_keys(requirement_spec: Dict[str, Any], subsystem_descriptors: List[Dict[str, Any]]) -> set[str]:
+        keys: set[str] = set()
+        signals = requirement_spec.get("signals", {}) if isinstance(requirement_spec.get("signals"), dict) else {}
+        for field_name in ("inputs", "outputs", "software_points", "alarm_points"):
+            keys.update(
+                canonicalize_signal_name(value)
+                for value in signals.get(field_name, []) or []
+                if canonicalize_signal_name(value)
+            )
+        keys.update(
+            canonicalize_signal_name(value)
+            for value in requirement_spec.get("global_modes", []) or []
+            if canonicalize_signal_name(value)
+        )
+        for descriptor in subsystem_descriptors:
+            for field_name in ("imports", "exports"):
+                keys.update(
+                    canonicalize_signal_name(value)
+                    for value in descriptor.get(field_name, []) or []
+                    if canonicalize_signal_name(value)
+                )
+            for binding in descriptor.get("interface_bindings", []) or []:
+                if not isinstance(binding, dict):
+                    continue
+                signal_key = canonicalize_signal_name(
+                    binding.get("canonical_signal_key")
+                    or binding.get("signal_key")
+                    or binding.get("signal_name")
+                )
+                if signal_key:
+                    keys.add(signal_key)
+        return {key for key in keys if key}
+
+    def _apply_architecture_advice(
+        self,
+        *,
+        advice: Dict[str, Any],
+        requirement_spec: Dict[str, Any],
+        pages: List[Dict[str, Any]],
+        subsystem_descriptors: List[Dict[str, Any]],
+        subsystem_slots: List[Dict[str, Any]],
+        subflow_templates: List[Dict[str, Any]],
+    ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
+        pages = [dict(page) for page in pages]
+        subsystem_descriptors = [dict(item) for item in subsystem_descriptors]
+        subsystem_slots = [dict(item) for item in subsystem_slots]
+        descriptor_by_id = {str(item.get("subsystem_id", "")).strip(): item for item in subsystem_descriptors}
+        slot_by_id = {str(item.get("subsystem_id", "")).strip(): item for item in subsystem_slots}
+        page_ids = {str(page.get("page_id", "")).strip() for page in pages}
+        allowed_template_ids = {
+            str(template.get("template_id") or template.get("module_type") or "").strip()
+            for template in subflow_templates
+            if str(template.get("template_id") or template.get("module_type") or "").strip()
+        }
+        standard_page_labels = {
+            "IO/通讯",
+            "控制",
+            "定时",
+            "状态",
+            "故障",
+            "直膨机状态",
+            "直膨机故障",
+            "排风机",
+        } | {str(label).strip() for label in requirement_spec.get("required_pages", []) or [] if str(label).strip()}
+        signal_keys = self._draft_signal_keys(requirement_spec, subsystem_descriptors)
+        warnings: List[str] = []
+        adopted_count = 0
+        rejected_count = 0
+
+        def reject(reason: str) -> None:
+            nonlocal rejected_count
+            rejected_count += 1
+            warnings.append(reason)
+
+        page_patch = advice.get("page_patch", []) if isinstance(advice, dict) else []
+        if isinstance(page_patch, list):
+            for raw_page in page_patch:
+                if not isinstance(raw_page, dict):
+                    continue
+                action = str(raw_page.get("action", "")).strip().lower()
+                label = str(raw_page.get("label", "") or raw_page.get("page_label", "") or "").strip()
+                if action in {"delete", "remove"}:
+                    reject(f"LLM page_patch rejected deletion request for {label or '<empty>'}.")
+                    continue
+                if not label:
+                    reject("LLM page_patch rejected empty label.")
+                    continue
+                if label not in standard_page_labels:
+                    reject(f"LLM page_patch rejected non-standard page label {label}.")
+                    continue
+                page_id = make_page_id(label)
+                if page_id in page_ids:
+                    continue
+                pages.append(
+                    {
+                        "page_id": page_id,
+                        "label": label,
+                        "kind": str(raw_page.get("kind", "")).strip() or make_page_key(label),
+                        "order": len(pages),
+                        "source": "llm_advisor",
+                    }
+                )
+                page_ids.add(page_id)
+                adopted_count += 1
+
+        def apply_template_preferences(subsystem_id: str, values: Any) -> None:
+            nonlocal adopted_count
+            slot = slot_by_id.get(subsystem_id)
+            descriptor = descriptor_by_id.get(subsystem_id)
+            if not slot or not descriptor:
+                reject(f"LLM template preference rejected unknown subsystem_id {subsystem_id}.")
+                return
+            raw_values = values if isinstance(values, list) else []
+            valid_ids: List[str] = []
+            invalid_ids: List[str] = []
+            seen = set()
+            for value in raw_values:
+                template_id = str(value).strip()
+                if not template_id:
+                    continue
+                if template_id not in allowed_template_ids:
+                    invalid_ids.append(template_id)
+                    continue
+                if template_id not in seen:
+                    valid_ids.append(template_id)
+                    seen.add(template_id)
+            if invalid_ids:
+                reject(f"LLM template preference rejected unknown template_id(s) for {subsystem_id}: {', '.join(invalid_ids)}.")
+            if not valid_ids:
+                return
+            if slot.get("preferred_template_ids") == valid_ids:
+                return
+            slot["preferred_template_ids"] = valid_ids
+            slot["preferred_implementation"] = "reuse_template"
+            slot["degrade_reason"] = ""
+            slot["selection_reason"] = (
+                str(slot.get("selection_reason", "")).strip()
+                + f" LLM advisor preferred templates: {', '.join(valid_ids)}."
+            ).strip()
+            score_breakdown = list(slot.get("score_breakdown", []) or [])
+            score_breakdown.insert(
+                0,
+                {
+                    "template_id": valid_ids[0],
+                    "score": 1,
+                    "reasons": ["LLM advisor template preference accepted."],
+                    "score_breakdown": {"llm_advisor": {"score": 1}},
+                },
+            )
+            slot["score_breakdown"] = score_breakdown[:3]
+            descriptor["implementation_preference"] = "reuse_template"
+            adopted_count += 1
+
+        subsystem_patch = advice.get("subsystem_patch", []) if isinstance(advice, dict) else []
+        if isinstance(subsystem_patch, list):
+            for raw_patch in subsystem_patch:
+                if not isinstance(raw_patch, dict):
+                    continue
+                action = str(raw_patch.get("action", "")).strip().lower()
+                subsystem_id = str(raw_patch.get("subsystem_id", "")).strip()
+                if action in {"delete", "remove"}:
+                    reject(f"LLM subsystem_patch rejected deletion request for {subsystem_id or '<empty>'}.")
+                    continue
+                descriptor = descriptor_by_id.get(subsystem_id)
+                slot = slot_by_id.get(subsystem_id)
+                if not descriptor or not slot:
+                    reject(f"LLM subsystem_patch rejected unknown subsystem_id {subsystem_id or '<empty>'}.")
+                    continue
+                page_label = str(raw_patch.get("page_label", "")).strip()
+                page_id = str(raw_patch.get("page_id", "")).strip()
+                if page_label:
+                    page_id = make_page_id(page_label)
+                if page_id and page_id in page_ids and descriptor.get("page_id") != page_id:
+                    descriptor["page_id"] = page_id
+                    slot["page_id"] = page_id
+                    adopted_count += 1
+                elif page_id and page_id not in page_ids:
+                    reject(f"LLM subsystem_patch rejected unknown page_id {page_id} for {subsystem_id}.")
+                if "priority" in raw_patch:
+                    try:
+                        priority = int(raw_patch.get("priority"))
+                    except (TypeError, ValueError):
+                        reject(f"LLM subsystem_patch rejected invalid priority for {subsystem_id}.")
+                    else:
+                        if descriptor.get("priority") != priority:
+                            descriptor["priority"] = priority
+                            slot["priority"] = priority
+                            adopted_count += 1
+                preferred_values = raw_patch.get("preferred_templates", raw_patch.get("preferred_template_ids", []))
+                if preferred_values:
+                    apply_template_preferences(subsystem_id, preferred_values)
+
+        template_preferences = advice.get("template_preferences", {}) if isinstance(advice, dict) else {}
+        if isinstance(template_preferences, dict):
+            for subsystem_id, values in template_preferences.items():
+                apply_template_preferences(str(subsystem_id).strip(), values)
+
+        shared_signal_patch = advice.get("shared_signal_patch", []) if isinstance(advice, dict) else []
+        if isinstance(shared_signal_patch, list):
+            for raw_patch in shared_signal_patch:
+                if not isinstance(raw_patch, dict):
+                    continue
+                signal_key = canonicalize_signal_name(
+                    raw_patch.get("canonical_signal_key")
+                    or raw_patch.get("signal_key")
+                    or raw_patch.get("signal_name")
+                )
+                if not signal_key or signal_key not in signal_keys:
+                    reject(f"LLM shared_signal_patch rejected unknown signal {raw_patch.get('signal_name', '') or signal_key or '<empty>'}.")
+                    continue
+                owner_values = raw_patch.get("owner_subsystem_ids", raw_patch.get("candidate_exporters", []))
+                if isinstance(owner_values, str):
+                    owner_ids = [owner_values]
+                elif isinstance(owner_values, list):
+                    owner_ids = [str(value).strip() for value in owner_values if str(value).strip()]
+                else:
+                    owner_id = str(raw_patch.get("owner_subsystem_id", "")).strip()
+                    owner_ids = [owner_id] if owner_id else []
+                owner_ids = [owner_id for owner_id in owner_ids if owner_id]
+                if len(set(owner_ids)) != 1:
+                    reject(f"LLM shared_signal_patch kept advisory for ambiguous owner of {signal_key}.")
+                    continue
+                owner_id = owner_ids[0]
+                if owner_id not in descriptor_by_id:
+                    reject(f"LLM shared_signal_patch rejected unknown owner {owner_id} for {signal_key}.")
+                    continue
+                for descriptor in subsystem_descriptors:
+                    for binding in descriptor.get("interface_bindings", []) or []:
+                        if not isinstance(binding, dict):
+                            continue
+                        binding_key = canonicalize_signal_name(
+                            binding.get("canonical_signal_key")
+                            or binding.get("signal_key")
+                            or binding.get("signal_name")
+                        )
+                        if binding_key == signal_key:
+                            binding["binding_kind"] = "shared_signal"
+                            binding["owner_subsystem_id"] = owner_id
+                adopted_count += 1
+
+        llm_warnings = advice.get("warnings", []) if isinstance(advice, dict) else []
+        if isinstance(llm_warnings, list):
+            warnings.extend(str(item).strip() for item in llm_warnings if str(item).strip())
+
+        diagnostics = {
+            "adopted_patch_count": adopted_count,
+            "rejected_patch_count": rejected_count,
+            "warnings": warnings,
+        }
+        return pages, subsystem_descriptors, subsystem_slots, diagnostics
+
+    def _maybe_apply_architecture_advisor(
+        self,
+        *,
+        requirement_spec: Dict[str, Any],
+        selected_pattern: Dict[str, Any],
+        subflow_templates: List[Dict[str, Any]],
+        pages: List[Dict[str, Any]],
+        subsystem_descriptors: List[Dict[str, Any]],
+        subsystem_slots: List[Dict[str, Any]],
+        shared_signal_registry: List[Dict[str, Any]],
+    ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
+        if not self._llm_advisor_enabled():
+            return pages, subsystem_descriptors, subsystem_slots, {}
+
+        deterministic_draft = {
+            "pages": pages,
+            "subsystem_descriptors": subsystem_descriptors,
+            "subsystem_slots": subsystem_slots,
+            "shared_signal_registry": shared_signal_registry,
+        }
+        try:
+            result = self._get_architecture_advisor().advise(
+                requirement_spec=requirement_spec,
+                selected_system_pattern=selected_pattern,
+                candidate_templates=self._candidate_template_summaries(subflow_templates),
+                deterministic_draft=deterministic_draft,
+            )
+            advice = result.get("advice", {}) if isinstance(result, dict) else {}
+            pages, subsystem_descriptors, subsystem_slots, patch_diagnostics = self._apply_architecture_advice(
+                advice=advice,
+                requirement_spec=requirement_spec,
+                pages=pages,
+                subsystem_descriptors=subsystem_descriptors,
+                subsystem_slots=subsystem_slots,
+                subflow_templates=subflow_templates,
+            )
+            advisory = self._architecture_advisory_from_result(
+                result if isinstance(result, dict) else {},
+                adopted_patch_count=int(patch_diagnostics.get("adopted_patch_count", 0) or 0),
+                rejected_patch_count=int(patch_diagnostics.get("rejected_patch_count", 0) or 0),
+                warnings=list(patch_diagnostics.get("warnings", []) or []),
+            )
+            return pages, subsystem_descriptors, subsystem_slots, advisory
+        except Exception as error:
+            return pages, subsystem_descriptors, subsystem_slots, {
+                "enabled": True,
+                "adopted": False,
+                "patch_count": 0,
+                "rejected_patch_count": 0,
+                "warnings": [],
+                "fallback_used": True,
+                "fallback_reason": str(error),
+            }
+
     def plan(
         self,
         requirement_spec: Dict[str, Any],
@@ -1019,6 +1402,29 @@ class ArchitecturePlanner:
             )
             planning_order.append(subsystem_id)
 
+        shared_signal_registry, _ = self._build_shared_signal_registry(
+            requirement_spec,
+            subsystem_descriptors,
+            planning_order,
+        )
+        pages, subsystem_descriptors, subsystem_slots, llm_advisory = self._maybe_apply_architecture_advisor(
+            requirement_spec=requirement_spec,
+            selected_pattern=selected_pattern,
+            subflow_templates=subflow_templates,
+            pages=pages,
+            subsystem_descriptors=subsystem_descriptors,
+            subsystem_slots=subsystem_slots,
+            shared_signal_registry=shared_signal_registry,
+        )
+        template_needs = [
+            {
+                "subsystem_id": str(slot.get("subsystem_id", "")).strip(),
+                "preferred_template_ids": list(slot.get("preferred_template_ids", []) or []),
+                "implementation_preference": str(slot.get("preferred_implementation", "")).strip(),
+            }
+            for slot in subsystem_slots
+            if str(slot.get("subsystem_id", "")).strip()
+        ]
         shared_signal_registry, shared_signal_warnings = self._build_shared_signal_registry(
             requirement_spec,
             subsystem_descriptors,
@@ -1046,6 +1452,8 @@ class ArchitecturePlanner:
                     },
                 }
             )
+            if llm_advisory:
+                pattern_bindings[-1]["llm_advisory"] = llm_advisory
 
         naming_strategy = {
             "signal_prefix": str(requirement_spec.get("system_type", "system")).strip().lower() or "system",
@@ -1087,7 +1495,11 @@ class ArchitecturePlanner:
                 "naming_strategy": naming_strategy,
                 "layout_strategy": layout_strategy,
                 "pattern_bindings": pattern_bindings,
-                "warnings": list(requirement_spec.get("warnings", []) or []) + shared_signal_warnings,
+                "warnings": (
+                    list(requirement_spec.get("warnings", []) or [])
+                    + shared_signal_warnings
+                    + list(llm_advisory.get("warnings", []) if llm_advisory else [])
+                ),
             }
         )
         decomposition_result.update(
@@ -1097,7 +1509,11 @@ class ArchitecturePlanner:
                 "shared_signal_registry": shared_signal_registry,
                 "template_needs": template_needs,
                 "planning_order": planning_order,
-                "warnings": list(requirement_spec.get("warnings", []) or []) + shared_signal_warnings,
+                "warnings": (
+                    list(requirement_spec.get("warnings", []) or [])
+                    + shared_signal_warnings
+                    + list(llm_advisory.get("warnings", []) if llm_advisory else [])
+                ),
             }
         )
 

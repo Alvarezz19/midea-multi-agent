@@ -32,6 +32,35 @@ def _model_to_dict(model: Any) -> Dict[str, Any]:
 def _validate_payload(payload: Any) -> RetrievalRewriteResult:
     if isinstance(payload, RetrievalRewriteResult):
         return payload
+    if isinstance(payload, list):
+        query_variants: List[str] = []
+        normalized_terms: List[str] = []
+        risk_flags: List[str] = []
+        for item in payload:
+            if isinstance(item, str):
+                query_variants.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            query_text = str(
+                item.get("query")
+                or item.get("text")
+                or item.get("query_variant")
+                or ""
+            ).strip()
+            if query_text:
+                query_variants.append(query_text)
+            terms = item.get("terms", item.get("normalized_terms", []))
+            if isinstance(terms, list):
+                normalized_terms.extend(str(term).strip() for term in terms if str(term).strip())
+            item_risks = item.get("risk_flags", [])
+            if isinstance(item_risks, list):
+                risk_flags.extend(str(flag).strip() for flag in item_risks if str(flag).strip())
+        payload = {
+            "query_variants": query_variants,
+            "normalized_terms": normalized_terms,
+            "risk_flags": risk_flags,
+        }
     if hasattr(RetrievalRewriteResult, "model_validate"):
         return RetrievalRewriteResult.model_validate(payload)
     return RetrievalRewriteResult.parse_obj(payload)
@@ -49,13 +78,16 @@ class RetrievalQueryRewriter:
 
     @staticmethod
     def _extract_json_text(content: str) -> str:
+        stripped = content.strip()
+        if stripped.startswith("{") or stripped.startswith("["):
+            return stripped
         json_match = re.search(r"```json\s*(.*?)\s*```", content, re.DOTALL | re.IGNORECASE)
         if json_match:
             return json_match.group(1).strip()
         obj_match = re.search(r"(\{.*\})", content, re.DOTALL)
         if obj_match:
             return obj_match.group(1).strip()
-        return content.strip()
+        return stripped
 
     @staticmethod
     def _create_prompt() -> ChatPromptTemplate:

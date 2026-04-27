@@ -1,10 +1,12 @@
 """Phase 3 subsystem planner."""
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import config
+from agents.llm_enhancers.subsystem_interface_adapter import SubsystemInterfaceAdapter
 from utils.console_utils import safe_print as print
+from utils.model_manager import LLMManager
 from utils.phase3_adapters import normalize_signal_name
 from utils.phase3_contracts import empty_subsystem_plan
 from utils.retrieval_bundle_utils import build_bundle_doc_map, get_bundle_atomic_modules
@@ -15,9 +17,41 @@ from .coding_utils import resolve_input_count, resolve_output_count
 class SubsystemPlanner:
     """Build subsystem-local IR in a deterministic, sequential fashion."""
 
-    def __init__(self):
+    def __init__(self, interface_adapter: Optional[SubsystemInterfaceAdapter] = None):
+        self.interface_adapter = interface_adapter
         if config.DEBUG:
             print("[SubsystemPlanner] initialized")
+
+    @staticmethod
+    def _llm_adapter_enabled() -> bool:
+        return bool(config.LLM_ENHANCEMENT_ENABLED and config.SUBSYSTEM_USE_LLM_ADAPTER)
+
+    def _get_interface_adapter(self) -> SubsystemInterfaceAdapter:
+        if self.interface_adapter is not None:
+            return self.interface_adapter
+
+        provider = (
+            config.SUBSYSTEM_LLM_PROVIDER
+            or config.LLM_ENHANCEMENT_PROVIDER
+            or config.LLM_PROVIDER
+        )
+        model_name = (
+            config.SUBSYSTEM_LLM_MODEL
+            or config.LLM_ENHANCEMENT_MODEL
+            or None
+        )
+        llm = LLMManager.get_llm(
+            provider,
+            model=model_name,
+            temperature=config.LLM_ENHANCEMENT_TEMPERATURE,
+            timeout=config.SUBSYSTEM_LLM_TIMEOUT_S,
+        )
+        self.interface_adapter = SubsystemInterfaceAdapter(
+            llm=llm,
+            provider=provider,
+            model=model_name or "",
+        )
+        return self.interface_adapter
 
     @staticmethod
     def _normalize_template(template_raw: Any) -> Dict[str, Any]:
@@ -396,14 +430,179 @@ class SubsystemPlanner:
             "issues": issues,
         }
 
+    @staticmethod
+    def _template_contract_summary(template_doc: Dict[str, Any]) -> Dict[str, Any]:
+        template_json = template_doc.get("template_json", {}) if isinstance(template_doc, dict) else {}
+        if not isinstance(template_json, dict):
+            template_json = {}
+        return {
+            "template_id": str(template_doc.get("template_id") or template_doc.get("module_type") or "").strip(),
+            "template_name": str(template_doc.get("template_name") or template_doc.get("name") or "").strip(),
+            "template_role": str(template_doc.get("template_role", "")).strip(),
+            "inputs": list(template_json.get("in", []) or []),
+            "outputs": list(template_json.get("out", []) or []),
+            "ports_definition": template_doc.get("ports_definition", {}) if isinstance(template_doc, dict) else {},
+            "compile_hints": template_doc.get("compile_hints", {}) if isinstance(template_doc, dict) else {},
+        }
+
+    @staticmethod
+    def _llm_advisory_from_result(result: Dict[str, Any], *, adopted_patch_count: int) -> Dict[str, Any]:
+        advice = result.get("advice", {}) if isinstance(result, dict) else {}
+        diagnostics = result.get("diagnostics", {}) if isinstance(result, dict) else {}
+        rejected_patches = advice.get("rejected_patches", []) if isinstance(advice, dict) else []
+        risk_flags = list(advice.get("risk_flags", []) or []) if isinstance(advice, dict) else []
+        if advice.get("fallback_required"):
+            risk_flags.append("fallback_required")
+        return {
+            "enabled": True,
+            "adopted": adopted_patch_count > 0,
+            "provider": str(diagnostics.get("provider", "") or ""),
+            "model": str(diagnostics.get("model", "") or ""),
+            "patch_count": adopted_patch_count,
+            "rejected_patch_count": len(rejected_patches or []),
+            "risk_flags": risk_flags,
+            "fallback_required": bool(advice.get("fallback_required", False)) if isinstance(advice, dict) else False,
+            "fallback_reason": str(
+                diagnostics.get("fallback_reason")
+                or (advice.get("fallback_reason", "") if isinstance(advice, dict) else "")
+                or ""
+            ),
+            "fallback_used": bool(diagnostics.get("fallback_used", False)),
+            "elapsed_ms": int(diagnostics.get("elapsed_ms", 0) or 0),
+        }
+
+    def _apply_interface_advice_to_descriptor(
+        self,
+        descriptor: Dict[str, Any],
+        advice: Dict[str, Any],
+    ) -> tuple[Dict[str, Any], int]:
+        patches = advice.get("port_binding_patch", []) if isinstance(advice, dict) else []
+        if not isinstance(patches, list) or not patches:
+            return dict(descriptor or {}), 0
+
+        updated_descriptor = dict(descriptor or {})
+        bindings = [
+            dict(item)
+            for item in updated_descriptor.get("interface_bindings", []) or []
+            if isinstance(item, dict)
+        ]
+        adopted_count = 0
+
+        for patch in patches:
+            if not isinstance(patch, dict):
+                continue
+            direction = str(patch.get("direction", "")).strip()
+            try:
+                port_index = int(patch.get("port_index", -1))
+            except (TypeError, ValueError):
+                continue
+            signal_name = str(patch.get("signal_name", "")).strip()
+            signal_key = str(patch.get("signal_key", "")).strip() or normalize_signal_name(signal_name)
+            canonical_signal_key = canonicalize_signal_name(signal_name) or signal_key
+            binding_patch = {
+                "signal_name": signal_name,
+                "signal_key": signal_key,
+                "canonical_signal_key": canonical_signal_key,
+                "direction": direction,
+                "binding_kind": str(patch.get("binding_kind", "")).strip(),
+                "allowed_external": bool(patch.get("allowed_external", False)),
+                "owner_subsystem_id": str(patch.get("owner_subsystem_id", "")).strip(),
+                "port_index": port_index,
+                "evidence": [str(patch.get("reason", "")).strip() or "LLM subsystem interface adapter."],
+                "confidence": float(patch.get("confidence", 0.0) or 0.0),
+            }
+
+            matched_index = None
+            for index, binding in enumerate(bindings):
+                try:
+                    binding_port_index = int(binding.get("port_index", -1))
+                except (TypeError, ValueError):
+                    binding_port_index = -1
+                if (
+                    str(binding.get("direction", "")).strip() == direction
+                    and binding_port_index == port_index
+                ):
+                    matched_index = index
+                    break
+
+            if matched_index is None:
+                bindings.append(binding_patch)
+                adopted_count += 1
+                continue
+
+            before = dict(bindings[matched_index])
+            merged = dict(before)
+            merged.update(binding_patch)
+            if merged != before:
+                adopted_count += 1
+            bindings[matched_index] = merged
+
+        updated_descriptor["interface_bindings"] = sorted(
+            bindings,
+            key=lambda item: (
+                0 if str(item.get("direction", "")).strip() == "input" else 1,
+                int(item.get("port_index", 0) or 0),
+            ),
+        )
+        return updated_descriptor, adopted_count
+
+    def _maybe_adapt_template_interface(
+        self,
+        *,
+        requirement_spec: Dict[str, Any],
+        descriptor: Dict[str, Any],
+        template_doc: Dict[str, Any],
+        atomic_modules: List[Dict[str, Any]],
+        shared_signal_registry: Dict[str, Dict[str, Any]],
+    ) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        if not self._llm_adapter_enabled():
+            return dict(descriptor or {}), {}
+
+        try:
+            input_count, output_count = self._resolve_counts(template_doc, {})
+            result = self._get_interface_adapter().adapt(
+                requirement_spec=requirement_spec,
+                subsystem_descriptor=descriptor,
+                template_contract=self._template_contract_summary(template_doc),
+                shared_signal_registry=shared_signal_registry,
+                available_atomic_modules=atomic_modules,
+                input_count=input_count,
+                output_count=output_count,
+            )
+            adapted_descriptor, adopted_count = self._apply_interface_advice_to_descriptor(
+                descriptor,
+                result.get("advice", {}) if isinstance(result, dict) else {},
+            )
+            advisory = self._llm_advisory_from_result(result if isinstance(result, dict) else {}, adopted_patch_count=adopted_count)
+            return adapted_descriptor, advisory
+        except Exception as error:
+            return dict(descriptor or {}), {
+                "enabled": True,
+                "adopted": False,
+                "patch_count": 0,
+                "rejected_patch_count": 0,
+                "risk_flags": [],
+                "fallback_required": False,
+                "fallback_reason": str(error),
+                "fallback_used": True,
+            }
+
     def _plan_template_reuse(
         self,
+        requirement_spec: Dict[str, Any],
         descriptor: Dict[str, Any],
         slot: Dict[str, Any],
         template_doc: Dict[str, Any],
         atomic_modules: List[Dict[str, Any]],
         shared_signal_registry: Dict[str, Dict[str, Any]],
     ) -> Dict[str, Any]:
+        descriptor, llm_advisory = self._maybe_adapt_template_interface(
+            requirement_spec=requirement_spec,
+            descriptor=descriptor,
+            template_doc=template_doc,
+            atomic_modules=atomic_modules,
+            shared_signal_registry=shared_signal_registry,
+        )
         subsystem_id = str(descriptor.get("subsystem_id", "")).strip()
         page_id = str(descriptor.get("page_id", "")).strip()
         interface_analysis = self._analyze_template_interface(descriptor, template_doc, shared_signal_registry)
@@ -446,6 +645,8 @@ class SubsystemPlanner:
                     "score_breakdown": list(slot.get("score_breakdown", []) or []),
                 }
             )
+            if llm_advisory:
+                template_binding["llm_advisory"] = llm_advisory
             fallback_plan["template_binding"] = template_binding
             fallback_plan["selection_reason"] = degraded_slot["selection_reason"]
             fallback_plan["degrade_reason"] = degrade_reason
@@ -461,14 +662,18 @@ class SubsystemPlanner:
         subsystem_plan.update(
             {
                 "implementation_mode": "reuse_template",
-                "selection_reason": str(slot.get("selection_reason", "")).strip()
-                or f"Selected reusable template {template_id}.",
+                "selection_reason": (
+                    (str(slot.get("selection_reason", "")).strip() or f"Selected reusable template {template_id}.")
+                    + (" LLM interface adapter adjusted port bindings." if llm_advisory.get("adopted") else "")
+                ),
                 "degrade_reason": "",
                 "template_binding": {
                     "template_id": template_id,
                     "reasoning": "Matched architecture preferred_template_ids against retrieval bundle.",
-                    "selection_reason": str(slot.get("selection_reason", "")).strip()
-                    or f"Selected reusable template {template_id}.",
+                    "selection_reason": (
+                        (str(slot.get("selection_reason", "")).strip() or f"Selected reusable template {template_id}.")
+                        + (" LLM interface adapter adjusted port bindings." if llm_advisory.get("adopted") else "")
+                    ),
                     "score_breakdown": list(slot.get("score_breakdown", []) or []),
                 },
                 "node_instances": [
@@ -499,6 +704,8 @@ class SubsystemPlanner:
                 "reasoning": str(slot.get("reasoning", "")).strip() or "Template reuse path selected.",
             }
         )
+        if llm_advisory:
+            subsystem_plan["template_binding"]["llm_advisory"] = llm_advisory
         return subsystem_plan
 
     def _plan_atomic_fallback(
@@ -697,6 +904,7 @@ class SubsystemPlanner:
             template_doc = self._select_template_doc(slot, doc_map)
             if template_doc:
                 subsystem_plan = self._plan_template_reuse(
+                    requirement_spec,
                     descriptor,
                     slot,
                     template_doc,

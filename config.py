@@ -11,7 +11,7 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "deepseek")  # deepseek, openai, qwen, 
 # DeepSeek 配置
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 
 # OpenAI 配置
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -32,12 +32,6 @@ GLM_MODEL = os.getenv("GLM_MODEL", "glm-4")
 KIMI_API_KEY = os.getenv("KIMI_API_KEY", "")
 KIMI_BASE_URL = os.getenv("KIMI_BASE_URL", "https://api.moonshot.cn/v1")
 KIMI_MODEL = os.getenv("KIMI_MODEL", "kimi-k2.5")
-
-# # Gemini 配置
-# GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-# # 推荐使用 Google 的 OpenAI 兼容接口，可以直接复用原有的 ChatOpenAI 工具链
-# GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
-# GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
 # ==================== Embedding 配置 ====================
 # 支持的 Embedding 提供商
@@ -83,14 +77,6 @@ MAX_RETRY_TIMES = int(os.getenv("MAX_RETRY_TIMES", "3"))
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "8192"))
 
-# ==================== 规划智能体配置 ====================
-PLANNING_LLM_PROVIDER = os.getenv("PLANNING_LLM_PROVIDER", "").strip()
-PLANNING_LLM_MODEL = os.getenv("PLANNING_LLM_MODEL", "").strip()
-PLANNING_LLM_TEMPERATURE = float(os.getenv("PLANNING_LLM_TEMPERATURE", "0.7"))
-PLANNING_MAX_RETRIES = int(os.getenv("PLANNING_MAX_RETRIES", "2"))
-PLANNING_CONTEXT_DETAIL_TOP_N = int(os.getenv("PLANNING_CONTEXT_DETAIL_TOP_N", "5"))
-PLANNING_CONTEXT_MAX_MODULES = int(os.getenv("PLANNING_CONTEXT_MAX_MODULES", "8"))
-
 # ==================== 分析智能体配置 ====================
 ANALYSIS_LLM_PROVIDER = os.getenv("ANALYSIS_LLM_PROVIDER", "").strip()
 ANALYSIS_LLM_MODEL = os.getenv("ANALYSIS_LLM_MODEL", "").strip()
@@ -132,3 +118,15 @@ RETRIEVAL_RERANKER_PROVIDER = os.getenv("RETRIEVAL_RERANKER_PROVIDER", "bge").st
 RETRIEVAL_RERANKER_MODEL = os.getenv("RETRIEVAL_RERANKER_MODEL", "BAAI/bge-reranker-v2-m3").strip()
 RETRIEVAL_RERANK_TOP_N = int(os.getenv("RETRIEVAL_RERANK_TOP_N", "50"))
 RETRIEVAL_RERANK_BATCH_SIZE = int(os.getenv("RETRIEVAL_RERANK_BATCH_SIZE", "16"))
+
+# ==================== 子系统规划 LLM 接口适配（默认关闭） ====================
+SUBSYSTEM_USE_LLM_ADAPTER = os.getenv("SUBSYSTEM_USE_LLM_ADAPTER", "false").lower() == "true"
+SUBSYSTEM_LLM_PROVIDER = os.getenv("SUBSYSTEM_LLM_PROVIDER", "").strip()
+SUBSYSTEM_LLM_MODEL = os.getenv("SUBSYSTEM_LLM_MODEL", "").strip()
+SUBSYSTEM_LLM_TIMEOUT_S = float(os.getenv("SUBSYSTEM_LLM_TIMEOUT_S", "30"))
+
+# ==================== 架构规划 LLM Advisor（默认关闭） ====================
+ARCHITECTURE_USE_LLM_ADVISOR = os.getenv("ARCHITECTURE_USE_LLM_ADVISOR", "false").lower() == "true"
+ARCHITECTURE_LLM_PROVIDER = os.getenv("ARCHITECTURE_LLM_PROVIDER", "").strip()
+ARCHITECTURE_LLM_MODEL = os.getenv("ARCHITECTURE_LLM_MODEL", "").strip()
+ARCHITECTURE_LLM_TIMEOUT_S = float(os.getenv("ARCHITECTURE_LLM_TIMEOUT_S", "20"))
