@@ -1,0 +1,55 @@
+{
+  "thread_id": "wf_demo_001",
+  "attempt_id": "20260423_101500_000001",
+  "status": "interrupted",
+  "current_step": "architecture_review_prepared",
+  "workflow_status": "interrupted",
+  "user_query": "为 AHU 生成送风机与电加热联动控制",
+  "review": {
+    "review_id": "architecture_review-0001",
+    "stage": "architecture_review",
+    "status": "pending",
+    "question": "请确认当前系统骨架是否可继续进入子系统规划；若需调整，请只反馈需求或约束层修改意见。",
+    "options": [
+      {
+        "label": "批准继续",
+        "value": "approve",
+        "description": "接受当前骨架并继续子系统规划。"
+      },
+      {
+        "label": "反馈后重规划",
+        "value": "feedback",
+        "description": "补充结构约束并重跑 architecture_planning。"
+      },
+      {
+        "label": "补充约束",
+        "value": "clarify",
+        "description": "补充需求信息后重跑 architecture_planning。"
+      },
+      {
+        "label": "终止本轮",
+        "value": "reject",
+        "description": "结束当前工作流。"
+      }
+    ],
+    "context_summary": "页面列表：控制\n子系统列表：supply_fan_ctrl\n共享信号摘要：\n- supply_fan_available_flag: owner=supply_fan_ctrl; consumers=无"
+  },
+  "progress": {
+    "current_step_label": "architecture_review_prepared",
+    "last_successful_node": "architecture_planning",
+    "node_count": 6
+  },
+  "diagnostics": {
+    "verification_status": "",
+    "verification_issue_summary": "",
+    "repair_round_count": 0,
+    "retry_counts_by_scope": {
+      "planning": 0,
+      "assembly": 0,
+      "compile": 0
+    },
+    "final_route_decision": ""
+  },
+  "trace_files": {},
+  "subtasks": []
+}

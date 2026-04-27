@@ -1,0 +1,1026 @@
+from __future__ import annotations
+
+import copy
+from datetime import datetime
+import hashlib
+import json
+import re
+import unicodedata
+from collections import Counter, defaultdict
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+
+import config
+
+DEFAULT_FLOW_DIR = Path("AHU\u7a0b\u5e8f")
+DEFAULT_PATTERN_LIBRARY_DIR = Path(config.AHU_PATTERN_LIBRARY_DIR)
+DEFAULT_SYSTEM_TYPE = "AHU"
+DEFAULT_BUILD_TOOL = "scripts/build_phase2_retrieval_indexes.py"
+_NON_FUNCTIONAL_TYPES = {"tab", "comment", "quote"}
+_TOPOLOGY_IGNORED_KEYS = {
+    "id",
+    "z",
+    "x",
+    "y",
+    "wires",
+    "name",
+    "label",
+    "info",
+    "g",
+    "d",
+}
+
+_PAGE_ROLE_ALIAS_RULES: Dict[str, Dict[str, Any]] = {
+    "exhaust_fan": {
+        "alias_role": "exhaust_fan_control",
+        "base_template_roles": ("supply_fan_control",),
+        "keywords": ("排风机", "排风", "exhaust fan", "exhaust", "ef", "开排风机"),
+    }
+}
+
+
+def _normalize_text(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    text = unicodedata.normalize("NFKC", value)
+    text = text.strip()
+    text = re.sub(r"[\uff08(][^\uff09)]*[\uff09)]", "", text)
+    text = re.sub(r"[\s\u3000]+", " ", text)
+    return text.strip(" _-/")
+
+
+def _slugify(value: str) -> str:
+    text = unicodedata.normalize("NFKC", value).lower().strip()
+    text = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "_", text)
+    text = re.sub(r"_+", "_", text).strip("_")
+    return text
+
+
+def _page_key_from_label(label: Any) -> str:
+    normalized = _normalize_text(label)
+    lowered = normalized.lower()
+
+    if not normalized:
+        return "page"
+    if "io" in lowered or "\u901a\u8baf" in normalized or "\u901a\u4fe1" in normalized:
+        return "io_comm"
+    if "\u5b9a\u65f6" in normalized or "schedule" in lowered:
+        return "timing"
+    if "\u63a7\u5236" in normalized:
+        return "control"
+    if "\u6545\u969c" in normalized:
+        if "\u76f4\u81a8" in normalized or "dx" in lowered:
+            return "dx_fault"
+        return "fault"
+    if "\u72b6\u6001" in normalized:
+        if "\u76f4\u81a8" in normalized or "dx" in lowered:
+            return "dx_status"
+        if "\u6392\u98ce" in normalized:
+            return "exhaust_status"
+        return "status"
+    if "\u6392\u98ce\u673a" in normalized:
+        return "exhaust_fan"
+    if "\u6392\u98ce" in normalized:
+        return "exhaust"
+    if "\u65b0\u98ce" in normalized:
+        return "fresh_air"
+    if "\u9001\u98ce\u673a" in normalized or ("\u9001\u98ce" in normalized and "\u673a" in normalized):
+        return "supply_fan"
+    if "\u51b7\u6c34\u9600" in normalized or "\u51b7\u6c34" in normalized:
+        return "chw_valve"
+    if "\u7535\u52a0\u70ed" in normalized:
+        return "heater"
+
+    slug = _slugify(normalized)
+    return slug or "page"
+
+
+_PAGE_KIND_HINTS = {
+    "io_comm": "io",
+    "control": "control",
+    "timing": "timing",
+    "status": "status",
+    "dx_status": "status",
+    "dx_fault": "fault",
+    "fault": "fault",
+    "exhaust": "exhaust",
+    "exhaust_fan": "fan",
+    "exhaust_status": "status",
+    "fresh_air": "air",
+    "supply_fan": "fan",
+    "chw_valve": "valve",
+    "heater": "heater",
+}
+
+
+def _page_kind_from_key(page_key: str) -> str:
+    if page_key in _PAGE_KIND_HINTS:
+        return _PAGE_KIND_HINTS[page_key]
+    if page_key.endswith("_status"):
+        return "status"
+    if page_key.endswith("_fault"):
+        return "fault"
+    return page_key.split("_")[-1] if "_" in page_key else "page"
+
+
+def _extract_flow_objects(raw_payload: Any) -> List[Dict[str, Any]]:
+    if isinstance(raw_payload, list):
+        return [copy.deepcopy(obj) for obj in raw_payload if isinstance(obj, dict)]
+
+    if isinstance(raw_payload, dict):
+        nodes = raw_payload.get("nodes")
+        if isinstance(nodes, list):
+            return [copy.deepcopy(obj) for obj in nodes if isinstance(obj, dict)]
+
+        raw_json = raw_payload.get("rawJson")
+        if isinstance(raw_json, str) and raw_json.strip():
+            try:
+                return _extract_flow_objects(json.loads(raw_json))
+            except json.JSONDecodeError:
+                return []
+        if isinstance(raw_json, (list, dict)):
+            return _extract_flow_objects(raw_json)
+
+    return []
+
+
+def _load_flow_document(path: Path) -> Dict[str, Any]:
+    raw_payload = json.loads(path.read_text(encoding="utf-8"))
+    objects = _extract_flow_objects(raw_payload)
+    return {
+        "source_path": path,
+        "source_name": path.stem,
+        "raw_payload": raw_payload,
+        "objects": objects,
+    }
+
+
+def load_ahu_flow_documents(flows_dir: Path | str = DEFAULT_FLOW_DIR) -> List[Dict[str, Any]]:
+    base_dir = Path(flows_dir)
+    if not base_dir.exists():
+        raise FileNotFoundError(f"AHU flows 目录不存在: {base_dir}")
+    flow_files = sorted(base_dir.glob("flows_*.json"))
+    if not flow_files:
+        raise FileNotFoundError(f"在 {base_dir} 下未找到任何 flows_*.json 资产文件。")
+    documents = [_load_flow_document(path) for path in flow_files]
+    if not any(document.get("objects") for document in documents):
+        raise ValueError(f"{base_dir} 中的 flows_*.json 均未解析出有效流程对象。")
+    return documents
+
+
+def _file_sha1(path: Path) -> str:
+    digest = hashlib.sha1()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _embedding_manifest() -> Dict[str, str]:
+    provider = str(getattr(config, "EMBEDDING_PROVIDER", "") or "").strip()
+    provider_to_model = {
+        "bge": getattr(config, "BGE_MODEL_NAME", ""),
+        "openai": getattr(config, "OPENAI_EMBEDDING_MODEL", ""),
+        "sentence-transformers": getattr(config, "SENTENCE_TRANSFORMER_MODEL", ""),
+        "jina": getattr(config, "JINA_MODEL", ""),
+        "siliconflow": getattr(config, "SILICONFLOW_EMBEDDING_MODEL", ""),
+    }
+    return {
+        "provider": provider,
+        "model": str(provider_to_model.get(provider, "") or "").strip(),
+    }
+
+
+def _default_collection_names() -> Dict[str, str]:
+    return {
+        "subflow_templates": config.CHROMA_COLLECTION_SUBFLOW_TEMPLATES,
+        "system_patterns": config.CHROMA_COLLECTION_SYSTEM_PATTERNS,
+    }
+
+
+def _source_flow_manifest(flow_documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    entries: List[Dict[str, Any]] = []
+    for document in flow_documents:
+        source_path = Path(document.get("source_path", ""))
+        stat = source_path.stat()
+        entries.append(
+            {
+                "file_name": source_path.name,
+                "path": str(source_path),
+                "sha1": _file_sha1(source_path),
+                "modified_at": datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds"),
+                "size_bytes": stat.st_size,
+                "object_count": len(document.get("objects", []) or []),
+            }
+        )
+    return entries
+
+
+def _infer_template_role(template_name: str) -> str:
+    name = _normalize_text(template_name)
+    if "\u9001\u98ce\u673a" in name and "\u9891\u7387" in name:
+        return "supply_fan_frequency_control"
+    if "\u9001\u98ce\u673a" in name:
+        return "supply_fan_control"
+    if "\u65b0\u98ce" in name and "\u56de\u98ce" in name:
+        return "air_damper_co2_control"
+    if "\u51b7\u6c34\u9600" in name:
+        return "chw_valve_control"
+    if "\u7535\u52a0\u70ed" in name:
+        return "heater_control"
+    if "\u76f4\u81a8" in name:
+        return "dx_control"
+    return "subflow_control"
+
+
+def _build_ports_definition(port_items: Iterable[Dict[str, Any]], direction: str) -> List[Dict[str, Any]]:
+    ports: List[Dict[str, Any]] = []
+    for index, port in enumerate(port_items):
+        label = _normalize_text(port.get("name") or port.get("label") or f"{direction}_{index}")
+        ports.append(
+            {
+                "index": index,
+                "label": label,
+                "name": label,
+                "type": "any",
+                "description": "",
+                "condition": "always",
+            }
+        )
+    return ports
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _canonicalize_scalar(value: Any) -> Any:
+    if isinstance(value, str):
+        return _normalize_text(value)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value
+    return ""
+
+
+def _extract_dependency_module_types(internal_objects: List[Dict[str, Any]]) -> List[str]:
+    dependencies: Set[str] = set()
+    for obj in internal_objects:
+        if not isinstance(obj, dict):
+            continue
+        obj_type = str(obj.get("type", "")).strip()
+        if not obj_type or obj_type in _NON_FUNCTIONAL_TYPES:
+            continue
+        dependencies.add(obj_type)
+    return sorted(dependencies)
+
+
+def _build_internal_topology_hash(internal_objects: List[Dict[str, Any]]) -> str:
+    node_map: Dict[str, Dict[str, Any]] = {}
+    typed_nodes: List[Dict[str, Any]] = []
+
+    for index, obj in enumerate(internal_objects):
+        if not isinstance(obj, dict):
+            continue
+        obj_type = str(obj.get("type", "")).strip()
+        if not obj_type or obj_type in _NON_FUNCTIONAL_TYPES:
+            continue
+
+        node_id = str(obj.get("id", "")).strip() or f"node_{index}"
+        if node_id in node_map:
+            node_id = f"{node_id}#{index}"
+
+        parameters: Dict[str, Any] = {}
+        for key, value in obj.items():
+            if key in _TOPOLOGY_IGNORED_KEYS:
+                continue
+            if isinstance(value, (str, int, float, bool)):
+                parameters[key] = _canonicalize_scalar(value)
+
+        normalized_obj = {
+            "id": node_id,
+            "type": obj_type,
+            "inputs": _safe_int(obj.get("inputs", 0)),
+            "outputs": _safe_int(obj.get("outputs", 0)),
+            "parameters": parameters,
+            "wires": copy.deepcopy(obj.get("wires", [])),
+        }
+        node_map[node_id] = normalized_obj
+        typed_nodes.append(normalized_obj)
+
+    edges: List[Tuple[str, int, str, int]] = []
+    for node in typed_nodes:
+        wires = node.get("wires", [])
+        if not isinstance(wires, list):
+            continue
+        source_id = node["id"]
+        for out_port, output_group in enumerate(wires):
+            if not isinstance(output_group, list):
+                continue
+            for target in output_group:
+                if not isinstance(target, dict):
+                    continue
+                target_id = str(target.get("id", "")).strip()
+                if target_id not in node_map:
+                    continue
+                target_port = _safe_int(target.get("port", 0))
+                edges.append((source_id, out_port, target_id, target_port))
+
+    labels: Dict[str, str] = {}
+    for node in typed_nodes:
+        payload = {
+            "type": node["type"],
+            "inputs": node["inputs"],
+            "outputs": node["outputs"],
+            "parameters": node["parameters"],
+        }
+        labels[node["id"]] = hashlib.sha1(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()[:16]
+
+    for _ in range(2):
+        outgoing_by_node: Dict[str, List[Tuple[int, str, int]]] = defaultdict(list)
+        incoming_by_node: Dict[str, List[Tuple[int, str, int]]] = defaultdict(list)
+        for source_id, out_port, target_id, target_port in edges:
+            outgoing_by_node[source_id].append((out_port, labels[target_id], target_port))
+            incoming_by_node[target_id].append((target_port, labels[source_id], out_port))
+
+        next_labels: Dict[str, str] = {}
+        for node in typed_nodes:
+            node_id = node["id"]
+            payload = {
+                "self": labels[node_id],
+                "outgoing": sorted(outgoing_by_node.get(node_id, [])),
+                "incoming": sorted(incoming_by_node.get(node_id, [])),
+            }
+            next_labels[node_id] = hashlib.sha1(
+                json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            ).hexdigest()[:16]
+        labels = next_labels
+
+    canonical_payload = {
+        "node_labels": sorted(labels.values()),
+        "edges": sorted((labels[source], out_port, labels[target], target_port) for source, out_port, target, target_port in edges),
+    }
+    return hashlib.sha1(
+        json.dumps(canonical_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _build_subflow_signature(subflow_obj: Dict[str, Any], internal_objects: List[Dict[str, Any]]) -> Dict[str, Any]:
+    input_ports = [port for port in subflow_obj.get("in", []) if isinstance(port, dict)]
+    output_ports = [port for port in subflow_obj.get("out", []) if isinstance(port, dict)]
+    return {
+        "name": _normalize_text(subflow_obj.get("name", "")),
+        "input_count": len(input_ports),
+        "output_count": len(output_ports),
+        "input_names": [_normalize_text(port.get("name", "")) for port in input_ports],
+        "output_names": [_normalize_text(port.get("name", "")) for port in output_ports],
+        "topology_hash": _build_internal_topology_hash(internal_objects),
+    }
+
+
+def _build_subflow_template_asset(
+    subflow_obj: Dict[str, Any],
+    internal_objects: List[Dict[str, Any]],
+    source_path: Path,
+    system_type: str,
+) -> Dict[str, Any]:
+    raw_definition = copy.deepcopy(subflow_obj)
+    signature_payload = _build_subflow_signature(subflow_obj, internal_objects)
+    signature_payload["system_type"] = system_type
+    signature_hash = hashlib.sha1(
+        json.dumps(signature_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+    input_count = signature_payload["input_count"]
+    output_count = signature_payload["output_count"]
+    template_id = f"{_slugify(system_type) or 'ahu'}_subflow__{input_count}in{output_count}out__{signature_hash[:10]}__v1"
+    template_name = _normalize_text(subflow_obj.get("name", template_id)) or template_id
+    template_role = _infer_template_role(template_name)
+
+    raw_definition["id"] = template_id
+    raw_definition["type"] = "subflow"
+    raw_definition["name"] = template_name
+    raw_definition["in"] = [copy.deepcopy(port) for port in subflow_obj.get("in", []) if isinstance(port, dict)]
+    raw_definition["out"] = [copy.deepcopy(port) for port in subflow_obj.get("out", []) if isinstance(port, dict)]
+    raw_definition["inputs"] = input_count
+    raw_definition["outputs"] = output_count
+
+    dependency_module_types = _extract_dependency_module_types(internal_objects)
+
+    description = _normalize_text(subflow_obj.get("info", ""))
+    if not description:
+        description = f"{template_name} \u5b50\u6d41\u7a0b\u6a21\u677f"
+
+    template_json = raw_definition
+    template_json["template_id"] = template_id
+    template_json["definition_id"] = template_id
+
+    return {
+        "module_type": template_id,
+        "asset_type": "subflow_template",
+        "template_id": template_id,
+        "definition_id": template_id,
+        "template_name": template_name,
+        "template_role": template_role,
+        "system_type": system_type,
+        "description": description,
+        "keywords": [],
+        "usage_guides": [],
+        "category": f"{system_type}\u5b50\u6d41\u7a0b\u6a21\u677f/{template_role}",
+        "ports_definition": {
+            "inputs": _build_ports_definition(raw_definition.get("in", []), "input"),
+            "outputs": _build_ports_definition(raw_definition.get("out", []), "output"),
+        },
+        "parameters_schema": {},
+        "template_json": template_json,
+        "internal_flow_objects": [copy.deepcopy(obj) for obj in internal_objects],
+        "dependency_module_types": dependency_module_types,
+        "compile_hints": {
+            "supports_multi_instance": True,
+            "input_count": input_count,
+            "output_count": output_count,
+        },
+        "source_info": {
+            "source_flows": [source_path.name],
+            "source_flow_paths": [str(source_path)],
+            "original_subflow_id": str(subflow_obj.get("id", "")),
+            "signature_hash": signature_hash,
+        },
+    }
+
+
+def _unique_texts(values: Iterable[Any]) -> List[str]:
+    ordered: List[str] = []
+    seen: Set[str] = set()
+    for value in values:
+        normalized = _normalize_text(value)
+        if normalized and normalized not in seen:
+            ordered.append(normalized)
+            seen.add(normalized)
+    return ordered
+
+
+def _alias_template_name(base_template_name: str, alias_role: str) -> str:
+    normalized_name = _normalize_text(base_template_name)
+    if alias_role == "exhaust_fan_control":
+        replaced = normalized_name.replace("送风机", "排风机")
+        if replaced != normalized_name:
+            return replaced
+        return "排风机标准控制"
+    return normalized_name or alias_role
+
+
+def _collect_alias_signal_examples(page_objects: Iterable[Dict[str, Any]], keywords: Iterable[str]) -> List[str]:
+    lowered_keywords = tuple(_normalize_text(keyword).lower() for keyword in keywords if _normalize_text(keyword))
+    examples: List[str] = []
+    for obj in page_objects:
+        if not isinstance(obj, dict):
+            continue
+        for candidate in (
+            obj.get("name"),
+            obj.get("label"),
+            obj.get("labelName"),
+            obj.get("labelNameOld"),
+        ):
+            normalized = _normalize_text(candidate)
+            lowered = normalized.lower()
+            if not normalized:
+                continue
+            if lowered_keywords and any(keyword in lowered for keyword in lowered_keywords):
+                examples.append(normalized)
+                continue
+            if "ef" in lowered:
+                examples.append(normalized)
+    return _unique_texts(examples)[:6]
+
+
+def _build_role_alias_template_asset(
+    base_asset: Dict[str, Any],
+    *,
+    alias_role: str,
+    source_path: Path,
+    page_label: str,
+    page_key: str,
+    signal_examples: List[str],
+) -> Dict[str, Any]:
+    base_template_name = _normalize_text(base_asset.get("template_name", ""))
+    alias_name = _alias_template_name(base_template_name, alias_role)
+    source_info = dict(base_asset.get("source_info", {}) or {})
+    signature_hash = _normalize_text(source_info.get("signature_hash", ""))
+    signature_token = signature_hash[:10] or hashlib.sha1(
+        f"{base_asset.get('template_id', '')}:{alias_role}".encode("utf-8")
+    ).hexdigest()[:10]
+    template_id = (
+        f"{_slugify(base_asset.get('system_type') or DEFAULT_SYSTEM_TYPE) or 'ahu'}"
+        f"_subflow_alias__{_slugify(alias_role) or 'role'}__{signature_token}__v1"
+    )
+
+    alias_template = copy.deepcopy(base_asset)
+    alias_template["module_type"] = template_id
+    alias_template["template_id"] = template_id
+    alias_template["definition_id"] = _normalize_text(base_asset.get("definition_id", "")) or template_id
+    alias_template["template_name"] = alias_name
+    alias_template["template_role"] = alias_role
+    alias_template["keywords"] = _unique_texts(
+        list(base_asset.get("keywords", []) or [])
+        + [alias_name, page_label, alias_role.replace("_", " ")]
+        + list(signal_examples)
+    )
+    alias_template["category"] = f"{alias_template.get('system_type', DEFAULT_SYSTEM_TYPE)}子流程模板/{alias_role}"
+    alias_template["description"] = (
+        f"{alias_name} 子流程模板，复用 {base_template_name or base_asset.get('template_id', '')} 正式定义；"
+        f"source_page={page_label or page_key}"
+        + (
+            f"；source_signals={', '.join(signal_examples[:4])}"
+            if signal_examples
+            else ""
+        )
+    )
+
+    template_json = copy.deepcopy(base_asset.get("template_json", {}) or {})
+    template_json["template_id"] = template_id
+    template_json["definition_id"] = alias_template["definition_id"]
+    template_json["id"] = alias_template["definition_id"]
+    alias_template["template_json"] = template_json
+
+    alias_source = alias_template.setdefault("source_info", {})
+    alias_source["source_flows"] = [source_path.name]
+    alias_source["source_flow_paths"] = [str(source_path)]
+    alias_source["alias_of_template_id"] = _normalize_text(base_asset.get("template_id", ""))
+    alias_source["alias_of_template_role"] = _normalize_text(base_asset.get("template_role", ""))
+    alias_source["alias_page_keys"] = [page_key] if page_key else []
+    alias_source["alias_page_labels"] = [page_label] if page_label else []
+    alias_source["alias_signal_examples"] = list(signal_examples)
+    return alias_template
+
+
+def _merge_subflow_assets(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
+    existing_source = existing.setdefault("source_info", {})
+    incoming_source = incoming.get("source_info", {})
+
+    existing_flows = list(existing_source.get("source_flows", []))
+    for flow_name in incoming_source.get("source_flows", []):
+        if flow_name not in existing_flows:
+            existing_flows.append(flow_name)
+    existing_source["source_flows"] = existing_flows
+
+    existing_paths = list(existing_source.get("source_flow_paths", []))
+    for flow_path in incoming_source.get("source_flow_paths", []):
+        if flow_path not in existing_paths:
+            existing_paths.append(flow_path)
+    existing_source["source_flow_paths"] = existing_paths
+
+    if not existing_source.get("original_subflow_id"):
+        existing_source["original_subflow_id"] = incoming_source.get("original_subflow_id", "")
+    if not existing_source.get("signature_hash"):
+        existing_source["signature_hash"] = incoming_source.get("signature_hash", "")
+    if not existing_source.get("alias_of_template_id"):
+        existing_source["alias_of_template_id"] = incoming_source.get("alias_of_template_id", "")
+    if not existing_source.get("alias_of_template_role"):
+        existing_source["alias_of_template_role"] = incoming_source.get("alias_of_template_role", "")
+
+    for key in ("alias_page_keys", "alias_page_labels", "alias_signal_examples"):
+        existing_values = list(existing_source.get(key, []))
+        for value in incoming_source.get(key, []):
+            normalized = _normalize_text(value)
+            if normalized and normalized not in existing_values:
+                existing_values.append(normalized)
+        if existing_values:
+            existing_source[key] = existing_values
+
+    existing_dependencies = set(existing.get("dependency_module_types", []))
+    existing_dependencies.update(incoming.get("dependency_module_types", []))
+    existing["dependency_module_types"] = sorted(existing_dependencies)
+
+    if len(incoming.get("internal_flow_objects", [])) > len(existing.get("internal_flow_objects", [])):
+        existing["internal_flow_objects"] = copy.deepcopy(incoming.get("internal_flow_objects", []))
+        existing["template_json"] = copy.deepcopy(incoming.get("template_json", {}))
+        existing["ports_definition"] = copy.deepcopy(incoming.get("ports_definition", {}))
+        existing["compile_hints"] = copy.deepcopy(incoming.get("compile_hints", {}))
+
+    return existing
+
+
+def _collect_role_alias_templates(
+    flow_documents: List[Dict[str, Any]],
+    templates: Dict[str, Dict[str, Any]],
+    template_id_by_source_definition: Dict[Tuple[str, str], str],
+) -> Dict[str, Dict[str, Any]]:
+    alias_templates: Dict[str, Dict[str, Any]] = {}
+
+    for document in flow_documents:
+        objects = document.get("objects", []) or []
+        source_path = Path(document.get("source_path", ""))
+        page_meta_by_id: Dict[str, Dict[str, str]] = {}
+        page_objects: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+
+        for obj in objects:
+            if not isinstance(obj, dict):
+                continue
+            obj_id = _normalize_text(obj.get("id", ""))
+            if obj.get("type") == "tab":
+                page_label = _normalize_text(obj.get("label", ""))
+                page_key = _page_key_from_label(page_label)
+                page_meta_by_id[obj_id] = {"label": page_label, "page_key": page_key}
+                continue
+            page_id = _normalize_text(obj.get("z", ""))
+            if page_id:
+                page_objects.setdefault(page_id, []).append(obj)
+
+        for page_id, meta in page_meta_by_id.items():
+            page_key = meta.get("page_key", "")
+            rule = _PAGE_ROLE_ALIAS_RULES.get(page_key)
+            if not rule:
+                continue
+
+            alias_role = _normalize_text(rule.get("alias_role", ""))
+            base_roles = tuple(_normalize_text(role) for role in rule.get("base_template_roles", ()) if _normalize_text(role))
+            signal_examples = _collect_alias_signal_examples(page_objects.get(page_id, []), rule.get("keywords", ()))
+
+            for obj in page_objects.get(page_id, []):
+                if not isinstance(obj, dict):
+                    continue
+                obj_type = _normalize_text(obj.get("type", ""))
+                if not obj_type.startswith("subflow:"):
+                    continue
+                original_subflow_id = obj_type.split(":", 1)[1]
+                base_template_id = template_id_by_source_definition.get((source_path.name, original_subflow_id))
+                if not base_template_id:
+                    continue
+                base_template = templates.get(base_template_id, {})
+                if _normalize_text(base_template.get("template_role", "")) not in base_roles:
+                    continue
+
+                alias_asset = _build_role_alias_template_asset(
+                    base_template,
+                    alias_role=alias_role,
+                    source_path=source_path,
+                    page_label=meta.get("label", ""),
+                    page_key=page_key,
+                    signal_examples=signal_examples,
+                )
+                alias_template_id = alias_asset["template_id"]
+                if alias_template_id in alias_templates:
+                    alias_templates[alias_template_id] = _merge_subflow_assets(alias_templates[alias_template_id], alias_asset)
+                else:
+                    alias_templates[alias_template_id] = alias_asset
+
+    return alias_templates
+
+
+def collect_subflow_templates(
+    flow_documents: List[Dict[str, Any]],
+    system_type: str = DEFAULT_SYSTEM_TYPE,
+) -> List[Dict[str, Any]]:
+    templates: Dict[str, Dict[str, Any]] = {}
+    template_id_by_source_definition: Dict[Tuple[str, str], str] = {}
+    for document in flow_documents:
+        objects = document.get("objects", []) or []
+        source_path = Path(document.get("source_path", ""))
+        for subflow_obj in [obj for obj in objects if isinstance(obj, dict) and obj.get("type") == "subflow"]:
+            original_id = str(subflow_obj.get("id", ""))
+            internal_objects = [
+                copy.deepcopy(obj)
+                for obj in objects
+                if isinstance(obj, dict) and obj.get("z") == original_id
+            ]
+            asset = _build_subflow_template_asset(subflow_obj, internal_objects, source_path, system_type)
+            template_id = asset["template_id"]
+            if source_path.name and original_id:
+                template_id_by_source_definition[(source_path.name, original_id)] = template_id
+            if template_id in templates:
+                templates[template_id] = _merge_subflow_assets(templates[template_id], asset)
+            else:
+                templates[template_id] = asset
+
+    for template_id, asset in _collect_role_alias_templates(
+        flow_documents,
+        templates,
+        template_id_by_source_definition,
+    ).items():
+        if template_id in templates:
+            templates[template_id] = _merge_subflow_assets(templates[template_id], asset)
+        else:
+            templates[template_id] = asset
+
+    return sorted(templates.values(), key=lambda item: item["template_id"])
+
+
+def _canonical_page_label(label: Any) -> str:
+    normalized = _normalize_text(label)
+    return normalized or _page_key_from_label(label)
+
+
+def collect_system_patterns(
+    flow_documents: List[Dict[str, Any]],
+    system_type: str = DEFAULT_SYSTEM_TYPE,
+) -> List[Dict[str, Any]]:
+    if not flow_documents:
+        return []
+
+    page_counts: Counter[str] = Counter()
+    labels_by_key: Dict[str, Counter[str]] = defaultdict(Counter)
+    kinds_by_key: Dict[str, Counter[str]] = defaultdict(Counter)
+    source_cases: List[Dict[str, Any]] = []
+
+    for document in flow_documents:
+        objects = document.get("objects", []) or []
+        source_path = Path(document.get("source_path", ""))
+        flow_page_map: Dict[str, Dict[str, Any]] = {}
+
+        for page in [obj for obj in objects if isinstance(obj, dict) and obj.get("type") == "tab"]:
+            label = _canonical_page_label(page.get("label", ""))
+            page_key = _page_key_from_label(label)
+            kind = _page_kind_from_key(page_key)
+            flow_page_map[page_key] = {
+                "page_key": page_key,
+                "label": label,
+                "kind": kind,
+            }
+
+        for page_key, page_entry in flow_page_map.items():
+            page_counts[page_key] += 1
+            labels_by_key[page_key][page_entry["label"]] += 1
+            kinds_by_key[page_key][page_entry["kind"]] += 1
+
+        source_cases.append(
+            {
+                "source_flow": source_path.name,
+                "source_flow_path": str(source_path),
+                "page_keys": sorted(flow_page_map.keys()),
+                "page_labels": [entry["label"] for entry in flow_page_map.values()],
+            }
+        )
+
+    total_flows = len(flow_documents)
+    required_pages: List[Dict[str, Any]] = []
+    optional_pages: List[Dict[str, Any]] = []
+
+    for page_key in sorted(page_counts.keys()):
+        count = page_counts[page_key]
+        coverage = count / total_flows if total_flows else 0.0
+        page_entry = {
+            "page_key": page_key,
+            "label": labels_by_key[page_key].most_common(1)[0][0],
+            "kind": kinds_by_key[page_key].most_common(1)[0][0],
+            "coverage_ratio": round(coverage, 3),
+            "coverage_count": count,
+        }
+        if coverage >= 1.0:
+            required_pages.append(page_entry)
+        else:
+            optional_pages.append(page_entry)
+
+    required_keys = "_".join(item["page_key"] for item in required_pages) or "core"
+    optional_keys = "_".join(item["page_key"] for item in optional_pages) or "plus"
+    pattern_id = f"{_slugify(system_type) or 'ahu'}__{required_keys}__{optional_keys}__v1"
+
+    pattern = {
+        "pattern_id": pattern_id,
+        "pattern_name": f"{system_type} \u63a7\u5236\u9aa8\u67b6",
+        "system_type": system_type,
+        "description": f"Derived from {total_flows} source flows.",
+        "feature_tags": [system_type.lower(), "phase2", "ahu"],
+        "required_pages": required_pages,
+        "optional_pages": optional_pages,
+        "subsystem_slots": [],
+        "naming_hints": {},
+        "layout_hints": {},
+        "style_guides": {},
+        "source_cases": source_cases,
+    }
+    return [pattern]
+
+
+def build_ahu_knowledge_assets(
+    flows_dir: Path | str = DEFAULT_FLOW_DIR,
+    output_dir: Path | str | None = DEFAULT_PATTERN_LIBRARY_DIR,
+    system_type: str = DEFAULT_SYSTEM_TYPE,
+) -> Dict[str, Any]:
+    flow_documents = load_ahu_flow_documents(flows_dir)
+    subflow_templates = collect_subflow_templates(flow_documents, system_type=system_type)
+    system_patterns = collect_system_patterns(flow_documents, system_type=system_type)
+    source_flows = _source_flow_manifest(flow_documents)
+
+    assets = {
+        "system_type": system_type,
+        "source_flow_count": len(flow_documents),
+        "source_flow_files": [str(document["source_path"]) for document in flow_documents],
+        "subflow_templates": subflow_templates,
+        "system_patterns": system_patterns,
+        "manifest": {
+            "build_generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "build_tool": {
+                "script": DEFAULT_BUILD_TOOL,
+                "version": "phase123-rectify-v1",
+            },
+            "asset_chain_role": "rebuildable_cache",
+            "system_type": system_type,
+            "flows_dir": str(Path(flows_dir)),
+            "pattern_library_dir": str(Path(output_dir)) if output_dir is not None else "",
+            "source_flows": source_flows,
+            "source_flow_count": len(source_flows),
+            "subflow_template_count": len(subflow_templates),
+            "system_pattern_count": len(system_patterns),
+            "persist_dir": "",
+            "collection_names": _default_collection_names(),
+            "embedding": _embedding_manifest(),
+            "collection_owner": getattr(config, "PHASE2_CHROMA_COLLECTION_OWNER", "phase2_ahu_assets"),
+            "stale_cleanup_policy": "exclusive_collections_only",
+        },
+    }
+
+    if output_dir is not None:
+        write_pattern_library(output_dir, assets)
+
+    return assets
+
+
+def write_pattern_library(output_dir: Path | str, assets: Dict[str, Any]) -> Dict[str, str]:
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    files = {
+        "subflow_templates": output_path / "subflow_templates.json",
+        "system_patterns": output_path / "system_patterns.json",
+        "manifest": output_path / "manifest.json",
+    }
+
+    files["subflow_templates"].write_text(
+        json.dumps(assets.get("subflow_templates", []), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    files["system_patterns"].write_text(
+        json.dumps(assets.get("system_patterns", []), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    files["manifest"].write_text(
+        json.dumps(assets.get("manifest", {}), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    return {name: str(path) for name, path in files.items()}
+
+
+def load_structured_payload(metadata: Any) -> Dict[str, Any]:
+    if not isinstance(metadata, dict):
+        return {}
+
+    payload_json = metadata.get("payload_json")
+    if isinstance(payload_json, dict):
+        return copy.deepcopy(payload_json)
+    if isinstance(payload_json, str) and payload_json.strip():
+        try:
+            return json.loads(payload_json)
+        except json.JSONDecodeError:
+            return {}
+
+    json_schema = metadata.get("json_schema")
+    if isinstance(json_schema, dict):
+        return copy.deepcopy(json_schema)
+    if isinstance(json_schema, str) and json_schema.strip():
+        try:
+            return json.loads(json_schema)
+        except json.JSONDecodeError:
+            return {}
+
+    return {}
+
+
+def _build_asset_document(asset: Dict[str, Any]) -> str:
+    if asset.get("asset_type") == "subflow_template":
+        return "\n".join(
+            [
+                asset.get("template_name", ""),
+                asset.get("description", ""),
+                asset.get("template_id", ""),
+                asset.get("category", ""),
+            ]
+        ).strip()
+
+    if asset.get("pattern_id"):
+        required = ", ".join(page.get("page_key", "") for page in asset.get("required_pages", []))
+        optional = ", ".join(page.get("page_key", "") for page in asset.get("optional_pages", []))
+        return "\n".join(
+            [
+                asset.get("pattern_name", ""),
+                asset.get("description", ""),
+                f"required: {required}",
+                f"optional: {optional}",
+            ]
+        ).strip()
+
+    return json.dumps(asset, ensure_ascii=False)
+
+
+def write_assets_to_chroma(
+    assets: Dict[str, Any],
+    persist_dir: Path | str | None = None,
+    collection_names: Optional[Dict[str, str]] = None,
+) -> Dict[str, int]:
+    try:
+        import chromadb  # type: ignore
+        from chromadb.utils.embedding_functions import DefaultEmbeddingFunction  # type: ignore
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError(f"chromadb is required to write indexes: {exc}") from exc
+
+    from utils.model_manager import EmbeddingManager
+
+    resolved_persist_dir = Path(persist_dir or config.CHROMA_PERSIST_DIR)
+    client = chromadb.PersistentClient(path=str(resolved_persist_dir))
+    try:
+        embedding_function = EmbeddingManager.get_embedding()
+    except Exception:
+        embedding_function = DefaultEmbeddingFunction()
+
+    collection_names = collection_names or _default_collection_names()
+    collection_owner = getattr(config, "PHASE2_CHROMA_COLLECTION_OWNER", "phase2_ahu_assets")
+    manifest = assets.setdefault("manifest", {})
+    manifest.update(
+        {
+            "persist_dir": str(resolved_persist_dir),
+            "collection_names": dict(collection_names),
+            "embedding": _embedding_manifest(),
+            "collection_owner": collection_owner,
+            "asset_chain_role": "rebuildable_cache",
+            "stale_cleanup_policy": "exclusive_collections_only",
+        }
+    )
+
+    counts = {"subflow_templates": 0, "system_patterns": 0}
+    for asset_key, collection_name in collection_names.items():
+        collection = client.get_or_create_collection(
+            name=collection_name,
+            embedding_function=embedding_function,
+            metadata={
+                "description": f"Phase 2 {asset_key}",
+                "collection_owner": collection_owner,
+                "asset_key": asset_key,
+                "system_type": str(assets.get("system_type", "") or ""),
+            },
+        )
+        existing_metadata = getattr(collection, "metadata", {}) or {}
+        existing_owner = str(existing_metadata.get("collection_owner", "") or "").strip()
+        existing_asset_key = str(existing_metadata.get("asset_key", "") or "").strip()
+        if existing_owner and existing_owner != collection_owner:
+            raise ValueError(
+                f"Collection {collection_name} 的 owner={existing_owner}，不是当前 Phase 2 资产独占集合。"
+            )
+        if existing_asset_key and existing_asset_key != asset_key:
+            raise ValueError(
+                f"Collection {collection_name} 已绑定 asset_key={existing_asset_key}，不能混写 {asset_key}。"
+            )
+        items = assets.get(asset_key, []) or []
+        documents: List[str] = []
+        metadatas: List[Dict[str, Any]] = []
+        ids: List[str] = []
+        for item in items:
+            item_id = item.get("template_id") or item.get("pattern_id")
+            if not item_id:
+                continue
+            payload_json = json.dumps(item, ensure_ascii=False)
+            documents.append(_build_asset_document(item))
+            metadata = {
+                "asset_type": item.get("asset_type", asset_key.rstrip("s")),
+                "module_type": item_id,
+                "payload_json": payload_json,
+                "json_schema": payload_json,
+            }
+            metadata.update({key: value for key, value in item.items() if isinstance(value, (str, int, float, bool))})
+            metadatas.append(metadata)
+            ids.append(item_id)
+
+        desired_ids = set(ids)
+        existing_ids: Set[str] = set()
+        try:
+            existing = collection.get(include=[])
+            existing_ids = set(existing.get("ids", []) or [])
+        except Exception:
+            existing_ids = set()
+
+        stale_ids = sorted(existing_ids - desired_ids)
+        if stale_ids:
+            collection.delete(ids=stale_ids)
+
+        if documents:
+            collection.upsert(documents=documents, metadatas=metadatas, ids=ids)
+            counts[asset_key] = len(documents)
+
+    manifest["written_counts"] = dict(counts)
+    manifest["last_chroma_write_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+    pattern_library_dir = str(manifest.get("pattern_library_dir", "") or "").strip()
+    if pattern_library_dir:
+        write_pattern_library(pattern_library_dir, assets)
+
+    return counts
+
+
+if __name__ == "__main__":
+    assets = build_ahu_knowledge_assets()
+    print(json.dumps(assets.get("manifest", {}), ensure_ascii=False, indent=2))

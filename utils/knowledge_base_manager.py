@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import config
+from utils.console_utils import safe_print as print
 from agents.retrieval_agent import RetrievalAgent
 
 

@@ -1,0 +1,57 @@
+{
+  "build_generated_at": "2026-04-16T22:31:23+08:00",
+  "build_tool": {
+    "script": "scripts/build_phase2_retrieval_indexes.py",
+    "version": "phase123-rectify-v1"
+  },
+  "asset_chain_role": "rebuildable_cache",
+  "system_type": "AHU",
+  "flows_dir": "AHU程序",
+  "pattern_library_dir": "AHU程序\\pattern_library",
+  "source_flows": [
+    {
+      "file_name": "flows_20251210190941.json",
+      "path": "AHU程序\\flows_20251210190941.json",
+      "sha1": "ae2c1300bcd8e97d09a85249e2853a93351128e5",
+      "modified_at": "2026-03-24T11:04:28+08:00",
+      "size_bytes": 740660,
+      "object_count": 913
+    },
+    {
+      "file_name": "flows_20251229175702.json",
+      "path": "AHU程序\\flows_20251229175702.json",
+      "sha1": "6284f8355b040551c9fdb73c44663e25dac3fa3d",
+      "modified_at": "2026-03-24T11:06:11+08:00",
+      "size_bytes": 776649,
+      "object_count": 956
+    },
+    {
+      "file_name": "flows_20260206160555.json",
+      "path": "AHU程序\\flows_20260206160555.json",
+      "sha1": "aaa0e9646226b9fde2e4ff5fed8f790675ff9c8b",
+      "modified_at": "2026-03-24T11:05:18+08:00",
+      "size_bytes": 791482,
+      "object_count": 992
+    }
+  ],
+  "source_flow_count": 3,
+  "subflow_template_count": 8,
+  "system_pattern_count": 1,
+  "persist_dir": "chroma_db",
+  "collection_names": {
+    "subflow_templates": "ahu_subflow_templates_v1",
+    "system_patterns": "ahu_system_patterns_v1"
+  },
+  "embedding": {
+    "provider": "siliconflow",
+    "model": "BAAI/bge-m3"
+  },
+  "collection_owner": "phase2_ahu_assets",
+  "stale_cleanup_policy": "exclusive_collections_only",
+  "build_command": "python scripts/build_phase2_retrieval_indexes.py --flows-dir \"AHU程序\" --output-dir \"AHU程序/pattern_library\" --system-type \"AHU\" --write-chroma --persist-dir \"./chroma_db\"",
+  "written_counts": {
+    "subflow_templates": 8,
+    "system_patterns": 1
+  },
+  "last_chroma_write_at": "2026-04-16T22:31:40+08:00"
+}

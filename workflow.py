@@ -1,240 +1,516 @@
 """
-LangGraph 工作流编排
-定义 6 个智能体的协作流程（DAG + 条件路由）
+LangGraph workflow orchestration.
+
+The formal workflow keeps the Phase 3 layered-planning backbone, and now
+mounts Phase 8 review branches plus the Phase 4 repair loop:
+
+analysis -> ambiguity_router -> retrieval -> architecture_planning
+-> architecture_review -> subsystem_planning -> global_assembly
+-> coding -> verification -> repair_router -> END/repair_agent
 """
-from typing import TypedDict
-from langgraph.graph import StateGraph, END
-from agents.analysis_agent import AnalysisAgent
-from agents.retrieval_agent import RetrievalAgent
-from agents.planning_agent import PlanningAgent
-from agents.coding_agent import CodingAgent
-from langsmith import traceable
+from typing import Any, Callable, TypedDict
 import os
+
+from langgraph.graph import END, StateGraph
+from langsmith import traceable
+
+from agents.analysis_agent import AnalysisAgent
+from agents.ambiguity_router import AmbiguityRouter
+from agents.architecture_feedback_apply_agent import ArchitectureFeedbackApplyAgent
+from agents.architecture_planner import ArchitecturePlanner
+from agents.architecture_review_agent import ArchitectureReviewAgent
+from agents.clarification_apply_agent import ClarificationApplyAgent
+from agents.clarification_review_agent import ClarificationReviewAgent
+from agents.coding_agent import CodingAgent
+from agents.global_assembler import GlobalAssembler
+from agents.repair_agent import RepairAgent
+from agents.repair_router import RepairRouter
+from agents.subsystem_planner import SubsystemPlanner
+from agents.verifier_agent import VerifierAgent
+from utils.phase3_contracts import (
+    DEFAULT_RETRY_BUDGET,
+    RepairContext,
+    RepairHistoryEntry,
+    ReviewHistoryEntry,
+    ReviewRequest,
+    ReviewResponse,
+    RouteDecision,
+    default_retry_budget,
+    default_retry_counts_by_scope,
+    empty_review_request,
+    empty_review_response,
+)
+from utils.workflow_runtime import build_runtime_invoke_config, compile_state_graph
+
+try:
+    from agents.retrieval_agent import RetrievalAgent
+except ModuleNotFoundError:
+    RetrievalAgent = None
 
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
-# 定义工作流状态
+
 class WorkflowState(TypedDict):
-    """工作流全局状态"""
-    user_query: str  # 用户输入的需求
-    analysis_result: dict  # 分析智能体输出
-    retrieval_context: dict  # 检索到的完整上下文（原始数据）
-    execution_plan: dict  # 执行计划
-    generated_code: str  # 生成的 Python 代码
-    execution_result: dict  # 代码执行结果
-    validation_result: dict  # 验证结果
-    debug_history: list  # 调试历史
-    retry_count: int  # 重试次数
-    current_step: str  # 当前步骤
-    next_step: str  # 下一步骤
-    final_output: dict  # 最终输出
+    """Shared workflow state."""
+
+    user_query: str
+
+    # Formal mainline fields
+    analysis_result: dict
+    requirement_spec: dict
+    retrieval_bundle: dict
+    decomposition_result: dict
+    architecture_plan: dict
+    subsystem_plan_map: dict
+    assembled_graph_ir: dict
+    compiled_artifact: dict
+    verification_report: dict
+    final_output: dict
+
+    # Control / reserved fields
+    debug_history: list
+    repair_context: RepairContext
+    repair_history: list[RepairHistoryEntry]
+    route_decision: RouteDecision
+    retry_count: int
+    retry_budget: dict[str, int]
+    retry_counts_by_scope: dict[str, int]
+    hitl_stage: str
+    review_request: ReviewRequest
+    review_response: ReviewResponse
+    review_history: list[ReviewHistoryEntry]
+    review_enabled: bool
+    review_required: bool
+    review_status: str
+    review_id: str
+    clarification_round: int
+    architecture_feedback_patch: dict
+    enable_hitl_clarification: bool
+    enable_hitl_architecture_review: bool
+    enable_repair_agent: bool
+    current_step: str
 
 
-@traceable(name="create_workflow", tags=["workflow", "langgraph"])
-def create_workflow() -> StateGraph:
-    """
-    创建 LangGraph 工作流
-    
-    Returns:
-        配置好的状态图
-    """
-    # 初始化所有智能体
-    analysis_agent = AnalysisAgent()
-    retrieval_agent = RetrievalAgent()
-    planning_agent = PlanningAgent()  # 启用规划智能体
-    coding_agent = CodingAgent()      # 启用编码智能体
-    
-    # 创建状态图
-    workflow = StateGraph(WorkflowState)
-    
-    # ========== 添加节点 ==========
-    workflow.add_node("analysis", analysis_agent)
-    workflow.add_node("retrieval", retrieval_agent)
-    workflow.add_node("planning", planning_agent)
-    workflow.add_node("coding", coding_agent)
-    
-    # ========== 定义边缘（流程）==========
+PHASE3_NODE_ORDER = [
+    "analysis",
+    "retrieval",
+    "architecture_planning",
+    "subsystem_planning",
+    "global_assembly",
+    "coding",
+    "verification",
+]
+PHASE8_REVIEW_NODE_ORDER = [
+    "ambiguity_router",
+    "clarification_review",
+    "clarification_apply",
+    "architecture_review",
+    "architecture_feedback_apply",
+]
+REPAIR_ROUTER_NODE = "repair_router"
+REPAIR_AGENT_NODE = "repair_agent"
+PHASE4_RECURSION_LIMIT = 40
+PHASE4_REPAIR_DECISION_TO_NEXT: dict[str, str] = {
+    "accept": END,
+    "planning_repair": REPAIR_AGENT_NODE,
+    "assembly_repair": REPAIR_AGENT_NODE,
+    "compile_repair": REPAIR_AGENT_NODE,
+    "reject": END,
+}
+PHASE4_RESUME_NODE_TO_NEXT: dict[str, str] = {
+    "subsystem_planning": "subsystem_planning",
+    "global_assembly": "global_assembly",
+    "coding": "coding",
+}
+PHASE4_REPAIR_AGENT_DECISION_TO_NEXT: dict[str, str] = {
+    "subsystem_planning": "subsystem_planning",
+    "global_assembly": "global_assembly",
+    "coding": "coding",
+    "END": END,
+}
 
-    workflow.set_entry_point("analysis")
-    workflow.add_edge("analysis", "retrieval")       # 分析 -> 检索
-    workflow.add_edge("retrieval", "planning")        # 检索 -> 规划
-    workflow.add_edge("planning", "coding")           # 规划 -> 编码
-    workflow.add_edge("coding", END)                  # 编码 -> 结束（临时）
-    
+
+def _coerce_non_negative_int(value: Any, default: int = 0) -> int:
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return default
+
+
+def normalize_retry_budget(retry_budget: dict[str, Any] | None) -> dict[str, int]:
+    normalized = default_retry_budget()
+    for scope in DEFAULT_RETRY_BUDGET:
+        if retry_budget is None:
+            continue
+        normalized[scope] = _coerce_non_negative_int(retry_budget.get(scope), normalized[scope])
+    return normalized
+
+
+def normalize_retry_counts_by_scope(retry_counts_by_scope: dict[str, Any] | None) -> dict[str, int]:
+    normalized = default_retry_counts_by_scope()
+    for scope in normalized:
+        if retry_counts_by_scope is None:
+            continue
+        normalized[scope] = _coerce_non_negative_int(retry_counts_by_scope.get(scope), 0)
+    return normalized
+
+
+def aggregate_retry_count(retry_counts_by_scope: dict[str, Any] | None) -> int:
+    return sum(normalize_retry_counts_by_scope(retry_counts_by_scope).values())
+
+
+def get_repair_router_branch(state: dict[str, Any]) -> str:
+    decision = str(((state or {}).get("route_decision", {}) or {}).get("decision", "")).strip()
+    return decision if decision in PHASE4_REPAIR_DECISION_TO_NEXT else "reject"
+
+
+def get_repair_resume_branch(state: dict[str, Any]) -> str:
+    resume_node = str(((state or {}).get("repair_context", {}) or {}).get("resume_node", "")).strip()
+    if resume_node not in PHASE4_RESUME_NODE_TO_NEXT:
+        raise ValueError(f"Unsupported repair resume node: {resume_node or '<empty>'}")
+    return resume_node
+
+
+def get_repair_agent_branch(state: dict[str, Any]) -> str:
+    decision = str(((state or {}).get("route_decision", {}) or {}).get("decision", "")).strip()
+    if decision == "reject":
+        return "END"
+    return get_repair_resume_branch(state)
+
+
+def get_ambiguity_branch(state: dict[str, Any]) -> str:
+    return "clarification_review" if bool((state or {}).get("review_required", False)) else "retrieval"
+
+
+def get_clarification_review_branch(state: dict[str, Any]) -> str:
+    review_required = bool((state or {}).get("review_required", False))
+    review_enabled = bool((state or {}).get("review_enabled", False))
+    review_status = str((state or {}).get("review_status", "")).strip()
+    review_response = (state or {}).get("review_response", {}) or {}
+    decision = str(review_response.get("decision", "")).strip()
+    if review_required and review_enabled and review_status == "pending":
+        return "clarification_review"
+    if review_status in {"answered", "applied", "rejected"}:
+        return "clarification_apply"
+    if decision:
+        return "clarification_apply"
+    return "retrieval"
+
+
+def get_clarification_apply_branch(state: dict[str, Any]) -> str:
+    decision = str((((state or {}).get("review_response", {}) or {}).get("decision", ""))).strip()
+    return "END" if decision == "reject" else "retrieval"
+
+
+def get_architecture_review_branch(state: dict[str, Any]) -> str:
+    review_required = bool((state or {}).get("review_required", False))
+    review_enabled = bool((state or {}).get("review_enabled", False))
+    review_status = str((state or {}).get("review_status", "")).strip()
+    review_response = (state or {}).get("review_response", {}) or {}
+    decision = str(review_response.get("decision", "")).strip()
+    if review_required and review_enabled and review_status == "pending":
+        return "architecture_review"
+    if review_status in {"answered", "applied", "rejected"}:
+        return "architecture_feedback_apply"
+    if decision:
+        return "architecture_feedback_apply"
+    return "subsystem_planning"
+
+
+def get_architecture_feedback_apply_branch(state: dict[str, Any]) -> str:
+    decision = str((((state or {}).get("review_response", {}) or {}).get("decision", ""))).strip()
+    if not decision:
+        decision = str((((state or {}).get("architecture_feedback_patch", {}) or {}).get("decision", ""))).strip()
+    if decision == "reject":
+        return "END"
+    if decision in {"feedback", "clarify"}:
+        return "architecture_planning"
+    return "subsystem_planning"
+
+
+def _passthrough_node(state: dict[str, Any]) -> dict[str, Any]:
+    return state
+
+
+def populate_phase4_workflow(
+    workflow: StateGraph,
+    nodes: dict[str, object],
+    *,
+    enable_repair_loop: bool = False,
+) -> StateGraph:
+    """Register the shared Phase 4-capable topology."""
+    for node_name in PHASE3_NODE_ORDER:
+        workflow.add_node(node_name, nodes[node_name])
+    for node_name in PHASE8_REVIEW_NODE_ORDER:
+        workflow.add_node(node_name, nodes.get(node_name, _passthrough_node))
+
+    if enable_repair_loop:
+        missing_nodes = {REPAIR_ROUTER_NODE, REPAIR_AGENT_NODE} - set(nodes)
+        if missing_nodes:
+            missing = ", ".join(sorted(missing_nodes))
+            raise ValueError(f"Phase 4 repair loop requires nodes: {missing}")
+        workflow.add_node(REPAIR_ROUTER_NODE, nodes[REPAIR_ROUTER_NODE])
+        workflow.add_node(REPAIR_AGENT_NODE, nodes[REPAIR_AGENT_NODE])
+
+    workflow.set_entry_point(PHASE3_NODE_ORDER[0])
+    workflow.add_edge("analysis", "ambiguity_router")
+    workflow.add_conditional_edges(
+        "ambiguity_router",
+        get_ambiguity_branch,
+        {
+            "clarification_review": "clarification_review",
+            "retrieval": "retrieval",
+        },
+    )
+    workflow.add_conditional_edges(
+        "clarification_review",
+        get_clarification_review_branch,
+        {
+            "clarification_review": "clarification_review",
+            "clarification_apply": "clarification_apply",
+            "retrieval": "retrieval",
+        },
+    )
+    workflow.add_conditional_edges(
+        "clarification_apply",
+        get_clarification_apply_branch,
+        {
+            "retrieval": "retrieval",
+            "END": END,
+        },
+    )
+    workflow.add_edge("retrieval", "architecture_planning")
+    workflow.add_edge("architecture_planning", "architecture_review")
+    workflow.add_conditional_edges(
+        "architecture_review",
+        get_architecture_review_branch,
+        {
+            "architecture_review": "architecture_review",
+            "architecture_feedback_apply": "architecture_feedback_apply",
+            "subsystem_planning": "subsystem_planning",
+        },
+    )
+    workflow.add_conditional_edges(
+        "architecture_feedback_apply",
+        get_architecture_feedback_apply_branch,
+        {
+            "architecture_planning": "architecture_planning",
+            "subsystem_planning": "subsystem_planning",
+            "END": END,
+        },
+    )
+    for source, target in zip(PHASE3_NODE_ORDER[3:], PHASE3_NODE_ORDER[4:]):
+        workflow.add_edge(source, target)
+
+    if enable_repair_loop:
+        workflow.add_edge(PHASE3_NODE_ORDER[-1], REPAIR_ROUTER_NODE)
+        workflow.add_conditional_edges(
+            REPAIR_ROUTER_NODE,
+            get_repair_router_branch,
+            PHASE4_REPAIR_DECISION_TO_NEXT,
+        )
+        workflow.add_conditional_edges(
+            REPAIR_AGENT_NODE,
+            get_repair_agent_branch,
+            PHASE4_REPAIR_AGENT_DECISION_TO_NEXT,
+        )
+    else:
+        workflow.add_edge(PHASE3_NODE_ORDER[-1], END)
     return workflow
 
 
-@traceable(name="run_workflow", tags=["workflow", "langgraph"])
-def run_workflow(user_query: str) -> dict:
-    """
-    运行完整工作流
-    
-    Args:
-        user_query: 用户需求描述
-        
-    Returns:
-        最终生成的 JSON 组态
-    """
-    # 创建工作流
-    workflow = create_workflow()
-    
-    # TODO: 编译图
-    app = workflow.compile()
-    
-    # 初始化状态
-    initial_state = {
+def build_initial_state(
+    user_query: str,
+    *,
+    enable_hitl_clarification: bool = False,
+    enable_hitl_architecture_review: bool = False,
+    enable_repair_agent: bool = False,
+) -> dict:
+    """Create the canonical initial state shared by both entrypoints."""
+    retry_budget = default_retry_budget()
+    retry_counts_by_scope = default_retry_counts_by_scope()
+    return {
         "user_query": user_query,
+        # Phase 3 formal fields
         "analysis_result": {},
-        "retrieval_context": {},
-        "execution_plan": {},
-        "generated_code": "",
-        "execution_result": {},
-        "validation_result": {},
+        "requirement_spec": {},
+        "retrieval_bundle": {},
+        "decomposition_result": {},
+        "architecture_plan": {},
+        "subsystem_plan_map": {},
+        "assembled_graph_ir": {},
+        "compiled_artifact": {},
+        "verification_report": {},
+        "final_output": {},
+        # Historical / reserved fields
         "debug_history": [],
-        "retry_count": 0,
+        "repair_context": {},
+        "repair_history": [],
+        "route_decision": {},
+        "retry_budget": retry_budget,
+        "retry_counts_by_scope": retry_counts_by_scope,
+        "retry_count": aggregate_retry_count(retry_counts_by_scope),
+        "hitl_stage": "none",
+        "review_request": empty_review_request(),
+        "review_response": empty_review_response(),
+        "review_history": [],
+        "review_enabled": False,
+        "review_required": False,
+        "review_status": "none",
+        "review_id": "",
+        "clarification_round": 0,
+        "architecture_feedback_patch": {},
+        "enable_hitl_clarification": bool(enable_hitl_clarification),
+        "enable_hitl_architecture_review": bool(enable_hitl_architecture_review),
+        "enable_repair_agent": bool(enable_repair_agent),
         "current_step": "start",
-        "next_step": "",
-        "final_output": {}
-    }
-    
-    # TODO: 执行工作流
-    invoke_config = {
-        "run_name": "MideaWorkflow",
-        "tags": ["workflow", "langgraph"],
-        "metadata": {"user_query": user_query},
     }
 
-    result = app.invoke(initial_state, config=invoke_config)
 
-    return result
+@traceable(name="create_workflow", tags=["workflow", "langgraph"])
+def create_workflow(*, checkpointer: Any | None = None) -> StateGraph:
+    """Create the formal workflow graph with review and repair branches."""
+    if RetrievalAgent is None:
+        raise ImportError("RetrievalAgent 依赖未安装，无法创建正式工作流。")
 
+    analysis_agent = AnalysisAgent()
+    ambiguity_router = AmbiguityRouter()
+    retrieval_agent = RetrievalAgent()
+    clarification_review = ClarificationReviewAgent()
+    clarification_apply = ClarificationApplyAgent()
+    architecture_planner = ArchitecturePlanner()
+    architecture_review = ArchitectureReviewAgent()
+    architecture_feedback_apply = ArchitectureFeedbackApplyAgent()
+    subsystem_planner = SubsystemPlanner()
+    global_assembler = GlobalAssembler()
+    coding_agent = CodingAgent()
+    verifier_agent = VerifierAgent()
+    repair_router = RepairRouter()
+    repair_agent = RepairAgent()
+
+    workflow = StateGraph(WorkflowState)
+    return populate_phase4_workflow(
+        workflow,
+        {
+            "analysis": analysis_agent,
+            "ambiguity_router": ambiguity_router,
+            "clarification_review": clarification_review,
+            "clarification_apply": clarification_apply,
+            "retrieval": retrieval_agent,
+            "architecture_planning": architecture_planner,
+            "architecture_review": architecture_review,
+            "architecture_feedback_apply": architecture_feedback_apply,
+            "subsystem_planning": subsystem_planner,
+            "global_assembly": global_assembler,
+            "coding": coding_agent,
+            "verification": verifier_agent,
+            "repair_router": repair_router,
+            "repair_agent": repair_agent,
+        },
+        enable_repair_loop=True,
+    )
+
+
+@traceable(name="run_workflow", tags=["workflow", "langgraph"])
+def run_workflow(
+    user_query: str,
+    *,
+    thread_id: str | None = None,
+    checkpointer: Any | None = None,
+    runtime_metadata: dict[str, Any] | None = None,
+    enable_hitl_clarification: bool = False,
+    enable_hitl_architecture_review: bool = False,
+    enable_repair_agent: bool = False,
+) -> dict:
+    """Run the end-to-end workflow and return the final state."""
+    workflow = create_workflow(checkpointer=checkpointer)
+    app = compile_state_graph(workflow, checkpointer=checkpointer)
+
+    initial_state = build_initial_state(
+        user_query,
+        enable_hitl_clarification=bool(
+            enable_hitl_clarification and checkpointer is not None and str(thread_id or "").strip()
+        ),
+        enable_hitl_architecture_review=bool(
+            enable_hitl_architecture_review and checkpointer is not None and str(thread_id or "").strip()
+        ),
+        enable_repair_agent=enable_repair_agent,
+    )
+
+    invoke_config = build_runtime_invoke_config(
+        user_query=user_query,
+        run_name="MideaWorkflow",
+        tags=["workflow", "langgraph", "phase3-layered-planning"],
+        recursion_limit=PHASE4_RECURSION_LIMIT,
+        thread_id=thread_id,
+        checkpointer=checkpointer,
+        extra_metadata=runtime_metadata,
+    )
+
+    return app.invoke(initial_state, config=invoke_config)
 
 
 if __name__ == "__main__":
     print("=" * 60)
-    # 测试完整工作流
     print("\n\n测试完整工作流调用:")
     print("=" * 60)
-    
-    test_query = "生成一个程序，接收一个输入，输入5v的时候，输出1，输入3v的时候输出2，输入10v的时候输出0"
+
+    test_query = "生成一个 AHU 空调箱 Node-RED flows JSON，包含 IO/通讯、控制、定时、直膨机状态 四个页面。子系统包括送风机标准控制、送风机频率控制、风阀控制、冷水阀控制、电加热控制、直膨机控制。系统需支持自动/手动、本地/远程、定时启停、夏季/冬季模式。请显式给出每个子系统的输入输出点、故障报警、联锁条件、延时逻辑和 PID 调节信号，并按标准控制子流程组织。"
     print(f"\n用户需求: {test_query}\n")
-    
+
     result = run_workflow(test_query)
 
-    # 显示分析结果
-    if result.get("analysis_result"):
-        analysis = result["analysis_result"]
-        retrieval_plan = analysis.get("retrieval_plan", {})
-        scenario_analysis = analysis.get("scenario_analysis", {})
-
-        print(f"\n\n{'=' * 60}")
-        print("🧠 分析智能体输出:")
+    if result.get("assembled_graph_ir"):
+        graph_ir = result["assembled_graph_ir"]
+        print(f"\n{'=' * 60}")
+        print("Graph IR 输出")
         print("=" * 60)
+        print(f"页面数: {len(graph_ir.get('pages', []))}")
+        print(f"子流程定义数: {len(graph_ir.get('subflow_definitions', []))}")
+        print(f"节点实例数: {len(graph_ir.get('node_instances', []))}")
+        print(f"边数: {len(graph_ir.get('edges', []))}")
 
-        summary = scenario_analysis.get("summary", "N/A")
-        print(f"\n业务摘要: {summary}")
-
-        key_fields = [
-            ("business_goal", "业务目标"),
-            ("system_type", "系统类型"),
-            ("equipment_object", "设备对象"),
-            ("actuator", "执行器"),
-            ("controlled_variable", "被控量"),
-            ("feedback_variable", "反馈量"),
-            ("setpoint_variable", "设定值"),
-            ("output_signal", "目标输出"),
-            ("control_strategy", "控制策略"),
-        ]
-        for key, label in key_fields:
-            value = scenario_analysis.get(key)
-            if value:
-                print(f"  - {label}: {value}")
-
-        if scenario_analysis.get("ambiguities"):
-            print(f"  - 模糊点: {scenario_analysis['ambiguities']}")
-        if scenario_analysis.get("assumptions"):
-            print(f"  - 假设: {scenario_analysis['assumptions']}")
-        if "confidence" in scenario_analysis:
-            print(f"  - 置信度: {scenario_analysis.get('confidence', 0):.2f}")
-
-        print(f"\n检索计划:")
-        print(f"  - intent: {retrieval_plan.get('intent', 'N/A')}")
-        print(f"  - category_l1: {retrieval_plan.get('category_l1', '') or '空'}")
-        print(f"  - detected_operations: {retrieval_plan.get('detected_operations', [])}")
-        print(f"  - keywords: {retrieval_plan.get('keywords', [])}")
-        queries = retrieval_plan.get("queries", [])
-        if queries:
-            print(f"  - queries ({len(queries)} 条):")
-            for i, query in enumerate(queries, 1):
-                print(f"    [{i}] {query}")
-    
-    # 显示原始检索结果
-    if result.get("retrieval_context"):
-        ctx = result["retrieval_context"]
-        print(f"\n📊 检索结果摘要:")
-        print(f"  - 查询: {ctx['query']}")
-        print(f"  - 找到模块数: {ctx['metadata']['retrieved_count']}")
-        print(f"  - 平均置信度: {ctx['metadata']['avg_confidence_score']:.3f}")
-        
-        if ctx['relevant_nodes']:
-            print(f"\n  最相关的模块:")
-            for node in ctx['relevant_nodes'][:3]:
-                print(f"    • {node['name']} ({node['module_type']}) - {node['similarity_score']:.3f}")
-    
-    # 显示规划结果
-    if result.get("execution_plan"):
-        plan = result["execution_plan"]
-        print(f"\n\n{'=' * 60}")
-        print("🎯 规划智能体输出:")
+    if result.get("compiled_artifact"):
+        artifact = result["compiled_artifact"]
+        report = artifact.get("compile_report", {})
+        json_code = artifact.get("json_text", "")
+        print(f"\n{'=' * 60}")
+        print("编译输出")
         print("=" * 60)
-        print(f"\n目标: {plan.get('goal', 'N/A')}")
-        
-        nodes = plan.get('nodes', [])
-        if nodes:
-            print(f"\n节点列表 ({len(nodes)} 个):")
-            for i, node in enumerate(nodes, 1):
-                print(f"\n  [{i}] {node.get('logic_id')} ({node.get('module_type')})")
-                print(f"      理由: {node.get('reasoning', 'N/A')}")
-                if node.get('parameters'):
-                    print(f"      参数: {node['parameters']}")
-        
-        connections = plan.get('connections', [])
-        if connections:
-            print(f"\n连接关系 ({len(connections)} 条):")
-            for conn in connections:
-                print(f"  {conn['from_node']}[{conn['from_port_index']}] -> {conn['to_node']}[{conn['to_port_index']}]")
-    
-    # 显示编码结果
-    if result.get("generated_code"):
-        print(f"\n\n{'=' * 60}")
-        print("🔧 编码智能体输出:")
+        print(f"JSON 长度: {len(artifact.get('json_text', ''))}")
+        print(f"页面数: {report.get('page_count', 0)}")
+        print(f"子流程定义数: {report.get('subflow_count', 0)}")
+        print(f"节点数: {report.get('node_count', 0)}")
+        if json_code:
+            print(f"\n{'=' * 60}")
+            print("JSON 预览")
+            print("=" * 60)
+            print(json_code[:500])
+            if len(json_code) > 500:
+                print(f"\n... (总计 {len(json_code)} 字符)")
+
+    if result.get("verification_report"):
+        verification = result["verification_report"]
+        print(f"\n{'=' * 60}")
+        print("验收结果")
         print("=" * 60)
-        
-        json_code = result["generated_code"]
-        print(f"\nJSON 文件预览（前 500 字符）:")
-        print(json_code[:500])
-        if len(json_code) > 500:
-            print(f"\n... (总计 {len(json_code)} 字符)")
-        
-        # 保存到文件
-        import os
+        print(f"状态: {verification.get('status', 'unknown')}")
+        print(f"错误数: {len(verification.get('issues', []))}")
+        print(f"警告数: {len(verification.get('warnings', []))}")
+
+    if result.get("compiled_artifact", {}).get("json_text"):
+        json_code = result["compiled_artifact"]["json_text"]
         from utils.time_utils import generate_output_filename
-        
-        # 创建输出目录
+
         output_dir = "generated_flow"
         os.makedirs(output_dir, exist_ok=True)
-        
-        # 生成带时间戳的文件名
         output_filename = generate_output_filename(prefix="模块", ext="json")
         output_file = os.path.join(output_dir, output_filename)
-        
-        with open(output_file, 'w', encoding='utf-8') as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             f.write(json_code)
-        
-        abs_path = os.path.abspath(output_file)
-        print(f"\n✅ JSON 已保存到: {abs_path}")
+
+        print(f"\nJSON 已保存到: {os.path.abspath(output_file)}")
 
     print("\n" + "=" * 60)
     print("测试完成！")
-    print("=" * 60) 
-
+    print("=" * 60)

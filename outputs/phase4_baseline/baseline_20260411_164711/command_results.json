@@ -1,0 +1,60 @@
+[
+  {
+    "name": "phase3_tests_initial",
+    "command": "D:\\Anaconda\\envs\\midea\\python.exe -m unittest discover -s tests -p test_phase3*.py",
+    "returncode": 1,
+    "stdout": "[CodingAgent] initialized\n\n[JSONCompiler] completed:\n   ҳ����: 2\n   �����̶�����: 2\n   �ڵ���: 2\n   ������: 0\n\n[VerifierAgent] completed:\n   ״̬: passed\n   ������: 0\n   ������: 0\n[CodingAgent] initialized\n\n[JSONCompiler] completed:\n   ҳ����: 2\n   �����̶�����: 2\n   �ڵ���: 3\n   ������: 1\n\n[VerifierAgent] completed:\n   ״̬: retryable_error\n   ������: 1\n   ������: 0\n[CodingAgent] initialized\n\n[JSONCompiler] completed:\n   ҳ����: 2\n   �����̶�����: 2\n   �ڵ���: 3\n   ������: 1\n\n[VerifierAgent] completed:\n   ״̬: retryable_error\n   ������: 1\n   ������: 0\n",
+    "stderr": ".................F.....\n======================================================================\nFAIL: test_workflow_runs_multi_subsystem_cases_with_real_phase2_assets (test_phase3_workflow.Phase3WorkflowRealIntegrationTests.test_workflow_runs_multi_subsystem_cases_with_real_phase2_assets)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"D:\\yjsproject\\midea\\tests\\test_phase3_workflow.py\", line 566, in test_workflow_runs_multi_subsystem_cases_with_real_phase2_assets\n    self.assertEqual(result[\"subsystem_plan_map\"][subsystem_id][\"implementation_mode\"], \"reuse_template\")\nAssertionError: 'atomic_assembly' != 'reuse_template'\n- atomic_assembly\n+ reuse_template\n\n\n----------------------------------------------------------------------\nRan 23 tests in 4.733s\n\nFAILED (failures=1)\n",
+    "ok": false,
+    "note": "Initial subprocess run failed once during baseline generation."
+  },
+  {
+    "name": "phase2_tests",
+    "command": "D:\\Anaconda\\envs\\midea\\python.exe -m unittest discover -s tests -p test_phase2*.py",
+    "returncode": 0,
+    "stdout": "\n[AssemblyAgent] completed:\n   ҳ����: 1\n   �����̶�����: 1\n   �ڵ�ʵ����: 1\n   ����: 0\n\n[AssemblyAgent] completed:\n   ҳ����: 1\n   �����̶�����: 1\n   �ڵ�ʵ����: 1\n   ����: 0\n[CodingAgent] initialized\n\n[JSONCompiler] completed:\n   ҳ����: 1\n   �����̶�����: 1\n   �ڵ���: 1\n   ������: 0\n",
+    "stderr": ".......................\n----------------------------------------------------------------------\nRan 23 tests in 6.305s\n\nOK\n",
+    "ok": true
+  },
+  {
+    "name": "phase1_tests",
+    "command": "D:\\Anaconda\\envs\\midea\\python.exe -m unittest discover -s tests -p test_phase1_workflow.py",
+    "returncode": 0,
+    "stdout": "[CodingAgent] initialized\n\n[AssemblyAgent] completed:\n   ҳ����: 1\n   �����̶�����: 0\n   �ڵ�ʵ����: 3\n   ����: 2\n[CodingAgent] initialized\n\n[AssemblyAgent] completed:\n   ҳ����: 1\n   �����̶�����: 1\n   �ڵ�ʵ����: 1\n   ����: 0\n\n[JSONCompiler] completed:\n   ҳ����: 1\n   �����̶�����: 1\n   �ڵ���: 1\n   ������: 0\n[CodingAgent] initialized\n\n[AssemblyAgent] completed:\n   ҳ����: 1\n   �����̶�����: 0\n   �ڵ�ʵ����: 3\n   ����: 2\n\n[JSONCompiler] completed:\n   ҳ����: 1\n   �����̶�����: 0\n   �ڵ���: 3\n   ������: 0\n[CodingAgent] initialized\n\n[AssemblyAgent] completed:\n   ҳ����: 1\n   �����̶�����: 0\n   �ڵ�ʵ����: 1\n   ����: 1\n\n[JSONCompiler] completed:\n   ҳ����: 1\n   �����̶�����: 0\n   �ڵ���: 1\n   ������: 1\n\n[VerifierAgent] completed:\n   ״̬: retryable_error\n   ������: 1\n   ������: 0\n[CodingAgent] initialized\n\n[JSONCompiler] completed:\n   ҳ����: 1\n   �����̶�����: 1\n   �ڵ���: 1\n   ������: 0\n[CodingAgent] initialized\n\n[AssemblyAgent] completed:\n   ҳ����: 1\n   �����̶�����: 0\n   �ڵ�ʵ����: 3\n   ����: 2\n\n[JSONCompiler] completed:\n   ҳ����: 1\n   �����̶�����: 0\n   �ڵ���: 3\n   ������: 0\n\n[VerifierAgent] completed:\n   ״̬: passed\n   ������: 0\n   ������: 0\n[CodingAgent] initialized\n\n[VerifierAgent] completed:\n   ״̬: retryable_error\n   ������: 1\n   ������: 0\n[CodingAgent] initialized\n\n[AssemblyAgent] completed:\n   ҳ����: 1\n   �����̶�����: 0\n   �ڵ�ʵ����: 2\n   ����: 1\n\n[JSONCompiler] completed:\n   ҳ����: 1\n   �����̶�����: 0\n   �ڵ���: 2\n   ������: 0\n\n[VerifierAgent] completed:\n   ״̬: retryable_error\n   ������: 1\n   ������: 0\n[CodingAgent] initialized\n\n[AssemblyAgent] completed:\n   ҳ����: 1\n   �����̶�����: 0\n   �ڵ�ʵ����: 0\n   ����: 0\n\n[JSONCompiler] completed:\n   ҳ����: 1\n   �����̶�����: 0\n   �ڵ���: 0\n   ������: 0\n\n[VerifierAgent] completed:\n   ״̬: retryable_error\n   ������: 4\n   ������: 0\n[CodingAgent] initialized\n[CodingAgent] initialized\n\n[AssemblyAgent] completed:\n   ҳ����: 1\n   �����̶�����: 0\n   �ڵ�ʵ����: 3\n   ����: 2\n\n[JSONCompiler] completed:\n   ҳ����: 1\n   �����̶�����: 0\n   �ڵ���: 3\n   ������: 0\n\n[VerifierAgent] completed:\n   ״̬: passed\n   ������: 0\n   ������: 0\n[CodingAgent] initialized\n[ArchitecturePlanner] initialized\n[SubsystemPlanner] initialized\n[GlobalAssembler] initialized\n[CodingAgent] initialized\n",
+    "stderr": "...........\n----------------------------------------------------------------------\nRan 11 tests in 0.091s\n\nOK\n",
+    "ok": true
+  },
+  {
+    "name": "runtime_tests",
+    "command": "D:\\Anaconda\\envs\\midea\\python.exe -m unittest tests.test_runtime_versions",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": "..\n----------------------------------------------------------------------\nRan 2 tests in 1.686s\n\nOK\n",
+    "ok": true
+  },
+  {
+    "name": "phase2_production_chroma_smoke",
+    "command": "D:\\Anaconda\\envs\\midea\\python.exe -m unittest tests.test_phase2_production_chroma_smoke",
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ".\n----------------------------------------------------------------------\nRan 1 test in 1.911s\n\nOK\n",
+    "ok": true
+  },
+  {
+    "name": "pip_check",
+    "command": "D:\\Anaconda\\envs\\midea\\python.exe -m pip check",
+    "returncode": 0,
+    "stdout": "No broken requirements found.\n",
+    "stderr": "",
+    "ok": true
+  },
+  {
+    "name": "phase3_tests_rerun",
+    "command": "D:\\Anaconda\\envs\\midea\\python.exe -m unittest discover -s tests -p test_phase3*.py",
+    "returncode": 0,
+    "stdout": "[CodingAgent] initialized\n\n[JSONCompiler] completed:\n   ҳ����: 2\n   �����̶�����: 2\n   �ڵ���: 2\n   ������: 0\n\n[VerifierAgent] completed:\n   ״̬: passed\n   ������: 0\n   ������: 0\n[CodingAgent] initialized\n\n[JSONCompiler] completed:\n   ҳ����: 2\n   �����̶�����: 2\n   �ڵ���: 3\n   ������: 1\n\n[VerifierAgent] completed:\n   ״̬: retryable_error\n   ������: 1\n   ������: 0\n[CodingAgent] initialized\n\n[JSONCompiler] completed:\n   ҳ����: 2\n   �����̶�����: 2\n   �ڵ���: 3\n   ������: 1\n\n[VerifierAgent] completed:\n   ״̬: retryable_error\n   ������: 1\n   ������: 0\n",
+    "stderr": ".......................\n----------------------------------------------------------------------\nRan 23 tests in 4.987s\n\nOK\n",
+    "ok": true,
+    "note": "Immediate rerun after baseline generation."
+  }
+]

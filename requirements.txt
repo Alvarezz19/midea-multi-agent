@@ -1,18 +1,27 @@
-langchain>=0.1.0
-langchain-openai>=0.0.5
-langgraph>=0.0.40
-chromadb>=0.4.0
-openai>=1.0.0
-streamlit>=1.30.0
-pydantic>=2.0.0
-python-dotenv>=1.0.0
-langsmith>=0.1.0
+# Verified against the `midea` Conda environment on 2026-04-09.
+# Future LangGraph interrupt / persistence / HITL work should be revalidated
+# from this baseline before adding checkpointer-related dependencies.
 
-# Embedding 模型支持
-sentence-transformers>=2.2.0
-torch>=2.0.0
-transformers>=4.30.0
+langgraph>=1.0.6,<2.0.0
+langgraph-checkpoint>=4.0.0,<5.0.0
+langgraph-checkpoint-sqlite>=3.0.3,<4.0.0
+langchain>=1.2.6,<2.0.0
+langchain-core>=1.2.7,<2.0.0
+langchain-openai>=1.1.7,<2.0.0
+chromadb>=1.4.1,<2.0.0
+openai>=2.15.0,<3.0.0
+pydantic>=2.12.4,<3.0.0
+python-dotenv>=1.2.1,<2.0.0
+langsmith>=0.6.0,<1.0.0
+typing-extensions>=4.15.0,<5.0.0
+fastapi>=0.136.0,<1.0.0
+uvicorn>=0.40.0,<1.0.0
 
-# 可选：加速 BGE 模型推理
-# faiss-cpu>=1.7.0  # CPU 版本
-# faiss-gpu>=1.7.0  # GPU 版本（需要 CUDA）
+# Embedding / local model dependencies
+sentence-transformers>=5.2.0,<6.0.0
+torch>=2.10.0,<3.0.0
+transformers>=4.57.6,<5.0.0
+colorama>=0.4.6,<1.0.0
+
+# Optional UI experiments (not required by the current Phase 3 workflow)
+# streamlit>=1.46.0,<2.0.0

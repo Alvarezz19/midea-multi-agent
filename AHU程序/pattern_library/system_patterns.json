@@ -1,0 +1,117 @@
+[
+  {
+    "pattern_id": "ahu__control_dx_status_io_comm_timing__dx_fault_exhaust_fan__v1",
+    "pattern_name": "AHU 控制骨架",
+    "system_type": "AHU",
+    "description": "Derived from 3 source flows.",
+    "feature_tags": [
+      "ahu",
+      "phase2",
+      "ahu"
+    ],
+    "required_pages": [
+      {
+        "page_key": "control",
+        "label": "控制",
+        "kind": "control",
+        "coverage_ratio": 1.0,
+        "coverage_count": 3
+      },
+      {
+        "page_key": "dx_status",
+        "label": "直膨机状态",
+        "kind": "status",
+        "coverage_ratio": 1.0,
+        "coverage_count": 3
+      },
+      {
+        "page_key": "io_comm",
+        "label": "IO/通讯",
+        "kind": "io",
+        "coverage_ratio": 1.0,
+        "coverage_count": 3
+      },
+      {
+        "page_key": "timing",
+        "label": "定时",
+        "kind": "timing",
+        "coverage_ratio": 1.0,
+        "coverage_count": 3
+      }
+    ],
+    "optional_pages": [
+      {
+        "page_key": "dx_fault",
+        "label": "直膨机故障",
+        "kind": "fault",
+        "coverage_ratio": 0.333,
+        "coverage_count": 1
+      },
+      {
+        "page_key": "exhaust_fan",
+        "label": "排风机",
+        "kind": "fan",
+        "coverage_ratio": 0.333,
+        "coverage_count": 1
+      }
+    ],
+    "subsystem_slots": [],
+    "naming_hints": {},
+    "layout_hints": {},
+    "style_guides": {},
+    "source_cases": [
+      {
+        "source_flow": "flows_20251210190941.json",
+        "source_flow_path": "AHU程序\\flows_20251210190941.json",
+        "page_keys": [
+          "control",
+          "dx_status",
+          "io_comm",
+          "timing"
+        ],
+        "page_labels": [
+          "IO/通讯",
+          "控制",
+          "定时",
+          "直膨机状态"
+        ]
+      },
+      {
+        "source_flow": "flows_20251229175702.json",
+        "source_flow_path": "AHU程序\\flows_20251229175702.json",
+        "page_keys": [
+          "control",
+          "dx_status",
+          "io_comm",
+          "timing"
+        ],
+        "page_labels": [
+          "IO/通讯",
+          "控制",
+          "定时",
+          "直膨机状态"
+        ]
+      },
+      {
+        "source_flow": "flows_20260206160555.json",
+        "source_flow_path": "AHU程序\\flows_20260206160555.json",
+        "page_keys": [
+          "control",
+          "dx_fault",
+          "dx_status",
+          "exhaust_fan",
+          "io_comm",
+          "timing"
+        ],
+        "page_labels": [
+          "IO/通讯",
+          "控制",
+          "排风机",
+          "定时",
+          "直膨机故障",
+          "直膨机状态"
+        ]
+      }
+    ]
+  }
+]

@@ -1,16 +1,16 @@
+"""Agent package.
+
+Keep package initialization lightweight so offline tests can import individual
+agents without pulling in optional runtime dependencies such as ChromaDB.
 """
-agents 包初始化文件
-"""
-from .retrieval_agent import RetrievalAgent
-from .planning_agent import PlanningAgent
-from .coding_agent import CodingAgent
-from .validation_agent import ValidationAgent
-from .debugging_agent import DebuggingAgent
 
 __all__ = [
-    'RetrievalAgent',
-    'PlanningAgent',
-    'CodingAgent',
-    'ValidationAgent',
-    'DebuggingAgent'
+    "analysis_agent",
+    "architecture_planner",
+    "coding_agent",
+    "global_assembler",
+    "legacy",
+    "retrieval_agent",
+    "subsystem_planner",
+    "verifier_agent",
 ]

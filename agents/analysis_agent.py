@@ -11,7 +11,10 @@ from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 
 import config
+from utils.console_utils import safe_print as print
 from utils.model_manager import LLMManager
+from utils.phase3_adapters import build_requirement_spec, merge_engineering_requirement_patch
+from agents.llm_enhancers.analysis_engineering_compiler import EngineeringRequirementCompiler
 
 
 class RetrievalPlan(BaseModel):
@@ -64,6 +67,126 @@ class AnalysisResult(BaseModel):
 	metadata: AnalysisMetadata = Field(default_factory=AnalysisMetadata)
 
 
+def derive_clarification_signals(analysis_result: Dict[str, Any], requirement_spec: Dict[str, Any]) -> Dict[str, Any]:
+	"""提取用于条件式澄清的稳定信号。"""
+
+	scenario = analysis_result.get("scenario_analysis", {}) if isinstance(analysis_result, dict) else {}
+	if not isinstance(scenario, dict):
+		scenario = {}
+
+	requirement_spec = requirement_spec if isinstance(requirement_spec, dict) else {}
+	signals: List[Dict[str, str]] = []
+
+	seen_signal_keys = set()
+
+	def add_signal(code: str, severity: str, message: str) -> None:
+		key = (code, message)
+		if key in seen_signal_keys:
+			return
+		seen_signal_keys.add(key)
+		signals.append(
+			{
+				"code": code,
+				"severity": severity,
+				"message": message,
+			}
+		)
+
+	ambiguities = requirement_spec.get("ambiguities", [])
+	if isinstance(ambiguities, list):
+		for ambiguity in ambiguities[:3]:
+			text = str(ambiguity or "").strip()
+			if text:
+				add_signal("requirement_ambiguity", "high", text)
+
+	warnings = requirement_spec.get("warnings", [])
+	if isinstance(warnings, list):
+		for warning in warnings[:3]:
+			text = str(warning or "").strip()
+			if text:
+				severity = "high" if "冲突" in text or "缺少" in text else "medium"
+				add_signal("requirement_warning", severity, text)
+
+	engineering = requirement_spec.get("engineering", {})
+	if not isinstance(engineering, dict):
+		engineering = {}
+	missing_required_fields = engineering.get("missing_required_fields", [])
+	if not isinstance(missing_required_fields, list):
+		missing_required_fields = []
+
+	missing_code_aliases = {
+		"missing_equipment_quantity": "missing_equipment_quantity",
+		"missing_point_schedule": "missing_point_schedule",
+		"missing_communication_address": "missing_communication_address",
+		"missing_control_target": "missing_control_target",
+		"missing_pid_loop_signals": "missing_pid_loop_signals",
+	}
+	for missing_field in missing_required_fields:
+		text = str(missing_field or "").strip()
+		if not text:
+			continue
+		lowered = text.lower()
+		code = missing_code_aliases.get(lowered, "")
+		if not code:
+			if "设备" in text and "数量" in text:
+				code = "missing_equipment_quantity"
+			elif "点表" in text or "点位" in text:
+				code = "missing_point_schedule"
+			elif "通讯" in text or "通信" in text or "地址" in text or "modbus" in lowered or "bacnet" in lowered:
+				code = "missing_communication_address"
+			elif "控制目标" in text:
+				code = "missing_control_target"
+			elif "pid" in lowered or "反馈" in text or "设定" in text:
+				code = "missing_pid_loop_signals"
+			else:
+				code = "missing_engineering_input"
+		add_signal(code, "high", text)
+
+	global_modes = requirement_spec.get("global_modes", [])
+	if isinstance(global_modes, list):
+		normalized_modes = {str(mode).strip().lower() for mode in global_modes}
+		if {"制冷", "制热"}.issubset(normalized_modes) and "season_mode" not in normalized_modes:
+			add_signal("conflicting_global_modes", "high", "制冷/制热模式缺少稳定的季节模式归属。")
+
+	subsystems = requirement_spec.get("subsystems", [])
+	if not isinstance(subsystems, list) or not subsystems:
+		add_signal("missing_key_subsystems", "high", "未识别出稳定的子系统边界。")
+
+	required_pages = requirement_spec.get("required_pages", [])
+	if not isinstance(required_pages, list) or not required_pages:
+		add_signal("missing_required_pages", "medium", "未识别出稳定的必需页面。")
+
+	signals_payload = requirement_spec.get("signals", {})
+	if not isinstance(signals_payload, dict):
+		signals_payload = {}
+	input_signals = signals_payload.get("inputs", [])
+	output_signals = signals_payload.get("outputs", [])
+	if (
+		(not isinstance(input_signals, list) or not input_signals)
+		and (not isinstance(output_signals, list) or not output_signals)
+	):
+		add_signal("missing_explicit_signals", "medium", "缺少显式输入/输出信号，后续规划可能依赖保守假设。")
+
+	confidence = requirement_spec.get("confidence", scenario.get("confidence", 0.0))
+	try:
+		confidence = float(confidence)
+	except (TypeError, ValueError):
+		confidence = 0.0
+	if confidence < 0.5:
+		add_signal("low_confidence", "high", f"当前分析置信度偏低（{confidence:.2f}）。")
+
+	system_type = str(requirement_spec.get("system_type", "") or "").strip()
+	if not system_type:
+		add_signal("missing_system_type", "high", "系统类型未明确。")
+
+	should_clarify = any(signal["severity"] == "high" for signal in signals)
+	return {
+		"should_clarify": should_clarify,
+		"signals": signals,
+		"signal_count": len(signals),
+	}
+
+
 class AnalysisAgent:
 	"""分析智能体。"""
 
@@ -79,6 +202,7 @@ class AnalysisAgent:
 		)
 		self.prompt = self._create_prompt()
 		self._analyze_cache: Dict[str, Dict[str, Any]] = {}
+		self.engineering_compiler = self._create_engineering_compiler() if config.ANALYSIS_USE_ENGINEERING_COMPILER else None
 
 		if config.DEBUG:
 			print("✅ 分析智能体初始化完成")
@@ -86,6 +210,51 @@ class AnalysisAgent:
 			print(f"   温度: {config.ANALYSIS_LLM_TEMPERATURE}")
 			if model_name:
 				print(f"   指定模型: {model_name}")
+
+	def _create_engineering_compiler(self) -> EngineeringRequirementCompiler:
+		provider = (
+			config.ANALYSIS_ENGINEERING_LLM_PROVIDER
+			or config.LLM_ENHANCEMENT_PROVIDER
+			or config.ANALYSIS_LLM_PROVIDER
+			or config.LLM_PROVIDER
+		)
+		model_name = (
+			config.ANALYSIS_ENGINEERING_LLM_MODEL
+			or config.LLM_ENHANCEMENT_MODEL
+			or config.ANALYSIS_LLM_MODEL
+			or None
+		)
+		temperature = config.LLM_ENHANCEMENT_TEMPERATURE
+		llm = LLMManager.get_llm(
+			provider,
+			model=model_name,
+			temperature=temperature,
+			timeout=config.ANALYSIS_ENGINEERING_LLM_TIMEOUT_S,
+		)
+		return EngineeringRequirementCompiler(
+			llm=llm,
+			provider=provider,
+			model=model_name or "",
+		)
+
+	def _compile_engineering_requirement(
+		self,
+		user_query: str,
+		analysis_result: Dict[str, Any],
+		requirement_spec: Dict[str, Any],
+	) -> tuple[Dict[str, Any], Dict[str, Any]]:
+		compiler = getattr(self, "engineering_compiler", None)
+		if compiler is None:
+			compiler = self._create_engineering_compiler()
+			self.engineering_compiler = compiler
+
+		result = compiler.compile_patch(user_query, analysis_result, requirement_spec)
+		patch = result.get("patch", {}) if isinstance(result, dict) else {}
+		diagnostics = result.get("diagnostics", {}) if isinstance(result, dict) else {}
+		merged_spec = merge_engineering_requirement_patch(requirement_spec, patch)
+		diagnostics = dict(diagnostics)
+		diagnostics["adopted"] = merged_spec != requirement_spec
+		return merged_spec, diagnostics
 
 	def _create_prompt(self) -> ChatPromptTemplate:
 		system_prompt = """你是一个工业楼控/自动化模块检索专家。你的任务是分析用户需求，推断意图，并生成适合向量数据库检索的多个查询变体。
@@ -412,6 +581,27 @@ class AnalysisAgent:
 
 	def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
 		user_query = state.get("user_query", "")
-		state["analysis_result"] = self.analyze(user_query)
+		analysis_result = self.analyze(user_query)
+		requirement_spec = build_requirement_spec(analysis_result)
+		analysis_result = dict(analysis_result)
+		if config.ANALYSIS_USE_ENGINEERING_COMPILER:
+			try:
+				requirement_spec, engineering_diagnostics = self._compile_engineering_requirement(
+					user_query,
+					analysis_result,
+					requirement_spec,
+				)
+			except Exception as error:
+				engineering_diagnostics = {
+					"enabled": True,
+					"llm_used": False,
+					"fallback_used": True,
+					"fallback_reason": str(error),
+					"adopted": False,
+				}
+			analysis_result["engineering_analysis"] = engineering_diagnostics
+		analysis_result["clarification_signals"] = derive_clarification_signals(analysis_result, requirement_spec)
+		state["analysis_result"] = analysis_result
+		state["requirement_spec"] = requirement_spec
 		state["current_step"] = "analysis_completed"
 		return state

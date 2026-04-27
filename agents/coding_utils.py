@@ -2,14 +2,32 @@
 编码智能体辅助工具
 包含 ID 生成、拓扑布局、输入端口解析等功能
 """
+import hashlib
 import re
-import uuid
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Optional, Set, Tuple
 
 
-def generate_short_uuid() -> str:
-    """生成类似 'b45d2af' 的短ID（7位）"""
-    return str(uuid.uuid4()).replace('-', '')[:7]
+def generate_short_uuid(seed: str, used_ids: Optional[Set[str]] = None) -> str:
+    """基于稳定 seed 生成短 ID，并在极少数碰撞时可确定性消解。"""
+    digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()
+
+    if used_ids is None:
+        return digest[:10]
+
+    for length in range(10, len(digest) + 1):
+        candidate = digest[:length]
+        if candidate not in used_ids:
+            used_ids.add(candidate)
+            return candidate
+
+    suffix = 1
+    while True:
+        collision_digest = hashlib.sha1(f"{seed}::{suffix}".encode("utf-8")).hexdigest()
+        candidate = collision_digest[:10]
+        if candidate not in used_ids:
+            used_ids.add(candidate)
+            return candidate
+        suffix += 1
 
 
 def _extract_placeholder_name(value: str) -> str:
@@ -83,6 +101,46 @@ def resolve_input_count(template_inputs, planned_params: Dict[str, Any],
         if always_count > 0:
             return always_count
     
+    return 0
+
+
+def resolve_output_count(template_outputs, planned_params: Dict[str, Any],
+                        module_doc: Dict[str, Any] = None) -> int:
+    """
+    é€šç”¨åœ°ç¡®å®šèŠ‚ç‚¹è¾“å‡ºç«¯å£æ•°é‡ã€‚
+
+    è¾“å‡ºç«¯å£åœ¨çŽ°æœ‰ schema ä¸­é€šå¸¸æ˜¯å›ºå®šå€¼ï¼Œä½†è¿™é‡Œä»å…¼å®¹
+    å ä½ç¬¦åŒ ports_definition å…œåº•è®¡ç®—ï¼Œä¾¿äºŽåŽç»­æ”¯æŒæ›´å¤æ‚çš„æ¨¡æ¿ã€‚
+    """
+    if isinstance(template_outputs, str) and "{{" in template_outputs:
+        param_name = _extract_placeholder_name(template_outputs)
+        if param_name:
+            if param_name == "channelsPlusOne":
+                channels = planned_params.get("channels", 1)
+                return int(channels) + 1
+            if param_name in planned_params:
+                return int(planned_params[param_name])
+
+        for alias in ["outputCount", "outputsCount", "outputs"]:
+            if alias in planned_params:
+                return int(planned_params[alias])
+
+    elif isinstance(template_outputs, (int, float)):
+        for key in ["outputCount", "outputsCount", "outputs"]:
+            if key in planned_params:
+                return int(planned_params[key])
+        return int(template_outputs)
+
+    if module_doc:
+        ports_def = module_doc.get("ports_definition", {})
+        output_ports = ports_def.get("outputs", [])
+        always_count = sum(
+            1 for p in output_ports
+            if p.get("condition", "always") == "always"
+        )
+        if always_count > 0:
+            return always_count
+
     return 0
 
 

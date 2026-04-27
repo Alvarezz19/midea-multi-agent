@@ -1,0 +1,30 @@
+:root {
+  --color-ink: #102033;
+  --color-muted: #637387;
+  --color-soft: #f4f8fc;
+  --color-panel: rgba(255, 255, 255, 0.86);
+  --color-line: #dce8f4;
+  --color-brand: #0073d8;
+  --color-brand-deep: #0056ad;
+  --color-brand-soft: #e6f3ff;
+  --color-cyan: #60c7e8;
+  --color-green: #1f9d62;
+  --color-orange: #d97917;
+  --color-red: #ce3f3f;
+  --color-shadow: rgba(21, 77, 126, 0.16);
+  --font-body: "HarmonyOS Sans SC", "MiSans", "Source Han Sans SC", "Microsoft YaHei UI", sans-serif;
+  --font-display: "DIN Alternate", "Barlow Condensed", "HarmonyOS Sans SC", sans-serif;
+  --radius-lg: 28px;
+  --radius-md: 18px;
+  --radius-sm: 12px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  background: var(--color-soft);
+}

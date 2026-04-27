@@ -1,0 +1,402 @@
+{
+  "schema_version": "phase6-v1",
+  "generated_at": "2026-04-16T18:30:00+08:00",
+  "case_owner": "codex_phase6_batch1",
+  "default_trace_policy": "keep_last_failure",
+  "cases": [
+    {
+      "case_id": "golden_supply_fan_standard_v1",
+      "query": "为 AHU 生成送风机标准控制",
+      "case_type": "golden_success",
+      "case_source": "phase3_real_integration_matrix",
+      "stable_version": "phase6-batch1",
+      "expected_subsystems": [
+        "supply_fan_ctrl"
+      ],
+      "expected_min_subflow_count": 1,
+      "expected_verification_status": "passed",
+      "expected_route_decision": "accept",
+      "expected_failure_bucket": "passed",
+      "allowed_end_states": [
+        "passed"
+      ],
+      "max_repair_rounds": 0,
+      "golden_trace_policy": "keep_always",
+      "notes": "黄金单子系统基线，优先用于保留真实绿色 trace。",
+      "query_variants": [
+        "AHU 送风机 标准控制",
+        "送风机标准控制",
+        "末端组空送风机标准控制"
+      ],
+      "expected_template_roles": [
+        "supply_fan_control"
+      ],
+      "expected_pattern_ids": [
+        "ahu__control_dx_status_io_comm_timing__dx_fault_exhaust_fan__v1"
+      ]
+    },
+    {
+      "case_id": "golden_supply_fan_standard_v2",
+      "query": "为 AHU 生成末端组空送风机标准控制",
+      "case_type": "golden_success",
+      "case_source": "phase3_real_integration_matrix",
+      "stable_version": "phase6-batch1",
+      "expected_subsystems": [
+        "supply_fan_ctrl"
+      ],
+      "expected_min_subflow_count": 1,
+      "expected_verification_status": "passed",
+      "expected_route_decision": "accept",
+      "expected_failure_bucket": "passed",
+      "allowed_end_states": [
+        "passed"
+      ],
+      "max_repair_rounds": 0,
+      "golden_trace_policy": "keep_always",
+      "notes": "黄金单子系统同义表达，服务 query 覆盖率对照。",
+      "query_variants": [
+        "AHU 末端组空送风机标准控制",
+        "送风机标准控制",
+        "末端组空送风机"
+      ],
+      "expected_template_roles": [
+        "supply_fan_control"
+      ],
+      "expected_pattern_ids": [
+        "ahu__control_dx_status_io_comm_timing__dx_fault_exhaust_fan__v1"
+      ]
+    },
+    {
+      "case_id": "golden_fan_heater_coupled",
+      "query": "为 AHU 生成送风机与电加热联动控制",
+      "case_type": "golden_success",
+      "case_source": "phase3_real_integration_matrix",
+      "stable_version": "phase6-batch1",
+      "expected_subsystems": [
+        "supply_fan_ctrl",
+        "heater_ctrl"
+      ],
+      "expected_min_subflow_count": 2,
+      "expected_verification_status": "passed",
+      "expected_route_decision": "accept",
+      "expected_failure_bucket": "passed",
+      "allowed_end_states": [
+        "passed"
+      ],
+      "max_repair_rounds": 0,
+      "golden_trace_policy": "keep_always",
+      "notes": "黄金双子系统基线，用于验证送风机可用标志与电加热联动。",
+      "query_variants": [
+        "AHU 送风机 电加热 联动控制",
+        "送风机标准控制",
+        "电加热标准控制"
+      ],
+      "expected_template_roles": [
+        "supply_fan_control",
+        "heater_control"
+      ],
+      "expected_pattern_ids": [
+        "ahu__control_dx_status_io_comm_timing__dx_fault_exhaust_fan__v1"
+      ]
+    },
+    {
+      "case_id": "golden_fan_chw_coupled",
+      "query": "为 AHU 生成送风机与冷水阀联动控制",
+      "case_type": "golden_success",
+      "case_source": "phase3_real_integration_matrix",
+      "stable_version": "phase6-batch1",
+      "expected_subsystems": [
+        "supply_fan_ctrl",
+        "chw_valve_ctrl"
+      ],
+      "expected_min_subflow_count": 2,
+      "expected_verification_status": "passed",
+      "expected_route_decision": "accept",
+      "expected_failure_bucket": "passed",
+      "allowed_end_states": [
+        "passed"
+      ],
+      "max_repair_rounds": 0,
+      "golden_trace_policy": "keep_always",
+      "notes": "黄金双子系统基线，用于验证冷水阀模板召回与组合规划。",
+      "query_variants": [
+        "AHU 送风机 冷水阀 联动控制",
+        "送风机标准控制",
+        "冷水阀标准控制"
+      ],
+      "expected_template_roles": [
+        "supply_fan_control",
+        "chw_valve_control"
+      ],
+      "expected_pattern_ids": [
+        "ahu__control_dx_status_io_comm_timing__dx_fault_exhaust_fan__v1"
+      ]
+    },
+    {
+      "case_id": "golden_fan_dx_coupled",
+      "query": "为 AHU 生成送风机与直膨联动控制",
+      "case_type": "golden_success",
+      "case_source": "phase3_real_integration_matrix",
+      "stable_version": "phase6-batch1",
+      "expected_subsystems": [
+        "supply_fan_ctrl",
+        "dx_ctrl"
+      ],
+      "expected_min_subflow_count": 2,
+      "expected_verification_status": "passed",
+      "expected_route_decision": "accept",
+      "expected_failure_bucket": "passed",
+      "allowed_end_states": [
+        "passed"
+      ],
+      "max_repair_rounds": 0,
+      "golden_trace_policy": "keep_always",
+      "notes": "黄金双子系统基线，用于验证直膨模板和系统 pattern 召回。",
+      "query_variants": [
+        "AHU 送风机 直膨 联动控制",
+        "送风机标准控制",
+        "直膨标准控制"
+      ],
+      "expected_template_roles": [
+        "supply_fan_control",
+        "dx_control"
+      ],
+      "expected_pattern_ids": [
+        "ahu__control_dx_status_io_comm_timing__dx_fault_exhaust_fan__v1"
+      ]
+    },
+    {
+      "case_id": "golden_supply_fan_enable_sequence",
+      "query": "为 AHU 生成送风机标准启停控制",
+      "case_type": "golden_success",
+      "case_source": "phase6_batch1_manual_seed",
+      "stable_version": "phase6-batch1",
+      "expected_subsystems": [
+        "supply_fan_ctrl"
+      ],
+      "expected_min_subflow_count": 1,
+      "expected_verification_status": "passed",
+      "expected_route_decision": "accept",
+      "expected_failure_bucket": "passed",
+      "allowed_end_states": [
+        "passed"
+      ],
+      "max_repair_rounds": 0,
+      "golden_trace_policy": "keep_always",
+      "notes": "黄金单子系统补充 case，用于维持至少 6 条黄金 trace 留档。",
+      "query_variants": [
+        "AHU 送风机 标准启停控制",
+        "送风机启停控制",
+        "送风机标准控制"
+      ],
+      "expected_template_roles": [
+        "supply_fan_control"
+      ],
+      "expected_pattern_ids": [
+        "ahu__control_dx_status_io_comm_timing__dx_fault_exhaust_fan__v1"
+      ]
+    },
+    {
+      "case_id": "repair_fan_heater_chw_triplet",
+      "query": "为 AHU 生成送风机、电加热、冷水阀三子系统联动控制",
+      "case_type": "observed_success",
+      "case_source": "phase6_batch1_manual_seed",
+      "stable_version": "phase6-batch2",
+      "expected_subsystems": [
+        "supply_fan_ctrl",
+        "heater_ctrl",
+        "chw_valve_ctrl"
+      ],
+      "expected_min_subflow_count": 3,
+      "expected_verification_status": "passed",
+      "expected_route_decision": "accept",
+      "expected_failure_bucket": "passed",
+      "allowed_end_states": [
+        "passed"
+      ],
+      "max_repair_rounds": 0,
+      "golden_trace_policy": "keep_last_green",
+      "notes": "batch2 收口后已稳定 direct pass，保留为非 golden 的正式成功基线。",
+      "query_variants": [
+        "AHU 送风机 电加热 冷水阀 联动控制",
+        "送风机标准控制",
+        "电加热标准控制",
+        "冷水阀标准控制"
+      ],
+      "expected_template_roles": [
+        "supply_fan_control",
+        "heater_control",
+        "chw_valve_control"
+      ],
+      "expected_pattern_ids": [
+        "ahu__control_dx_status_io_comm_timing__dx_fault_exhaust_fan__v1"
+      ]
+    },
+    {
+      "case_id": "repair_fan_heater_dx_triplet",
+      "query": "为 AHU 生成送风机、电加热、直膨三子系统联动控制",
+      "case_type": "observed_success",
+      "case_source": "phase6_batch1_manual_seed",
+      "stable_version": "phase6-batch2",
+      "expected_subsystems": [
+        "supply_fan_ctrl",
+        "heater_ctrl",
+        "dx_ctrl"
+      ],
+      "expected_min_subflow_count": 3,
+      "expected_verification_status": "passed",
+      "expected_route_decision": "accept",
+      "expected_failure_bucket": "passed",
+      "allowed_end_states": [
+        "passed"
+      ],
+      "max_repair_rounds": 0,
+      "golden_trace_policy": "keep_last_green",
+      "notes": "batch2 收口后已稳定 direct pass，保留为非 golden 的正式成功基线。",
+      "query_variants": [
+        "AHU 送风机 电加热 直膨 联动控制",
+        "送风机标准控制",
+        "电加热标准控制",
+        "直膨标准控制"
+      ],
+      "expected_template_roles": [
+        "supply_fan_control",
+        "heater_control",
+        "dx_control"
+      ],
+      "expected_pattern_ids": [
+        "ahu__control_dx_status_io_comm_timing__dx_fault_exhaust_fan__v1"
+      ]
+    },
+    {
+      "case_id": "repair_fan_damper_coupled",
+      "query": "为 AHU 生成送风机与新风阀/回风阀 CO2 联动控制",
+      "case_type": "observed_success",
+      "case_source": "phase6_batch1_manual_seed",
+      "stable_version": "phase6-batch2",
+      "expected_subsystems": [
+        "supply_fan_ctrl",
+        "air_damper_ctrl"
+      ],
+      "expected_min_subflow_count": 2,
+      "expected_verification_status": "passed",
+      "expected_route_decision": "accept",
+      "expected_failure_bucket": "passed",
+      "allowed_end_states": [
+        "passed"
+      ],
+      "max_repair_rounds": 0,
+      "golden_trace_policy": "keep_last_green",
+      "notes": "batch2 收口后已稳定 direct pass，保留为非 golden 的正式成功基线。",
+      "query_variants": [
+        "AHU 送风机 风阀 CO2 联动控制",
+        "送风机标准控制",
+        "新风阀 回风阀 CO2 控制"
+      ],
+      "expected_template_roles": [
+        "supply_fan_control",
+        "air_damper_co2_control"
+      ],
+      "expected_pattern_ids": [
+        "ahu__control_dx_status_io_comm_timing__dx_fault_exhaust_fan__v1"
+      ]
+    },
+    {
+      "case_id": "reject_exhaust_fan_only",
+      "query": "为 AHU 生成排风机标准控制",
+      "case_type": "observed_success",
+      "case_source": "phase6_batch1_manual_seed",
+      "stable_version": "phase6-batch2",
+      "expected_subsystems": [
+        "exhaust_fan_ctrl"
+      ],
+      "expected_min_subflow_count": 0,
+      "expected_verification_status": "passed",
+      "expected_route_decision": "accept",
+      "expected_failure_bucket": "passed",
+      "allowed_end_states": [
+        "passed"
+      ],
+      "max_repair_rounds": 0,
+      "golden_trace_policy": "keep_last_green",
+      "notes": "workflow 侧已稳定 direct pass，但 retrieval eval 仍保留 exhaust_fan_control 模板资产缺口观测，不纳入 golden。",
+      "query_variants": [
+        "AHU 排风机 标准控制",
+        "排风机控制",
+        "exhaust fan control"
+      ],
+      "expected_template_roles": [
+        "exhaust_fan_control"
+      ],
+      "expected_pattern_ids": [
+        "ahu__control_dx_status_io_comm_timing__dx_fault_exhaust_fan__v1"
+      ]
+    },
+    {
+      "case_id": "reject_supply_and_exhaust_fan",
+      "query": "为 AHU 生成送风机与排风机联动控制",
+      "case_type": "observed_success",
+      "case_source": "phase6_batch1_manual_seed",
+      "stable_version": "phase6-batch2",
+      "expected_subsystems": [
+        "supply_fan_ctrl",
+        "exhaust_fan_ctrl"
+      ],
+      "expected_min_subflow_count": 1,
+      "expected_verification_status": "passed",
+      "expected_route_decision": "accept",
+      "expected_failure_bucket": "passed",
+      "allowed_end_states": [
+        "passed"
+      ],
+      "max_repair_rounds": 0,
+      "golden_trace_policy": "keep_last_green",
+      "notes": "workflow 侧已稳定 direct pass，但 retrieval eval 仍保留 exhaust_fan_control 模板资产缺口观测，不纳入 golden。",
+      "query_variants": [
+        "AHU 送风机 排风机 联动控制",
+        "送风机标准控制",
+        "排风机控制"
+      ],
+      "expected_template_roles": [
+        "supply_fan_control",
+        "exhaust_fan_control"
+      ],
+      "expected_pattern_ids": [
+        "ahu__control_dx_status_io_comm_timing__dx_fault_exhaust_fan__v1"
+      ]
+    },
+    {
+      "case_id": "reject_exhaust_and_damper_mix",
+      "query": "为 AHU 生成排风机与新风阀/回风阀 CO2 联动控制",
+      "case_type": "observed_success",
+      "case_source": "phase6_batch1_manual_seed",
+      "stable_version": "phase6-batch2",
+      "expected_subsystems": [
+        "exhaust_fan_ctrl",
+        "air_damper_ctrl"
+      ],
+      "expected_min_subflow_count": 1,
+      "expected_verification_status": "passed",
+      "expected_route_decision": "accept",
+      "expected_failure_bucket": "passed",
+      "allowed_end_states": [
+        "passed"
+      ],
+      "max_repair_rounds": 0,
+      "golden_trace_policy": "keep_last_green",
+      "notes": "workflow 侧已稳定 direct pass，但 retrieval eval 仍保留 exhaust_fan_control 模板资产缺口观测，不纳入 golden。",
+      "query_variants": [
+        "AHU 排风机 风阀 CO2 联动控制",
+        "排风机控制",
+        "新风阀 回风阀 CO2 控制"
+      ],
+      "expected_template_roles": [
+        "exhaust_fan_control",
+        "air_damper_co2_control"
+      ],
+      "expected_pattern_ids": [
+        "ahu__control_dx_status_io_comm_timing__dx_fault_exhaust_fan__v1"
+      ]
+    }
+  ]
+}

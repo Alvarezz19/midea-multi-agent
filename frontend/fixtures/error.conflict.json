@@ -1,0 +1,12 @@
+{
+  "error": {
+    "code": "conflict",
+    "message": "review_id 不匹配，无法恢复执行。",
+    "details": {
+      "thread_id": "wf_demo_001",
+      "attempt_id": "20260423_101500_000001",
+      "review_id": "wrong-review",
+      "active_review_id": "architecture_review-0001"
+    }
+  }
+}
