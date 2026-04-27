@@ -41,6 +41,7 @@ TRACE_SUMMARY_KEYS = [
     "hitl_stage",
     "failure_bucket",
     "acceptance_summary",
+    "compile_report_summary",
 ]
 
 

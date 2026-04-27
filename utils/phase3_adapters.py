@@ -17,6 +17,15 @@ _SUBSYSTEM_RULES: List[Tuple[str, str, Tuple[str, ...], str]] = [
     ("dx_ctrl", "dx_control", ("直膨", "dx"), "直膨控制"),
 ]
 
+_SUBSYSTEM_TYPE_TO_ID: Dict[str, str] = {
+    "supply_fan_control": "supply_fan_ctrl",
+    "exhaust_fan_control": "exhaust_fan_ctrl",
+    "chw_valve_control": "chw_valve_ctrl",
+    "heater_control": "heater_ctrl",
+    "air_damper_control": "air_damper_ctrl",
+    "dx_control": "dx_ctrl",
+}
+
 _SUBSYSTEM_DEFAULT_IMPORTS: Dict[str, List[str]] = {
     "heater_control": ["送风机可用标志"],
     "chw_valve_control": ["送风机可用标志"],
@@ -60,10 +69,125 @@ def _dedupe_strings(values: Iterable[str]) -> List[str]:
     return result
 
 
+def _append_unique_strings(target: List[str], values: Iterable[Any]) -> List[str]:
+    return _dedupe_strings(list(target or []) + [_normalize_text(value) for value in values])
+
+
+def _safe_confidence(value: Any) -> float:
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    return max(0.0, min(1.0, confidence))
+
+
+def _is_empty_engineering_patch(patch: Dict[str, Any]) -> bool:
+    if not isinstance(patch, dict):
+        return True
+    scalar_keys = ("system_type", "project_summary")
+    list_keys = (
+        "subsystem_patches",
+        "required_pages",
+        "global_modes",
+        "points",
+        "control_loops",
+        "interlocks",
+        "acceptance_criteria",
+        "ambiguities",
+        "assumptions",
+        "missing_required_fields",
+    )
+    dict_keys = ("communication", "naming_convention")
+    if any(_normalize_text(patch.get(key, "")) for key in scalar_keys):
+        return False
+    if any(patch.get(key) for key in list_keys + dict_keys):
+        return False
+    return True
+
+
 def _slugify(value: str) -> str:
     text = unicodedata.normalize("NFKC", value).lower().strip()
     text = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "_", text)
     return re.sub(r"_+", "_", text).strip("_")
+
+
+def _merge_engineering_items(existing: List[Dict[str, Any]], incoming: List[Dict[str, Any]], key_fields: Tuple[str, ...]) -> List[Dict[str, Any]]:
+    result: List[Dict[str, Any]] = [dict(item) for item in existing if isinstance(item, dict)]
+    seen = {
+        tuple(_normalize_text(item.get(field, "")).lower() for field in key_fields)
+        for item in result
+    }
+    for item in incoming:
+        if not isinstance(item, dict):
+            continue
+        cleaned = {key: value for key, value in item.items() if value not in (None, "", [], {})}
+        key = tuple(_normalize_text(cleaned.get(field, "")).lower() for field in key_fields)
+        if not any(key) or key in seen:
+            continue
+        result.append(cleaned)
+        seen.add(key)
+    return result
+
+
+def _normalize_subsystem_patch(payload: Dict[str, Any], fallback_priority: int) -> RequirementSubsystem | None:
+    if not isinstance(payload, dict):
+        return None
+
+    subsystem_type = _normalize_text(payload.get("subsystem_type", ""))
+    subsystem_id = _normalize_text(payload.get("subsystem_id", ""))
+    if not subsystem_id and subsystem_type:
+        subsystem_id = _SUBSYSTEM_TYPE_TO_ID.get(subsystem_type, "")
+    if not subsystem_id:
+        name_hint = _normalize_text(payload.get("name", "")) or _normalize_text(payload.get("goal", ""))
+        subsystem_id = _slugify(name_hint)
+    if not subsystem_id:
+        return None
+
+    goal = _normalize_text(payload.get("goal", "")) or _normalize_text(payload.get("name", ""))
+    if not goal:
+        goal = subsystem_type or subsystem_id
+
+    priority = payload.get("priority", fallback_priority)
+    try:
+        priority = int(priority)
+    except (TypeError, ValueError):
+        priority = fallback_priority
+
+    return {
+        "subsystem_id": subsystem_id,
+        "subsystem_type": subsystem_type or subsystem_id,
+        "goal": goal,
+        "page_hint": _normalize_text(payload.get("page_hint", "")) or "控制",
+        "priority": priority,
+        "preferred_templates": [],
+        "imports": _clean_text_list(payload.get("imports", [])),
+        "exports": _clean_text_list(payload.get("exports", [])),
+        "reasoning": _normalize_text(payload.get("reasoning", "")) or "Merged from engineering requirement patch.",
+    }
+
+
+def _merge_subsystems(existing: List[RequirementSubsystem], incoming: List[Dict[str, Any]]) -> List[RequirementSubsystem]:
+    result: List[RequirementSubsystem] = [dict(item) for item in existing if isinstance(item, dict)]
+    by_id = {str(item.get("subsystem_id", "")).strip(): item for item in result}
+    next_priority = len(result) + 1
+    for raw_item in incoming:
+        item = _normalize_subsystem_patch(raw_item, next_priority)
+        if not item:
+            continue
+        subsystem_id = item["subsystem_id"]
+        existing_item = by_id.get(subsystem_id)
+        if existing_item:
+            existing_item["imports"] = _append_unique_strings(existing_item.get("imports", []), item.get("imports", []))
+            existing_item["exports"] = _append_unique_strings(existing_item.get("exports", []), item.get("exports", []))
+            if not _normalize_text(existing_item.get("goal", "")):
+                existing_item["goal"] = item.get("goal", "")
+            if not _normalize_text(existing_item.get("reasoning", "")):
+                existing_item["reasoning"] = item.get("reasoning", "")
+            continue
+        result.append(item)
+        by_id[subsystem_id] = item
+        next_priority += 1
+    return result
 
 
 def _infer_system_type(scenario: Dict[str, Any]) -> str:
@@ -245,6 +369,147 @@ def build_requirement_spec(analysis_result: Dict[str, Any]) -> Dict[str, Any]:
         }
     )
     return requirement_spec
+
+
+def merge_engineering_requirement_patch(
+    requirement_spec: Dict[str, Any],
+    patch: Dict[str, Any],
+) -> Dict[str, Any]:
+    """把 LLM 工程补丁合并到 requirement_spec，保持下游正式字段兼容。"""
+
+    merged = dict(requirement_spec or {})
+    if _is_empty_engineering_patch(patch):
+        return merged
+
+    patch = patch if isinstance(patch, dict) else {}
+    confidence = _safe_confidence(patch.get("confidence", 0.0))
+
+    patch_system_type = _normalize_text(patch.get("system_type", ""))
+    if patch_system_type and not _normalize_text(merged.get("system_type", "")) and confidence >= 0.5:
+        merged["system_type"] = patch_system_type
+
+    project_summary = _normalize_text(patch.get("project_summary", ""))
+    if project_summary and not _normalize_text(merged.get("scenario_summary", "")):
+        merged["scenario_summary"] = project_summary
+
+    merged["subsystems"] = _merge_subsystems(
+        merged.get("subsystems", []) if isinstance(merged.get("subsystems", []), list) else [],
+        patch.get("subsystem_patches", []) if isinstance(patch.get("subsystem_patches", []), list) else [],
+    )
+    merged["required_pages"] = _append_unique_strings(
+        merged.get("required_pages", []) if isinstance(merged.get("required_pages", []), list) else [],
+        patch.get("required_pages", []) if isinstance(patch.get("required_pages", []), list) else [],
+    )
+    merged["global_modes"] = _append_unique_strings(
+        merged.get("global_modes", []) if isinstance(merged.get("global_modes", []), list) else [],
+        patch.get("global_modes", []) if isinstance(patch.get("global_modes", []), list) else [],
+    )
+    merged["acceptance_criteria"] = _append_unique_strings(
+        merged.get("acceptance_criteria", []) if isinstance(merged.get("acceptance_criteria", []), list) else [],
+        patch.get("acceptance_criteria", []) if isinstance(patch.get("acceptance_criteria", []), list) else [],
+    )
+    merged["ambiguities"] = _append_unique_strings(
+        merged.get("ambiguities", []) if isinstance(merged.get("ambiguities", []), list) else [],
+        patch.get("ambiguities", []) if isinstance(patch.get("ambiguities", []), list) else [],
+    )
+    merged["assumptions"] = _append_unique_strings(
+        merged.get("assumptions", []) if isinstance(merged.get("assumptions", []), list) else [],
+        patch.get("assumptions", []) if isinstance(patch.get("assumptions", []), list) else [],
+    )
+    merged["warnings"] = _append_unique_strings(
+        merged.get("warnings", []) if isinstance(merged.get("warnings", []), list) else [],
+        [],
+    )
+
+    signals = dict(merged.get("signals", {}) if isinstance(merged.get("signals", {}), dict) else {})
+    for key in ("inputs", "outputs", "software_points", "alarm_points"):
+        signals[key] = list(signals.get(key, []) if isinstance(signals.get(key, []), list) else [])
+
+    points = patch.get("points", []) if isinstance(patch.get("points", []), list) else []
+    for point in points:
+        if not isinstance(point, dict):
+            continue
+        name = _normalize_text(point.get("name", ""))
+        if not name:
+            continue
+        role = _normalize_text(point.get("point_role", "")).lower()
+        io_kind = _normalize_text(point.get("io_kind", "")).lower()
+        if role in {"alarm"}:
+            signals["alarm_points"] = _append_unique_strings(signals["alarm_points"], [name])
+        elif role in {"actuator", "command"} or io_kind == "physical_output":
+            signals["outputs"] = _append_unique_strings(signals["outputs"], [name])
+        elif role in {"setpoint", "mode", "parameter"} or io_kind == "software_point":
+            signals["software_points"] = _append_unique_strings(signals["software_points"], [name])
+        elif role in {"sensor", "status"} or io_kind in {"physical_input", "communication_point"}:
+            signals["inputs"] = _append_unique_strings(signals["inputs"], [name])
+
+    control_loops = patch.get("control_loops", []) if isinstance(patch.get("control_loops", []), list) else []
+    for loop in control_loops:
+        if not isinstance(loop, dict):
+            continue
+        signals["inputs"] = _append_unique_strings(signals["inputs"], [loop.get("pv_signal", "")])
+        signals["software_points"] = _append_unique_strings(signals["software_points"], [loop.get("sp_signal", "")])
+        signals["outputs"] = _append_unique_strings(signals["outputs"], [loop.get("mv_signal", "")])
+        target = _normalize_text(loop.get("target", ""))
+        strategy = _normalize_text(loop.get("strategy", ""))
+        if target or strategy:
+            merged["acceptance_criteria"] = _append_unique_strings(
+                merged.get("acceptance_criteria", []),
+                [f"{target} {strategy} 控制回路".strip()],
+            )
+
+    interlocks = patch.get("interlocks", []) if isinstance(patch.get("interlocks", []), list) else []
+    for interlock in interlocks:
+        if not isinstance(interlock, dict):
+            continue
+        condition = _normalize_text(interlock.get("condition", ""))
+        action = _normalize_text(interlock.get("action", ""))
+        severity = _normalize_text(interlock.get("severity", "")).lower()
+        if condition or action:
+            merged["acceptance_criteria"] = _append_unique_strings(
+                merged.get("acceptance_criteria", []),
+                [f"{condition} -> {action}".strip(" ->")],
+            )
+        if "alarm" in severity or "报警" in action or "故障" in condition:
+            signals["alarm_points"] = _append_unique_strings(signals["alarm_points"], [condition or action])
+
+    merged["signals"] = signals
+
+    missing_fields = _clean_text_list(patch.get("missing_required_fields", []))
+    if missing_fields:
+        merged["ambiguities"] = _append_unique_strings(merged.get("ambiguities", []), missing_fields)
+        missing_messages = [f"工程需求缺少关键输入：{field}" for field in missing_fields]
+        merged["warnings"] = _append_unique_strings(merged.get("warnings", []), missing_messages)
+
+    engineering = dict(merged.get("engineering", {}) if isinstance(merged.get("engineering", {}), dict) else {})
+    engineering["points"] = _merge_engineering_items(engineering.get("points", []), points, ("name", "subsystem_id", "point_role"))
+    engineering["control_loops"] = _merge_engineering_items(
+        engineering.get("control_loops", []),
+        control_loops,
+        ("loop_id", "target", "subsystem_id"),
+    )
+    engineering["interlocks"] = _merge_engineering_items(
+        engineering.get("interlocks", []),
+        interlocks,
+        ("interlock_id", "condition", "action"),
+    )
+    if isinstance(patch.get("communication", {}), dict):
+        engineering["communication"] = {**dict(engineering.get("communication", {}) or {}), **dict(patch.get("communication", {}) or {})}
+    if isinstance(patch.get("naming_convention", {}), dict):
+        engineering["naming_convention"] = {
+            **dict(engineering.get("naming_convention", {}) or {}),
+            **dict(patch.get("naming_convention", {}) or {}),
+        }
+    engineering["missing_required_fields"] = _append_unique_strings(
+        engineering.get("missing_required_fields", []),
+        missing_fields,
+    )
+    if confidence:
+        engineering["confidence"] = max(_safe_confidence(engineering.get("confidence", 0.0)), confidence)
+    merged["engineering"] = engineering
+
+    merged["confidence"] = max(_safe_confidence(merged.get("confidence", 0.0)), confidence)
+    return merged
 
 
 def make_page_key(label: str) -> str:

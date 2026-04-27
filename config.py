@@ -99,6 +99,20 @@ ANALYSIS_LLM_TIMEOUT_S = float(os.getenv("ANALYSIS_LLM_TIMEOUT_S", "30"))
 ANALYSIS_MAX_AMBIGUITIES = int(os.getenv("ANALYSIS_MAX_AMBIGUITIES", "5"))
 ANALYSIS_MAX_ASSUMPTIONS = int(os.getenv("ANALYSIS_MAX_ASSUMPTIONS", "5"))
 
+# ==================== LLM 增强配置（默认关闭） ====================
+# 总开关只记录增强层是否允许启用；具体节点仍由各自开关控制。
+LLM_ENHANCEMENT_ENABLED = os.getenv("LLM_ENHANCEMENT_ENABLED", "false").lower() == "true"
+LLM_ENHANCEMENT_PROVIDER = os.getenv("LLM_ENHANCEMENT_PROVIDER", "").strip()
+LLM_ENHANCEMENT_MODEL = os.getenv("LLM_ENHANCEMENT_MODEL", "").strip()
+LLM_ENHANCEMENT_TEMPERATURE = float(os.getenv("LLM_ENHANCEMENT_TEMPERATURE", "0.1"))
+LLM_ENHANCEMENT_TIMEOUT_S = float(os.getenv("LLM_ENHANCEMENT_TIMEOUT_S", "20"))
+
+# Analysis A0：工程需求编译器。默认关闭，确保旧 analysis 行为不变。
+ANALYSIS_USE_ENGINEERING_COMPILER = os.getenv("ANALYSIS_USE_ENGINEERING_COMPILER", "false").lower() == "true"
+ANALYSIS_ENGINEERING_LLM_PROVIDER = os.getenv("ANALYSIS_ENGINEERING_LLM_PROVIDER", "").strip()
+ANALYSIS_ENGINEERING_LLM_MODEL = os.getenv("ANALYSIS_ENGINEERING_LLM_MODEL", "").strip()
+ANALYSIS_ENGINEERING_LLM_TIMEOUT_S = float(os.getenv("ANALYSIS_ENGINEERING_LLM_TIMEOUT_S", "30"))
+
 # ==================== 检索智能体 LLM 优化（默认关闭） ====================
 # 说明：这些开关用于在检索阶段引入可选的 LLM 查询重写/轻量重排。
 # 默认全部关闭，确保成本与延迟可控；LLM 不可用时实现必须自动兜底回退。
@@ -111,3 +125,10 @@ RETRIEVAL_LLM_MODEL = os.getenv("RETRIEVAL_LLM_MODEL", "").strip()
 # 预算参数（与成本/延迟强相关）
 RETRIEVAL_LLM_MAX_QUERIES = int(os.getenv("RETRIEVAL_LLM_MAX_QUERIES", "8"))
 RETRIEVAL_LLM_TIMEOUT_S = float(os.getenv("RETRIEVAL_LLM_TIMEOUT_S", "8"))
+
+# ==================== 检索 Cross-Encoder 重排（默认关闭） ====================
+RETRIEVAL_USE_CROSS_ENCODER_RERANK = os.getenv("RETRIEVAL_USE_CROSS_ENCODER_RERANK", "false").lower() == "true"
+RETRIEVAL_RERANKER_PROVIDER = os.getenv("RETRIEVAL_RERANKER_PROVIDER", "bge").strip()
+RETRIEVAL_RERANKER_MODEL = os.getenv("RETRIEVAL_RERANKER_MODEL", "BAAI/bge-reranker-v2-m3").strip()
+RETRIEVAL_RERANK_TOP_N = int(os.getenv("RETRIEVAL_RERANK_TOP_N", "50"))
+RETRIEVAL_RERANK_BATCH_SIZE = int(os.getenv("RETRIEVAL_RERANK_BATCH_SIZE", "16"))

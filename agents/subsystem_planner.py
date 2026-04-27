@@ -59,10 +59,44 @@ class SubsystemPlanner:
                 return names
         return [f"{default_prefix}_{index + 1}" for index in range(max(0, count))]
 
+    @staticmethod
+    def _input_parameter_maximum(module_doc: Dict[str, Any]) -> int | None:
+        params_schema = module_doc.get("parameters_schema", {}) if isinstance(module_doc, dict) else {}
+        if not isinstance(params_schema, dict):
+            return None
+
+        maximums: List[int] = []
+        for key in ("inputCount", "inputs", "inputsCount"):
+            field_schema = params_schema.get(key, {})
+            if not isinstance(field_schema, dict):
+                continue
+            maximum = field_schema.get("maximum")
+            if isinstance(maximum, (int, float)):
+                maximums.append(int(maximum))
+        if maximums:
+            return max(maximums)
+        return None
+
+    @classmethod
+    def _supports_desired_inputs(cls, module_doc: Dict[str, Any], desired_inputs: int) -> bool:
+        maximum = cls._input_parameter_maximum(module_doc)
+        if maximum is not None:
+            return desired_inputs <= maximum
+
+        params_schema = module_doc.get("parameters_schema", {}) if isinstance(module_doc, dict) else {}
+        if not isinstance(params_schema, dict):
+            params_schema = {}
+        if any(key in params_schema for key in ("inputCount", "inputs", "inputsCount", "channels")):
+            return True
+
+        input_count, _ = cls._resolve_counts(module_doc, {})
+        return desired_inputs <= input_count
+
     def _select_atomic_primary_doc(
         self,
         descriptor: Dict[str, Any],
         atomic_modules: List[Dict[str, Any]],
+        desired_inputs: int = 0,
     ) -> Dict[str, Any]:
         subsystem_text = " ".join(
             str(descriptor.get(key, "")).lower()
@@ -70,8 +104,17 @@ class SubsystemPlanner:
         )
         best_doc: Dict[str, Any] = {}
         best_score = -1
+        candidate_modules = list(atomic_modules)
+        if desired_inputs > 0:
+            supported_modules = [
+                doc
+                for doc in candidate_modules
+                if self._supports_desired_inputs(doc, desired_inputs)
+            ]
+            if supported_modules:
+                candidate_modules = supported_modules
 
-        for doc in atomic_modules:
+        for doc in candidate_modules:
             searchable = " ".join(
                 str(doc.get(key, "")).lower()
                 for key in ("module_type", "name", "description", "category")
@@ -92,7 +135,7 @@ class SubsystemPlanner:
                 best_score = score
                 best_doc = doc
 
-        return best_doc or (atomic_modules[0] if atomic_modules else {})
+        return best_doc or (candidate_modules[0] if candidate_modules else {}) or (atomic_modules[0] if atomic_modules else {})
 
     def _select_source_doc(self, atomic_modules: List[Dict[str, Any]]) -> Dict[str, Any]:
         preferred = ("constinput", "swinput", "variable", "physicalinput", "modbus", "mqtt")
@@ -126,7 +169,13 @@ class SubsystemPlanner:
             parameters["fixedValue"] = 0
         for key in ("inputCount", "inputs", "inputsCount"):
             if key in params_schema:
-                parameters[key] = max(1, desired_inputs)
+                value = max(1, desired_inputs)
+                field_schema = params_schema.get(key, {})
+                if isinstance(field_schema, dict):
+                    maximum = field_schema.get("maximum")
+                    if isinstance(maximum, (int, float)):
+                        value = min(value, int(maximum))
+                parameters[key] = value
         if "channels" in params_schema and desired_inputs > 1:
             parameters["channels"] = max(1, desired_inputs - 1)
         return parameters
@@ -462,7 +511,11 @@ class SubsystemPlanner:
         subsystem_id = str(descriptor.get("subsystem_id", "")).strip()
         page_id = str(descriptor.get("page_id", "")).strip()
         subsystem_plan = empty_subsystem_plan(subsystem_id=subsystem_id, page_id=page_id)
-        primary_doc = self._select_atomic_primary_doc(descriptor, atomic_modules)
+        interface_bindings = self._descriptor_interface_bindings(descriptor, shared_signal_registry)
+        input_bindings = self._bindings_for_direction(interface_bindings, "input")
+        output_bindings = self._bindings_for_direction(interface_bindings, "output")
+        desired_inputs = len(input_bindings) or 1
+        primary_doc = self._select_atomic_primary_doc(descriptor, atomic_modules, desired_inputs)
         if not primary_doc:
             subsystem_plan.update(
                 {
@@ -485,10 +538,6 @@ class SubsystemPlanner:
             )
             return subsystem_plan
 
-        interface_bindings = self._descriptor_interface_bindings(descriptor, shared_signal_registry)
-        input_bindings = self._bindings_for_direction(interface_bindings, "input")
-        output_bindings = self._bindings_for_direction(interface_bindings, "output")
-        desired_inputs = len(input_bindings) or 1
         primary_logic_id = f"{subsystem_id}_main"
         primary_parameters = self._default_parameters(primary_doc, str(descriptor.get("goal") or subsystem_id), desired_inputs)
         primary_input_count, primary_output_count = self._resolve_counts(primary_doc, primary_parameters)
@@ -517,6 +566,19 @@ class SubsystemPlanner:
         ]
         edges: List[Dict[str, Any]] = []
         unresolved_items: List[Dict[str, Any]] = []
+        if len(input_bindings) > primary_input_count:
+            unresolved_items.append(
+                {
+                    "type": "atomic_fallback_input_capacity_limited",
+                    "severity": "warning",
+                    "subsystem_id": subsystem_id,
+                    "module_type": str(primary_doc.get("module_type", "")).strip(),
+                    "desired_input_count": len(input_bindings),
+                    "actual_input_count": primary_input_count,
+                    "message": "Atomic fallback 主节点输入容量不足，已按模块合同裁剪输入端口数量。",
+                    "suggested_fix": "提供更匹配的子流程模板，或召回支持更多输入端口的原子模块。",
+                }
+            )
 
         source_doc = self._select_source_doc(atomic_modules)
         if primary_input_count > 0 and not source_doc:

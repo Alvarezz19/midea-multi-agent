@@ -7,10 +7,64 @@ import json
 import os
 import chromadb
 import config
+from agents.llm_enhancers.retrieval_rewrite import RetrievalQueryRewriter
 from utils.console_utils import safe_print as print
-from utils.model_manager import EmbeddingManager
+from utils.knowledge_contract_loader import load_module_contract
+from utils.model_manager import EmbeddingManager, LLMManager
+from utils.reranker_manager import RerankerManager
 from utils.retrieval_bundle_utils import (
     load_structured_payload,
+)
+from utils.retrieval_rerank import rerank_retrieval_candidates
+
+
+AHU_CORE_ATOMIC_MODULE_TYPES = (
+    "constInput",
+    "swInput",
+    "hwInput",
+    "quote",
+    "modbusOutput",
+    "bacipOutput",
+    "hwOutput",
+    "systemTime",
+    "logic",
+    "compare",
+    "switch",
+    "limit",
+    "pid",
+    "fuzzypid",
+    "hysteresis",
+    "delayOn",
+    "delayOff",
+    "delayPulse",
+    "delayOut",
+    "edgeTrigger",
+    "rsFlipflop",
+    "srFlipflop",
+    "add",
+    "subtract",
+    "multiply",
+    "divide",
+    "linear",
+    "seq",
+)
+
+COMPLEX_AHU_RETRIEVAL_HINTS = (
+    "ahu",
+    "空调箱",
+    "node-red",
+    "flows",
+    "流程json",
+    "io/通讯",
+    "通讯",
+    "送风机",
+    "冷水阀",
+    "电加热",
+    "风阀",
+    "直膨",
+    "定时启停",
+    "夏季",
+    "冬季",
 )
 
 
@@ -22,6 +76,7 @@ class RetrievalAgent:
         embedding_provider: Optional[str] = None,
         llm_provider: Optional[str] = None,
         llm_model: Optional[str] = None,
+        reranker_scorer: Optional[Any] = None,
     ):
         """
         初始化向量数据库和嵌入模型
@@ -48,6 +103,10 @@ class RetrievalAgent:
         self.atomic_collection_name = getattr(config, "CHROMA_COLLECTION_ATOMIC_MODULES", "kong_modules_v1")
         self.subflow_collection_name = getattr(config, "CHROMA_COLLECTION_SUBFLOW_TEMPLATES", "ahu_subflow_templates_v1")
         self.system_pattern_collection_name = getattr(config, "CHROMA_COLLECTION_SYSTEM_PATTERNS", "ahu_system_patterns_v1")
+        self.llm_provider = llm_provider
+        self.llm_model = llm_model
+        self.retrieval_rewriter: Optional[RetrievalQueryRewriter] = None
+        self.reranker_scorer = reranker_scorer
 
         self.atomic_collection = self._get_collection(
             self.atomic_collection_name,
@@ -57,6 +116,54 @@ class RetrievalAgent:
         self.collection = self.atomic_collection
         self.subflow_collection = self._get_collection(self.subflow_collection_name, create_if_missing=False)
         self.system_pattern_collection = self._get_collection(self.system_pattern_collection_name, create_if_missing=False)
+
+    @staticmethod
+    def _llm_rewrite_enabled() -> bool:
+        return bool(config.LLM_ENHANCEMENT_ENABLED and config.RETRIEVAL_USE_LLM_REWRITE)
+
+    @staticmethod
+    def _rerank_enabled() -> bool:
+        return bool(config.RETRIEVAL_USE_CROSS_ENCODER_RERANK)
+
+    def _get_retrieval_rewriter(self) -> RetrievalQueryRewriter:
+        if self.retrieval_rewriter is not None:
+            return self.retrieval_rewriter
+
+        provider = (
+            self.llm_provider
+            or config.RETRIEVAL_LLM_PROVIDER
+            or config.LLM_ENHANCEMENT_PROVIDER
+            or config.LLM_PROVIDER
+        )
+        model_name = (
+            self.llm_model
+            or config.RETRIEVAL_LLM_MODEL
+            or config.LLM_ENHANCEMENT_MODEL
+            or None
+        )
+        llm = LLMManager.get_llm(
+            provider,
+            model=model_name,
+            temperature=config.LLM_ENHANCEMENT_TEMPERATURE,
+            timeout=config.RETRIEVAL_LLM_TIMEOUT_S,
+        )
+        self.retrieval_rewriter = RetrievalQueryRewriter(
+            llm=llm,
+            provider=provider,
+            model=model_name or "",
+            max_queries=config.RETRIEVAL_LLM_MAX_QUERIES,
+        )
+        return self.retrieval_rewriter
+
+    def _get_reranker_scorer(self):
+        if self.reranker_scorer is not None:
+            return self.reranker_scorer
+        self.reranker_scorer = RerankerManager.get_reranker(
+            config.RETRIEVAL_RERANKER_PROVIDER,
+            config.RETRIEVAL_RERANKER_MODEL,
+            batch_size=config.RETRIEVAL_RERANK_BATCH_SIZE,
+        )
+        return self.reranker_scorer
 
     @staticmethod
     def _clean_text(value: Any) -> str:
@@ -122,6 +229,97 @@ class RetrievalAgent:
                 scores.append(0.0)
         return scores
 
+    @classmethod
+    def _collect_retrieval_text(
+        cls,
+        query: str,
+        retrieval_plan: Dict[str, Any],
+        scenario_analysis: Any,
+    ) -> str:
+        fragments: List[str] = [query]
+        fragments.extend(cls._clean_text_list(retrieval_plan.get("queries", [])))
+        fragments.extend(cls._clean_text_list(retrieval_plan.get("keywords", [])))
+        if isinstance(scenario_analysis, dict):
+            for value in scenario_analysis.values():
+                if isinstance(value, str):
+                    fragments.append(value)
+                elif isinstance(value, list):
+                    fragments.extend(str(item) for item in value if isinstance(item, str))
+        return " ".join(fragment for fragment in fragments if cls._clean_text(fragment)).lower()
+
+    @classmethod
+    def _should_inject_ahu_core_modules(
+        cls,
+        query: str,
+        retrieval_plan: Dict[str, Any],
+        scenario_analysis: Any,
+    ) -> bool:
+        retrieval_text = cls._collect_retrieval_text(query, retrieval_plan, scenario_analysis)
+        if not retrieval_text:
+            return False
+        matched_count = sum(1 for hint in COMPLEX_AHU_RETRIEVAL_HINTS if hint.lower() in retrieval_text)
+        return matched_count >= 2
+
+    @staticmethod
+    def _normalize_core_atomic_contract(module_type: str, rank: int) -> Dict[str, Any]:
+        contract = load_module_contract(module_type)
+        if not contract:
+            return {}
+        normalized = dict(contract)
+        normalized["module_type"] = module_type
+        normalized.setdefault("name", "")
+        normalized.setdefault("description", "")
+        normalized.setdefault("category", "")
+        normalized.setdefault("parameters_schema", {})
+        normalized.setdefault("ports_definition", {})
+        normalized.setdefault("template_json", {})
+        normalized.setdefault("keywords", [])
+        normalized.setdefault("usage_guides", [])
+        normalized["similarity_score"] = 0.0
+        normalized["rank"] = rank
+        normalized["matched_query"] = "ahu_core_required"
+        normalized["retrieval_origin"] = "core_required"
+        return normalized
+
+    def _ensure_ahu_core_atomic_modules(
+        self,
+        atomic_modules: List[Dict[str, Any]],
+        *,
+        query: str,
+        retrieval_plan: Dict[str, Any],
+        scenario_analysis: Any,
+    ) -> tuple[List[Dict[str, Any]], List[str]]:
+        if not self._should_inject_ahu_core_modules(query, retrieval_plan, scenario_analysis):
+            return atomic_modules, []
+
+        merged: List[Dict[str, Any]] = []
+        seen_types: set[str] = set()
+        for item in atomic_modules:
+            if not isinstance(item, dict):
+                continue
+            module_type = self._clean_text(str(item.get("module_type", "")))
+            if not module_type or module_type in seen_types:
+                continue
+            normalized = dict(item)
+            normalized.setdefault("retrieval_origin", "semantic")
+            merged.append(normalized)
+            seen_types.add(module_type)
+
+        injected_types: List[str] = []
+        for module_type in AHU_CORE_ATOMIC_MODULE_TYPES:
+            if module_type in seen_types:
+                continue
+            contract = self._normalize_core_atomic_contract(module_type, len(merged) + 1)
+            if not contract:
+                continue
+            merged.append(contract)
+            seen_types.add(module_type)
+            injected_types.append(module_type)
+
+        for index, item in enumerate(merged, start=1):
+            item["rank"] = index
+        return merged, injected_types
+
     def _normalize_retrieval_plan(self, retrieval_plan: Any, query: str) -> Dict[str, Any]:
         if not isinstance(retrieval_plan, dict):
             retrieval_plan = {}
@@ -153,6 +351,141 @@ class RetrievalAgent:
             "keywords": self._clean_text_list(retrieval_plan.get("keywords", [])),
             "original_query": query,
         }
+
+    def _maybe_rewrite_queries(
+        self,
+        query: str,
+        analysis_result: Optional[Dict[str, Any]],
+        requirement_hint: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        if not self._llm_rewrite_enabled():
+            return {
+                "rewrite": {},
+                "diagnostics": {
+                    "enabled": False,
+                    "fallback_used": False,
+                    "adopted": False,
+                },
+            }
+
+        try:
+            result = self._get_retrieval_rewriter().rewrite(
+                query=query,
+                analysis_result=analysis_result or {},
+                requirement_hint=requirement_hint or {},
+            )
+        except Exception as exc:
+            return {
+                "rewrite": {},
+                "diagnostics": {
+                    "enabled": True,
+                    "llm_used": False,
+                    "fallback_used": True,
+                    "fallback_reason": str(exc),
+                    "adopted": False,
+                },
+            }
+        return result if isinstance(result, dict) else {"rewrite": {}, "diagnostics": {"enabled": True, "fallback_used": True}}
+
+    @classmethod
+    def _merge_rewrite_into_plan(
+        cls,
+        retrieval_plan: Dict[str, Any],
+        rewrite_payload: Dict[str, Any],
+        query: str,
+    ) -> Dict[str, Any]:
+        merged = dict(retrieval_plan or {})
+        if not isinstance(rewrite_payload, dict):
+            rewrite_payload = {}
+
+        query_values: List[str] = []
+        query_values.extend(merged.get("queries", []) or [])
+        query_values.extend(rewrite_payload.get("query_variants", []) or [])
+        query_values.extend(rewrite_payload.get("template_queries", []) or [])
+        query_values.extend(rewrite_payload.get("pattern_queries", []) or [])
+        if not query_values:
+            query_values.append(query)
+
+        queries: List[str] = []
+        seen = set()
+        for value in query_values:
+            text = cls._clean_text(value)
+            if text and text not in seen:
+                queries.append(text)
+                seen.add(text)
+            if len(queries) >= config.RETRIEVAL_LLM_MAX_QUERIES:
+                break
+
+        merged["queries"] = queries
+        category_l1 = cls._clean_text(rewrite_payload.get("category_l1", ""))
+        if category_l1:
+            merged["category_l1"] = category_l1
+        keywords = list(merged.get("keywords", []) or [])
+        keywords.extend(rewrite_payload.get("normalized_terms", []) or [])
+        merged["keywords"] = cls._clean_text_list(keywords)
+        return merged
+
+    @classmethod
+    def _merge_query_lists(cls, *query_lists: Any, max_items: Optional[int] = None) -> List[str]:
+        limit = max_items or config.RETRIEVAL_LLM_MAX_QUERIES
+        merged: List[str] = []
+        seen = set()
+        for values in query_lists:
+            if isinstance(values, str):
+                values = [values]
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                text = cls._clean_text(value)
+                if text and text not in seen:
+                    merged.append(text)
+                    seen.add(text)
+                if len(merged) >= limit:
+                    return merged
+        return merged
+
+    def _maybe_rerank_assets(
+        self,
+        candidates: List[Dict[str, Any]],
+        *,
+        query: str,
+        asset_type: str,
+    ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        if not self._rerank_enabled():
+            return candidates, {
+                "enabled": False,
+                "asset_type": asset_type,
+                "fallback_used": False,
+                "candidate_count": len(candidates or []),
+            }
+
+        diagnostics = {
+            "enabled": True,
+            "asset_type": asset_type,
+            "provider": config.RETRIEVAL_RERANKER_PROVIDER,
+            "model": config.RETRIEVAL_RERANKER_MODEL,
+            "fallback_used": False,
+            "fallback_reason": "",
+            "candidate_count": len(candidates or []),
+        }
+        try:
+            scorer = self._get_reranker_scorer()
+            result = rerank_retrieval_candidates(
+                candidates,
+                query=query,
+                scorer=scorer,
+                asset_type=asset_type,
+                top_n=config.RETRIEVAL_RERANK_TOP_N,
+            )
+        except Exception as exc:
+            diagnostics["fallback_used"] = True
+            diagnostics["fallback_reason"] = str(exc)
+            return candidates, diagnostics
+
+        diagnostics["fallback_used"] = bool(result.get("fallback_used", False))
+        diagnostics["fallback_reason"] = str(result.get("fallback_reason", "") or "")
+        diagnostics["candidate_count"] = int(result.get("candidate_count", len(candidates or [])) or 0)
+        return list(result.get("candidates", candidates) or []), diagnostics
 
     # ==================== 相似度计算 ====================
 
@@ -524,44 +857,85 @@ class RetrievalAgent:
     def retrieve_bundle(
         self,
         query: str,
-        top_k: int = 10,
+        top_k: int = 20,
         category_filter: Optional[str] = None,
         similarity_threshold: float = 0.3,
         analysis_result: Optional[Dict[str, Any]] = None,
+        requirement_spec: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         retrieval_plan = self._normalize_retrieval_plan(
             (analysis_result or {}).get("retrieval_plan", {}),
             query,
         )
         scenario_analysis = (analysis_result or {}).get("scenario_analysis", {})
+        rewrite_result = self._maybe_rewrite_queries(query, analysis_result, requirement_spec)
+        rewrite_payload = rewrite_result.get("rewrite", {}) if isinstance(rewrite_result, dict) else {}
+        rewrite_diagnostics = rewrite_result.get("diagnostics", {}) if isinstance(rewrite_result, dict) else {}
+        effective_retrieval_plan = self._merge_rewrite_into_plan(retrieval_plan, rewrite_payload, query)
+        rewrite_diagnostics = dict(rewrite_diagnostics or {})
+        rewrite_diagnostics["adopted"] = bool(
+            rewrite_payload
+            and effective_retrieval_plan.get("queries", []) != retrieval_plan.get("queries", [])
+        )
+        effective_analysis_result = dict(analysis_result or {})
+        effective_analysis_result["retrieval_plan"] = effective_retrieval_plan
         atomic_context = self._retrieve_atomic_context(
             query=query,
             top_k=top_k,
             category_filter=category_filter,
             similarity_threshold=similarity_threshold,
-            analysis_result=analysis_result,
+            analysis_result=effective_analysis_result,
+        )
+        semantic_atomic_modules = atomic_context.get("relevant_nodes", [])
+        atomic_modules, injected_core_atomic_types = self._ensure_ahu_core_atomic_modules(
+            semantic_atomic_modules,
+            query=query,
+            retrieval_plan=effective_retrieval_plan,
+            scenario_analysis=scenario_analysis,
         )
 
+        base_template_queries = self._build_scenario_queries(
+            scenario_analysis,
+            ["business_goal", "system_type", "equipment_object", "actuator", "control_strategy", "output_signal"],
+            query,
+        )
+        template_queries = self._merge_query_lists(
+            rewrite_payload.get("template_queries", []) if isinstance(rewrite_payload, dict) else [],
+            effective_retrieval_plan.get("queries", []),
+            base_template_queries,
+        )
         subflow_templates = self._query_asset_collection(
             self.subflow_collection,
-            self._build_scenario_queries(
-                scenario_analysis,
-                ["business_goal", "system_type", "equipment_object", "actuator", "control_strategy", "output_signal"],
-                query,
-            ),
+            template_queries,
             top_k=top_k,
             similarity_threshold=similarity_threshold,
             asset_type="subflow_template",
         )
+        base_pattern_queries = self._build_scenario_queries(
+            scenario_analysis,
+            ["system_type", "control_mode", "operating_conditions", "input_signals", "output_signals"],
+            query,
+        )
+        pattern_queries = self._merge_query_lists(
+            rewrite_payload.get("pattern_queries", []) if isinstance(rewrite_payload, dict) else [],
+            effective_retrieval_plan.get("queries", []),
+            base_pattern_queries,
+        )
         system_patterns = self._query_asset_collection(
             self.system_pattern_collection,
-            self._build_scenario_queries(
-                scenario_analysis,
-                ["system_type", "control_mode", "operating_conditions", "input_signals", "output_signals"],
-                query,
-            ),
+            pattern_queries,
             top_k=top_k,
             similarity_threshold=similarity_threshold,
+            asset_type="system_pattern",
+        )
+        subflow_templates, subflow_rerank = self._maybe_rerank_assets(
+            subflow_templates,
+            query=" ".join(template_queries),
+            asset_type="subflow_template",
+        )
+        system_patterns, pattern_rerank = self._maybe_rerank_assets(
+            system_patterns,
+            query=" ".join(pattern_queries),
             asset_type="system_pattern",
         )
 
@@ -573,6 +947,7 @@ class RetrievalAgent:
         atomic_metadata = atomic_context.get("metadata", {}) if isinstance(atomic_context.get("metadata"), dict) else {}
         llm_queries = self._clean_text_list(atomic_metadata.get("llm_queries", []), config.RETRIEVAL_LLM_MAX_QUERIES)
         query_variants = retrieval_plan.get("queries", []) or [query]
+        effective_query_variants = effective_retrieval_plan.get("queries", []) or [query]
         analysis_summary = self._clean_text(atomic_metadata.get("analysis_summary", ""))
         llm_category_l1 = self._clean_text(atomic_metadata.get("llm_category_l1", ""))
         try:
@@ -581,17 +956,23 @@ class RetrievalAgent:
             analysis_confidence = 0.0
 
         return {
-            "atomic_modules": atomic_context.get("relevant_nodes", []),
+            "atomic_modules": atomic_modules,
             "subflow_templates": subflow_templates,
             "system_patterns": system_patterns,
             "style_guides": style_guides,
             "metadata": {
                 "query_text": query,
-                "query_variants": query_variants,
-                "intent": retrieval_plan.get("intent", "general_query"),
-                "detected_operations": retrieval_plan.get("detected_operations", []),
+                "query_variants": effective_query_variants,
+                "base_query_variants": query_variants,
+                "template_query_variants": template_queries,
+                "pattern_query_variants": pattern_queries,
+                "intent": effective_retrieval_plan.get("intent", "general_query"),
+                "detected_operations": effective_retrieval_plan.get("detected_operations", []),
                 "selected_case_pattern_id": selected_pattern.get("pattern_id", ""),
-                "retrieved_atomic_count": len(atomic_context.get("relevant_nodes", [])),
+                "retrieved_atomic_count": len(atomic_modules),
+                "semantic_atomic_count": len(semantic_atomic_modules),
+                "core_atomic_injected_count": len(injected_core_atomic_types),
+                "core_atomic_injected_types": injected_core_atomic_types,
                 "retrieved_subflow_count": len(subflow_templates),
                 "retrieved_pattern_count": len(system_patterns),
                 "avg_atomic_score": atomic_context.get("metadata", {}).get("avg_confidence_score", 0.0),
@@ -599,14 +980,15 @@ class RetrievalAgent:
                 "analysis_used": bool(atomic_metadata.get("analysis_used", False)),
                 "llm_queries": llm_queries,
                 "llm_category_l1": llm_category_l1,
+                "llm_rewrite": rewrite_diagnostics,
                 "analysis_summary": analysis_summary,
                 "analysis_confidence": analysis_confidence,
                 "top_atomic_module_types": self._top_asset_identifiers(
-                    atomic_context.get("relevant_nodes", []),
+                    atomic_modules,
                     "module_type",
                     limit=5,
                 ),
-                "top_atomic_scores": self._top_asset_scores(atomic_context.get("relevant_nodes", []), limit=5),
+                "top_atomic_scores": self._top_asset_scores(atomic_modules, limit=5),
                 "top_subflow_template_ids": self._top_asset_identifiers(
                     subflow_templates,
                     "template_id",
@@ -620,6 +1002,13 @@ class RetrievalAgent:
                     limit=5,
                 ),
                 "top_system_pattern_scores": self._top_asset_scores(system_patterns, limit=5),
+                "reranker_enabled": bool(subflow_rerank.get("enabled") or pattern_rerank.get("enabled")),
+                "reranker_model": config.RETRIEVAL_RERANKER_MODEL if self._rerank_enabled() else "",
+                "reranker_fallback_used": bool(subflow_rerank.get("fallback_used") or pattern_rerank.get("fallback_used")),
+                "reranker": {
+                    "subflow_templates": subflow_rerank,
+                    "system_patterns": pattern_rerank,
+                },
                 "query_bundle_version": "phase2-v1",
             },
         }
@@ -954,8 +1343,9 @@ class RetrievalAgent:
         """
         user_query = state.get("user_query", "")
         analysis_result = state.get("analysis_result", {})
+        requirement_spec = state.get("requirement_spec", {})
 
-        bundle = self.retrieve_bundle(user_query, analysis_result=analysis_result)
+        bundle = self.retrieve_bundle(user_query, analysis_result=analysis_result, requirement_spec=requirement_spec)
 
         state["retrieval_bundle"] = bundle
         state["current_step"] = "retrieval_completed"

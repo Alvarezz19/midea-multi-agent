@@ -356,6 +356,66 @@ class Phase3SubsystemPlannerTests(unittest.TestCase):
         self.assertTrue(plan["degrade_reason"])
         self.assertTrue(plan["template_binding"]["degrade_reason"])
 
+    def test_atomic_fallback_clamps_dynamic_input_count_to_schema_maximum(self):
+        decomposition_result, architecture_plan = make_decomposition_and_architecture(prefer_template=False)
+        descriptor = decomposition_result["subsystem_descriptors"][0]
+        descriptor["interface_bindings"].append(
+            {
+                "signal_name": "third_feedback",
+                "signal_key": "third_feedback",
+                "canonical_signal_key": "third_feedback",
+                "direction": "input",
+                "binding_kind": "external_input",
+                "allowed_external": True,
+                "owner_subsystem_id": "",
+                "port_index": 2,
+            }
+        )
+        bundle = {
+            "atomic_modules": [
+                {
+                    "module_type": "constInput",
+                    "name": "Constant Input",
+                    "category": "logic/basic",
+                    "description": "Provide a constant numeric value.",
+                    "parameters_schema": {"fixedValue": {"type": "number"}},
+                    "ports_definition": {"inputs": [], "outputs": [{"index": 0, "label": "out"}]},
+                    "template_json": {"type": "constInput", "inputs": 0, "outputs": 1},
+                },
+                {
+                    "module_type": "modbusOutput",
+                    "name": "Modbus Output",
+                    "category": "variable/io",
+                    "description": "Write output points.",
+                    "parameters_schema": {
+                        "inputCount": {"type": "integer", "minimum": 1, "maximum": 2},
+                        "outputCount": {"type": "integer", "minimum": 1, "maximum": 2},
+                    },
+                    "ports_definition": {
+                        "inputs": [{"index": 0, "label": "in0"}, {"index": 1, "label": "enable"}],
+                        "outputs": [{"index": 0, "label": "out"}],
+                    },
+                    "template_json": {"type": "modbusOutput", "inputs": "{{inputCount}}", "outputs": "{{outputCount}}"},
+                },
+            ],
+            "subflow_templates": [],
+            "system_patterns": [],
+            "style_guides": [],
+            "metadata": {},
+        }
+
+        with patch.object(config, "DEBUG", False):
+            planner = SubsystemPlanner()
+            subsystem_plan_map = planner.plan({}, decomposition_result, architecture_plan, bundle)
+
+        plan = subsystem_plan_map["supply_fan_ctrl"]
+        primary = plan["node_instances"][0]
+        self.assertEqual(primary["module_type"], "modbusOutput")
+        self.assertEqual(primary["parameters"]["inputCount"], 2)
+        self.assertEqual(primary["input_count"], 2)
+        self.assertEqual(len(plan["edges"]), 2)
+        self.assertIn("atomic_fallback_input_capacity_limited", {item["type"] for item in plan["unresolved_items"]})
+
     def test_subsystem_planner_degrades_to_atomic_when_template_inputs_are_insufficient(self):
         decomposition_result, architecture_plan = make_decomposition_and_architecture(prefer_template=True)
         descriptor = decomposition_result["subsystem_descriptors"][0]

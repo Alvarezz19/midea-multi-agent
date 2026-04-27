@@ -12,6 +12,11 @@ function getNumberMetric(source: Record<string, unknown>, key: string) {
   return typeof value === "number" ? value : 0;
 }
 
+function getArrayLengthMetric(source: Record<string, unknown>, key: string) {
+  const value = source[key];
+  return Array.isArray(value) ? value.length : 0;
+}
+
 function stringifyPretty(value: unknown) {
   return JSON.stringify(value ?? {}, null, 2);
 }
@@ -80,6 +85,26 @@ export function ResultPanel({ result, isLoading }: ResultPanelProps) {
         <article>
           <span>节点数</span>
           <strong>{getNumberMetric(compileReport, "node_count")}</strong>
+        </article>
+        <article>
+          <span>body 节点</span>
+          <strong>{getNumberMetric(compileReport, "body_node_count")}</strong>
+        </article>
+        <article>
+          <span>跳过节点</span>
+          <strong>{getNumberMetric(compileReport, "dropped_node_count")}</strong>
+        </article>
+        <article>
+          <span>缺模板</span>
+          <strong>{getNumberMetric(compileReport, "missing_template_count")}</strong>
+        </article>
+        <article>
+          <span>占位符</span>
+          <strong>{getNumberMetric(compileReport, "unresolved_placeholder_count")}</strong>
+        </article>
+        <article>
+          <span>body 错误</span>
+          <strong>{getArrayLengthMetric(compileReport, "body_expansion_errors")}</strong>
         </article>
         <article>
           <span>验收状态</span>
